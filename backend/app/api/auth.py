@@ -3,21 +3,30 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_global_db
 from app.core.security import verify_password, create_access_token
 from app.core.dependencies import get_current_active_user
-from app.models.global_models import Usuario
+from app.models.global_models import Usuario, UsuarioProyecto, Proyecto
 from app.schemas.auth import LoginRequest, TokenResponse, UsuarioMe, ProyectoBasico
 from app.services.log_service import registrar_log
 
 router = APIRouter()
 
 
+def _load_user_full(db: Session, user_id: int):
+    return (
+        db.query(Usuario)
+        .options(
+            joinedload(Usuario.rol),
+            joinedload(Usuario.proyectos).joinedload(UsuarioProyecto.proyecto),
+        )
+        .filter(Usuario.id == user_id)
+        .first()
+    )
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_global_db)):
     user = (
         db.query(Usuario)
-        .options(
-            joinedload(Usuario.rol),
-            joinedload(Usuario.proyectos).joinedload("proyecto"),
-        )
+        .options(joinedload(Usuario.rol))
         .filter(Usuario.correo == payload.correo)
         .first()
     )
@@ -36,7 +45,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_glo
         db=db,
         id_usuario=user.id,
         accion="login",
-        descripcion=f"Inicio de sesión exitoso: {user.correo}",
+        descripcion=f"Inicio de sesion exitoso: {user.correo}",
         ip=request.client.host,
     )
 
@@ -45,18 +54,14 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_glo
 
 @router.get("/me", response_model=UsuarioMe)
 def me(current_user: Usuario = Depends(get_current_active_user), db: Session = Depends(get_global_db)):
-    user = (
-        db.query(Usuario)
-        .options(
-            joinedload(Usuario.rol),
-            joinedload(Usuario.proyectos).joinedload("proyecto"),
-        )
-        .filter(Usuario.id == current_user.id)
-        .first()
-    )
+    user = _load_user_full(db, current_user.id)
 
     proyectos = [
-        ProyectoBasico(id=up.proyecto.id, nombre=up.proyecto.nombre, slug=up.proyecto.slug)
+        ProyectoBasico(
+            id=up.proyecto.id,
+            nombre=up.proyecto.nombre,
+            slug=up.proyecto.slug,
+        )
         for up in user.proyectos
         if up.proyecto.activo
     ]
@@ -72,12 +77,16 @@ def me(current_user: Usuario = Depends(get_current_active_user), db: Session = D
 
 
 @router.post("/logout")
-def logout(request: Request, current_user: Usuario = Depends(get_current_active_user), db: Session = Depends(get_global_db)):
+def logout(
+    request: Request,
+    current_user: Usuario = Depends(get_current_active_user),
+    db: Session = Depends(get_global_db),
+):
     registrar_log(
         db=db,
         id_usuario=current_user.id,
         accion="logout",
-        descripcion=f"Cierre de sesión: {current_user.correo}",
+        descripcion=f"Cierre de sesion: {current_user.correo}",
         ip=request.client.host,
     )
-    return {"message": "Sesión cerrada"}
+    return {"message": "Sesion cerrada"}

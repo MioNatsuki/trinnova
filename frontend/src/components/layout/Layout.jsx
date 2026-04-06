@@ -3,11 +3,11 @@ import Header from './Header';
 import Sidebar from './Sidebar';
 import './Layout.css';
 
-function Layout() {
+export default function Layout() {
   return (
     <div className="app-layout">
       <Header />
-      <div className="main-container">
+      <div className="layout-body">
         <Sidebar />
         <main className="content">
           <Outlet />
@@ -16,5 +16,3 @@ function Layout() {
     </div>
   );
 }
-
-export default Layout;

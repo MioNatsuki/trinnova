@@ -4,6 +4,7 @@ import Login from './components/auth/Login';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
 import UsuariosCRUD from './pages/usuarios/UsuariosCRUD';
+// Eliminada la línea: import './App.css';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();

@@ -1,82 +1,149 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../api/auth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer
+  Tooltip, Legend, ResponsiveContainer, Cell
 } from 'recharts';
 import './Dashboard.css';
 
-/* Datos de ejemplo — en fases posteriores vendrán del backend */
-const chartData = [
-  { mes: 'Enero',   gdl_lic: 0,   tlaj_agua: 420, gdl_pred: 380, tlaj_pred: 520, estado: 290, pensiones: 130 },
-  { mes: 'Febrero', gdl_lic: 0,   tlaj_agua: 310, gdl_pred: 420, tlaj_pred: 480, estado: 360, pensiones: 110 },
-  { mes: 'Marzo',   gdl_lic: 0,   tlaj_agua: 390, gdl_pred: 290, tlaj_pred: 560, estado: 470, pensiones: 150 },
-  { mes: 'Abril',   gdl_lic: 140, tlaj_agua: 310, gdl_pred: 20,  tlaj_pred: 330, estado: 0,   pensiones: 0   },
-];
-
-const COLORS = {
-  gdl_lic:   '#4caf50',
-  tlaj_agua: '#90caf9',
-  gdl_pred:  '#ef9a3e',
-  tlaj_pred: '#b39ddb',
-  estado:    '#5c9bd6',
-  pensiones: '#c8c8c8',
+// Colores por slug de proyecto — coherentes con el mockup
+const SLUG_COLORS = {
+  licencias_gdl:    '#4caf50',
+  apa_tlajomulco:   '#90caf9',
+  predial_gdl:      '#ef9a3e',
+  predial_tlajomulco: '#b39ddb',
+  estado:           '#5c9bd6',
+  pensiones:        '#c8c8c8',
 };
 
-const LABELS = {
-  gdl_lic:   'Guadalajara – Licencias',
-  tlaj_agua: 'Tlajomulco – Agua',
-  gdl_pred:  'Guadalajara – Predial',
-  tlaj_pred: 'Tlajomulco – Predial',
-  estado:    'Proyecto del Estado',
-  pensiones: 'Instituto de Pensiones',
-};
+const DEFAULT_COLORS = ['#4a7fb5','#38a169','#dd6b20','#805ad5','#e53e3e','#00b5d8'];
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const isSuperadmin = user?.rol === 'superadmin';
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+
+  useEffect(() => {
+    api.get('/dashboard/')
+      .then(r => setData(r.data))
+      .catch(() => setError('No se pudo cargar el dashboard'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Transformar lista plana de emisiones en filas por mes para recharts
+  const buildChartData = (emisiones) => {
+    if (!emisiones?.length) return { rows: [], proyectos: [] };
+
+    const slugs  = [...new Set(emisiones.map(e => e.slug))];
+    const meses  = [...new Set(emisiones.map(e => e.mes))];
+
+    const rows = meses.map(mes => {
+      const row = { mes };
+      slugs.forEach(slug => { row[slug] = 0; });
+      emisiones.filter(e => e.mes === mes).forEach(e => { row[e.slug] = e.total; });
+      return row;
+    });
+
+    const proyectos = slugs.map((slug, i) => ({
+      slug,
+      nombre: emisiones.find(e => e.slug === slug)?.proyecto || slug,
+      color: SLUG_COLORS[slug] || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+    }));
+
+    return { rows, proyectos };
+  };
+
+  const { rows, proyectos } = data ? buildChartData(data.emisiones) : { rows: [], proyectos: [] };
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="chart-tooltip">
+        <p className="chart-tooltip-label">{label}</p>
+        {payload.map(p => (
+          <p key={p.dataKey} style={{ color: p.fill }}>
+            {proyectos.find(x => x.slug === p.dataKey)?.nombre || p.dataKey}: <strong>{p.value}</strong>
+          </p>
+        ))}
+      </div>
+    );
+  };
+
+  if (loading) return <div className="dash-loading">Cargando dashboard...</div>;
+  if (error)   return <div className="dash-error">{error}</div>;
 
   return (
     <div className="dashboard">
-      {/* Stat cards */}
+
+      {/* ── Stat cards ── */}
       <div className="dash-cards">
-        {isSuperadmin && (
+        {data.cards.usuarios != null && (
           <div className="dash-card">
-            <span className="dash-card-num">5</span>
+            <span className="dash-card-num">{data.cards.usuarios}</span>
             <span className="dash-card-label">Usuarios</span>
           </div>
         )}
         <div className="dash-card">
-          <span className="dash-card-num">{user?.proyectos?.length ?? 0}</span>
+          <span className="dash-card-num">{data.cards.proyectos}</span>
           <span className="dash-card-label">Proyectos</span>
         </div>
         <div className="dash-card">
-          <span className="dash-card-num">0</span>
+          <span className="dash-card-num">{data.cards.plantillas}</span>
           <span className="dash-card-label">Plantillas</span>
         </div>
       </div>
 
-      {/* Gráfica de barras */}
+      {/* ── Gráfica ── */}
       <div className="dash-chart-card">
-        <ResponsiveContainer width="100%" height={340}>
-          <BarChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-            <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#718096' }} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#718096' }} />
-            <Tooltip
-              contentStyle={{ borderRadius: 8, border: '1px solid #e8eaed', fontSize: 12 }}
-              cursor={{ fill: '#f7fafc' }}
-            />
-            <Legend
-              iconType="square"
-              iconSize={12}
-              wrapperStyle={{ fontSize: 12, paddingTop: 16 }}
-              formatter={(value) => LABELS[value] || value}
-            />
-            {Object.keys(COLORS).map(key => (
-              <Bar key={key} dataKey={key} fill={COLORS[key]} radius={[3,3,0,0]} maxBarSize={28} />
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
+        {rows.length === 0 ? (
+          <div className="dash-empty">
+            <p>Aún no hay emisiones registradas.</p>
+            <p className="dash-empty-sub">La gráfica se actualizará automáticamente cuando se generen PDFs.</p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={420}>
+            <BarChart
+              data={rows}
+              margin={{ top: 16, right: 32, left: 8, bottom: 8 }}
+              barCategoryGap="28%"
+              barGap={3}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis
+                dataKey="mes"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: 12, fill: '#718096' }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: 12, fill: '#718096' }}
+                allowDecimals={false}
+              />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f7fafc' }} />
+              <Legend
+                iconType="square"
+                iconSize={12}
+                wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
+                formatter={(value) =>
+                  proyectos.find(p => p.slug === value)?.nombre || value
+                }
+              />
+              {proyectos.map(p => (
+                <Bar
+                  key={p.slug}
+                  dataKey={p.slug}
+                  fill={p.color}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={32}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

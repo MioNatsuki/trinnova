@@ -1,8 +1,8 @@
 .dashboard {
-  max-width: 1100px;
+  width: 100%;
 }
 
-/* Tarjetas */
+/* ── Tarjetas ── */
 .dash-cards {
   display: flex;
   gap: 20px;
@@ -14,32 +14,73 @@
   background: var(--clr-white);
   border: 1px solid var(--clr-border);
   border-radius: var(--radius);
-  padding: 32px 28px;
+  padding: 40px 28px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   box-shadow: var(--shadow-sm);
 }
 
 .dash-card-num {
-  font-size: 52px;
+  font-size: 64px;
   font-weight: 300;
   color: var(--clr-text);
   line-height: 1;
 }
 
 .dash-card-label {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--clr-muted);
   letter-spacing: .5px;
 }
 
-/* Gráfica */
+/* ── Gráfica ── */
 .dash-chart-card {
   background: var(--clr-white);
   border: 1px solid var(--clr-border);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: 28px 28px 20px;
   box-shadow: var(--shadow-sm);
+  min-height: 600px;
+  display: flex;
+  align-items: center;
 }
+
+.dash-empty {
+  flex: 1;
+  text-align: center;
+  color: var(--clr-muted);
+  padding: 60px 0;
+}
+
+.dash-empty p { font-size: 15px; margin-bottom: 8px; }
+.dash-empty-sub { font-size: 13px; opacity: .7; }
+
+/* Tooltip custom */
+.chart-tooltip {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  box-shadow: var(--shadow-md);
+  min-width: 160px;
+}
+
+.chart-tooltip-label {
+  font-weight: 600;
+  color: var(--clr-text);
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.dash-loading,
+.dash-error {
+  padding: 60px;
+  text-align: center;
+  color: var(--clr-muted);
+  font-size: 14px;
+}
+
+.dash-error { color: var(--clr-red); }

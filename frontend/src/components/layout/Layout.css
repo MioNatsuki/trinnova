@@ -77,7 +77,7 @@
 
 /* ===== SIDEBAR ===== */
 .sidebar {
-  width: var(--sidebar-w);
+  width: calc(var(--sidebar-w) + 10px);
   background: var(--clr-sidebar);
   border-right: 1px solid var(--clr-border);
   position: fixed;

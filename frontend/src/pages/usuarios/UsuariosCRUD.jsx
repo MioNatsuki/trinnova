@@ -3,143 +3,134 @@ import api from '../../api/auth';
 import { useAuth } from '../../context/AuthContext';
 import './UsuariosCRUD.css';
 
-function UsuariosCRUD() {
+const ROL_STYLE = {
+  superadmin: { bg: '#fed7d7', color: '#9b2c2c' },
+  analista:   { bg: '#c6f6d5', color: '#276749' },
+  auxiliar:   { bg: '#feebc8', color: '#9c4221' },
+};
+
+export default function UsuariosCRUD() {
   const { user: currentUser } = useAuth();
-  const [usuarios, setUsuarios] = useState([]);
+  const [usuarios,  setUsuarios]  = useState([]);
   const [proyectos, setProyectos] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [roles,     setRoles]     = useState([]);
+  const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [formData, setFormData] = useState({
-    nombre: '',
-    apellidos: '',
-    correo: '',
-    password: '',
-    id_rol: '',
-    proyectos: [],
-  });
+  const [editUser,  setEditUser]  = useState(null);
+  const [saving,    setSaving]    = useState(false);
+  const [formErr,   setFormErr]   = useState('');
 
-  // Cargar datos
-  useEffect(() => {
-    cargarDatos();
-  }, []);
+  const emptyForm = {
+    nombre: '', apellidos: '', correo: '',
+    password: '', id_rol: '', proyectos: [],
+  };
+  const [form, setForm] = useState(emptyForm);
 
-  const cargarDatos = async () => {
+  useEffect(() => { cargar(); }, []);
+
+  const cargar = async () => {
     setLoading(true);
     try {
-      const [usuariosRes, proyectosRes, rolesRes] = await Promise.all([
+      const [u, p, r] = await Promise.all([
         api.get('/usuarios/'),
         api.get('/proyectos/'),
         api.get('/roles/'),
       ]);
-      setUsuarios(usuariosRes.data);
-      setProyectos(proyectosRes.data);
-      setRoles(rolesRes.data);
-    } catch (error) {
-      console.error('Error cargando datos:', error);
+      setUsuarios(u.data);
+      setProyectos(p.data);
+      setRoles(r.data);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInputChange = (e) => {
+  const openCreate = () => {
+    setEditUser(null);
+    setForm(emptyForm);
+    setFormErr('');
+    setShowModal(true);
+  };
+
+  const openEdit = (u) => {
+    setEditUser(u);
+    // Obtener ids de proyectos del usuario (slugs → ids)
+    const ids = proyectos
+      .filter(p => u.proyectos.includes(p.slug))
+      .map(p => p.id);
+    setForm({
+      nombre: u.nombre, apellidos: u.apellidos,
+      correo: u.correo, password: '',
+      id_rol: roles.find(r => r.nombre === u.rol)?.id || '',
+      proyectos: ids,
+    });
+    setFormErr('');
+    setShowModal(true);
+  };
+
+  const handleChange = e => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+    setForm(f => ({ ...f, [name]: value }));
   };
 
-  const handleProyectosChange = (e) => {
-    const options = e.target.options;
-    const selected = [];
-    for (let i = 0; i < options.length; i++) {
-      if (options[i].selected) {
-        selected.push(parseInt(options[i].value));
-      }
-    }
-    setFormData({ ...formData, proyectos: selected });
+  const handleProyectos = e => {
+    const sel = [...e.target.options]
+      .filter(o => o.selected)
+      .map(o => parseInt(o.value));
+    setForm(f => ({ ...f, proyectos: sel }));
   };
 
-  const openCreateModal = () => {
-    setEditingUser(null);
-    setFormData({
-      nombre: '',
-      apellidos: '',
-      correo: '',
-      password: '',
-      id_rol: '',
-      proyectos: [],
-    });
-    setShowModal(true);
-  };
-
-  const openEditModal = (user) => {
-    setEditingUser(user);
-    setFormData({
-      nombre: user.nombre,
-      apellidos: user.apellidos,
-      correo: user.correo,
-      password: '',
-      id_rol: user.id_rol || '',
-      proyectos: user.proyectos_ids || [],
-    });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
+    setSaving(true);
+    setFormErr('');
     try {
-      if (editingUser) {
-        await api.put(`/usuarios/${editingUser.id}`, formData);
+      const payload = { ...form, id_rol: parseInt(form.id_rol) };
+      if (!payload.password) delete payload.password;
+      if (editUser) {
+        await api.put(`/usuarios/${editUser.id}`, payload);
       } else {
-        await api.post('/usuarios/', formData);
+        await api.post('/usuarios/', payload);
       }
       setShowModal(false);
-      cargarDatos();
-    } catch (error) {
-      console.error('Error guardando usuario:', error);
-      alert(error.response?.data?.detail || 'Error al guardar');
+      cargar();
+    } catch (err) {
+      setFormErr(err.response?.data?.detail || 'Error al guardar');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (user) => {
-    if (user.id === currentUser.id) {
+  const handleDelete = async (u) => {
+    if (u.id === currentUser.id) {
       alert('No puedes eliminar tu propio usuario');
       return;
     }
-    if (window.confirm(`¿Eliminar usuario ${user.nombre} ${user.apellidos}?`)) {
-      try {
-        await api.delete(`/usuarios/${user.id}`);
-        cargarDatos();
-      } catch (error) {
-        console.error('Error eliminando usuario:', error);
-        alert('Error al eliminar usuario');
-      }
+    if (!window.confirm(`¿Desactivar a ${u.nombre} ${u.apellidos}?`)) return;
+    try {
+      await api.delete(`/usuarios/${u.id}`);
+      cargar();
+    } catch {
+      alert('Error al eliminar');
     }
   };
 
-  const getRolNombre = (rolId) => {
-    const rol = roles.find(r => r.id === rolId);
-    return rol ? rol.nombre : 'Desconocido';
-  };
-
-  if (loading) return <div className="loading">Cargando...</div>;
+  if (loading) return <div className="uc-loading">Cargando usuarios...</div>;
 
   return (
-    <div className="usuarios-crud">
-      <div className="header-actions">
-        <h1>Gestión de Usuarios</h1>
-        <button onClick={openCreateModal} className="btn-primary">
-          + Nuevo Usuario
-        </button>
+    <div className="uc-root">
+
+      {/* Cabecera */}
+      <div className="uc-header">
+        <h2 className="uc-title">Gestión de Usuarios</h2>
+        <button className="uc-btn-add" onClick={openCreate}>+ Nuevo usuario</button>
       </div>
 
-      <div className="table-container">
-        <table className="usuarios-table">
+      {/* Tabla */}
+      <div className="uc-table-wrap">
+        <table className="uc-table">
           <thead>
             <tr>
-              <th>ID</th>
               <th>Nombre</th>
-              <th>Apellidos</th>
               <th>Correo</th>
               <th>Rol</th>
               <th>Proyectos</th>
@@ -148,145 +139,119 @@ function UsuariosCRUD() {
             </tr>
           </thead>
           <tbody>
-            {usuarios.map((user) => (
-              <tr key={user.id}>
-                <td>{user.id}</td>
-                <td>{user.nombre}</td>
-                <td>{user.apellidos}</td>
-                <td>{user.correo}</td>
-                <td>
-                  <span className={`rol-badge rol-${user.rol}`}>
-                    {user.rol}
-                  </span>
-                </td>
-                <td>
-                  <div className="proyectos-list">
-                    {user.proyectos?.map(p => (
-                      <span key={p} className="proyecto-tag">{p}</span>
-                    ))}
-                  </div>
-                </td>
-                <td>
-                  <span className={`status-badge ${user.activo ? 'active' : 'inactive'}`}>
-                    {user.activo ? 'Activo' : 'Inactivo'}
-                  </span>
-                </td>
-                <td className="actions">
-                  <button
-                    onClick={() => openEditModal(user)}
-                    className="btn-edit"
-                    title="Editar"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => handleDelete(user)}
-                    className="btn-delete"
-                    title="Eliminar"
-                  >
-                    🗑️
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {usuarios.map(u => {
+              const rs = ROL_STYLE[u.rol] || { bg: '#e2e8f0', color: '#4a5568' };
+              return (
+                <tr key={u.id}>
+                  <td>
+                    <div className="uc-name">{u.nombre} {u.apellidos}</div>
+                  </td>
+                  <td className="uc-muted">{u.correo}</td>
+                  <td>
+                    <span className="uc-badge" style={{ background: rs.bg, color: rs.color }}>
+                      {u.rol}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="uc-tags">
+                      {u.proyectos.length === 0
+                        ? <span className="uc-muted" style={{fontSize:11}}>—</span>
+                        : u.proyectos.map(slug => (
+                            <span key={slug} className="uc-tag">{slug.replace(/_/g, ' ')}</span>
+                          ))
+                      }
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`uc-status ${u.activo ? 'active' : 'inactive'}`}>
+                      {u.activo ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="uc-actions">
+                      <button className="uc-btn-icon" title="Editar" onClick={() => openEdit(u)}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+                      </button>
+                      {u.id !== currentUser.id && (
+                        <button className="uc-btn-icon danger" title="Desactivar" onClick={() => handleDelete(u)}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h2>
-            <form onSubmit={handleSubmit}>
-              <div className="form-row">
-                <div className="form-group">
+        <div className="uc-overlay" onClick={() => setShowModal(false)}>
+          <div className="uc-modal" onClick={e => e.stopPropagation()}>
+            <div className="uc-modal-header">
+              <h3>{editUser ? 'Editar usuario' : 'Nuevo usuario'}</h3>
+              <button className="uc-modal-close" onClick={() => setShowModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="uc-form">
+              <div className="uc-form-row">
+                <div className="uc-field">
                   <label>Nombre *</label>
-                  <input
-                    type="text"
-                    name="nombre"
-                    value={formData.nombre}
-                    onChange={handleInputChange}
-                    required
-                  />
+                  <input name="nombre" value={form.nombre} onChange={handleChange} required />
                 </div>
-                <div className="form-group">
+                <div className="uc-field">
                   <label>Apellidos *</label>
-                  <input
-                    type="text"
-                    name="apellidos"
-                    value={formData.apellidos}
-                    onChange={handleInputChange}
-                    required
-                  />
+                  <input name="apellidos" value={form.apellidos} onChange={handleChange} required />
                 </div>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
+              <div className="uc-form-row">
+                <div className="uc-field">
                   <label>Correo *</label>
-                  <input
-                    type="email"
-                    name="correo"
-                    value={formData.correo}
-                    onChange={handleInputChange}
-                    required
-                  />
+                  <input type="email" name="correo" value={form.correo} onChange={handleChange} required />
                 </div>
-                <div className="form-group">
-                  <label>Contraseña {!editingUser && '*'}</label>
+                <div className="uc-field">
+                  <label>Contraseña {!editUser && '*'}</label>
                   <input
                     type="password"
                     name="password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    required={!editingUser}
-                    placeholder={editingUser ? 'Dejar en blanco para no cambiar' : ''}
+                    value={form.password}
+                    onChange={handleChange}
+                    required={!editUser}
+                    placeholder={editUser ? 'Dejar vacío para no cambiar' : ''}
                   />
                 </div>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
+              <div className="uc-form-row">
+                <div className="uc-field">
                   <label>Rol *</label>
-                  <select
-                    name="id_rol"
-                    value={formData.id_rol}
-                    onChange={handleInputChange}
-                    required
-                  >
+                  <select name="id_rol" value={form.id_rol} onChange={handleChange} required>
                     <option value="">Seleccionar rol</option>
-                    {roles.map(rol => (
-                      <option key={rol.id} value={rol.id}>
-                        {rol.nombre} - {rol.descripcion}
-                      </option>
+                    {roles.map(r => (
+                      <option key={r.id} value={r.id}>{r.nombre}</option>
                     ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Proyectos Asignados</label>
-                  <select
-                    multiple
-                    value={formData.proyectos}
-                    onChange={handleProyectosChange}
-                    className="proyectos-select"
-                  >
-                    {proyectos.map(proy => (
-                      <option key={proy.id} value={proy.id}>
-                        {proy.nombre}
-                      </option>
+                <div className="uc-field">
+                  <label>Proyectos asignados</label>
+                  <select multiple value={form.proyectos} onChange={handleProyectos} className="uc-select-multi">
+                    {proyectos.map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre}</option>
                     ))}
                   </select>
-                  <small>Ctrl+Click para múltiple selección</small>
+                  <span className="uc-hint">Ctrl + clic para selección múltiple</span>
                 </div>
               </div>
 
-              <div className="modal-actions">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-cancel">
-                  Cancelar
-                </button>
-                <button type="submit" className="btn-save">
-                  {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
+              {formErr && <p className="uc-form-error">{formErr}</p>}
+
+              <div className="uc-modal-footer">
+                <button type="button" className="uc-btn-cancel" onClick={() => setShowModal(false)}>Cancelar</button>
+                <button type="submit" className="uc-btn-save" disabled={saving}>
+                  {saving ? 'Guardando...' : editUser ? 'Guardar cambios' : 'Crear usuario'}
                 </button>
               </div>
             </form>
@@ -296,5 +261,3 @@ function UsuariosCRUD() {
     </div>
   );
 }
-
-export default UsuariosCRUD;

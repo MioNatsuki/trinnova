@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, usuarios, proyectos, roles
+from app.api import auth, usuarios, proyectos, roles, dashboard
 
 app = FastAPI(
     title="Trinnova API",
@@ -16,17 +16,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
-app.include_router(auth.router,     prefix="/api/v1/auth",     tags=["Autenticación"])
-app.include_router(usuarios.router, prefix="/api/v1/usuarios", tags=["Usuarios"])
+app.include_router(auth.router,      prefix="/api/v1/auth",      tags=["Autenticación"])
+app.include_router(usuarios.router,  prefix="/api/v1/usuarios",  tags=["Usuarios"])
 app.include_router(proyectos.router, prefix="/api/v1/proyectos", tags=["Proyectos"])
-app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
+app.include_router(roles.router,     prefix="/api/v1/roles",     tags=["Roles"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 
 
 @app.get("/")
 def root():
     return {"status": "ok", "app": "Trinnova API"}
-
 
 @app.get("/health")
 def health():

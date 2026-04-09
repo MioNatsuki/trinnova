@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.db.session import get_global_db
 from app.core.security import decode_access_token
-from app.models.global_models import Usuario, RolNombre
+from app.models.global_models import Usuario, RolNombre, Proyecto, UsuarioProyecto
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -56,16 +56,52 @@ def require_any_role(current_user: Usuario = Depends(get_current_active_user)) -
     return current_user
 
 
-def check_project_access(project_slug: str, current_user: Usuario) -> None:
+def check_project_access(proyecto_slug: str, current_user: Usuario, db: Session = None) -> Proyecto:
     """
     Verifica que el usuario tenga acceso al proyecto.
-    Superadmin tiene acceso a todo.
-    """
+    Retorna el proyecto si tiene acceso.
+    """    
+    # Obtener proyecto por slug
+    proyecto = None
+    if db:
+        proyecto = db.query(Proyecto).filter(Proyecto.slug == proyecto_slug).first()
+    else:
+        # Si no hay db, necesitamos una sesión global
+        from app.db.session import SessionGlobal
+        session = SessionGlobal()
+        try:
+            proyecto = session.query(Proyecto).filter(Proyecto.slug == proyecto_slug).first()
+        finally:
+            session.close()
+    
+    if not proyecto:
+        raise HTTPException(status_code=404, detail=f"Proyecto '{proyecto_slug}' no encontrado")
+    
+    # Superadmin tiene acceso a todo
     if current_user.rol.nombre == RolNombre.superadmin:
-        return
-    slugs_asignados = [up.proyecto.slug for up in current_user.proyectos]
-    if project_slug not in slugs_asignados:
+        return proyecto
+    
+    # Verificar asignación
+    if db:
+        asignado = db.query(UsuarioProyecto).filter(
+            UsuarioProyecto.id_usuario == current_user.id,
+            UsuarioProyecto.id_proyecto == proyecto.id
+        ).first()
+    else:
+        from app.db.session import SessionGlobal
+        session = SessionGlobal()
+        try:
+            asignado = session.query(UsuarioProyecto).filter(
+                UsuarioProyecto.id_usuario == current_user.id,
+                UsuarioProyecto.id_proyecto == proyecto.id
+            ).first()
+        finally:
+            session.close()
+    
+    if not asignado:
         raise HTTPException(
             status_code=403,
-            detail=f"Sin acceso al proyecto '{project_slug}'"
+            detail=f"No tienes acceso al proyecto '{proyecto_slug}'"
         )
+    
+    return proyecto

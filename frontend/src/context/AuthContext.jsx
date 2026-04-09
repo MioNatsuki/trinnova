@@ -1,3 +1,4 @@
+// frontend/src/context/AuthContext.jsx - Agrega logs
 import { createContext, useContext, useState, useEffect } from 'react';
 import { getMe, logout as apiLogout } from '../api/auth';
 
@@ -13,8 +14,11 @@ export function AuthProvider({ children }) {
       if (token) {
         try {
           const userData = await getMe();
+          console.log('Usuario cargado:', userData);
+          console.log('Proyectos:', userData.proyectos);
           setUser(userData);
         } catch (error) {
+          console.error('Error loading user:', error);
           localStorage.removeItem('access_token');
         }
       }

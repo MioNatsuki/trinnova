@@ -54,7 +54,12 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_glo
 
 @router.get("/me", response_model=UsuarioMe)
 def me(current_user: Usuario = Depends(get_current_active_user), db: Session = Depends(get_global_db)):
+    print(f"Usuario autenticado: {current_user.id} - {current_user.correo}")
     user = _load_user_full(db, current_user.id)
+    print(f"Proyectos encontrados: {len(user.proyectos)}")
+
+    for up in user.proyectos:
+        print(f"   - {up.proyecto.nombre} ({up.proyecto.slug}) - activo: {up.proyecto.activo}")
 
     proyectos = [
         ProyectoBasico(

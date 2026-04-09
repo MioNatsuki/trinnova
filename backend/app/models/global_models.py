@@ -38,7 +38,7 @@ class Usuario(Base):
     updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     rol      = relationship("Rol", back_populates="usuarios")
-    proyectos = relationship("UsuarioProyecto", back_populates="usuario")
+    proyectos = relationship("UsuarioProyecto", back_populates="usuario", lazy="joined")
     logs     = relationship("Log", back_populates="usuario")
 
 
@@ -66,7 +66,7 @@ class UsuarioProyecto(Base):
     id_proyecto = Column(Integer, ForeignKey("proyectos.id", ondelete="CASCADE"))
 
     usuario  = relationship("Usuario",  back_populates="proyectos")
-    proyecto = relationship("Proyecto", back_populates="usuarios")
+    proyecto = relationship("Proyecto", back_populates="usuarios", lazy="joined")
 
 
 class Plantilla(Base):
@@ -126,3 +126,17 @@ class EmisionArchivo(Base):
     error_msg     = Column(Text)
     created_at    = Column(DateTime, server_default=func.now())
     completado_at = Column(DateTime, nullable=True)
+
+class PadronVersion(Base):
+    __tablename__ = "padron_versiones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    version = Column(Integer, nullable=False)
+    total_registros = Column(Integer, default=0)
+    archivo_nombre = Column(String(255), nullable=True)  
+    cargado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    proyecto = relationship("Proyecto")
+    usuario = relationship("Usuario")

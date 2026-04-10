@@ -5,13 +5,13 @@ from typing import Optional
 
 def registrar_log(
     db: Session,
+    id_usuario: Optional[int],
     accion: str,
-    id_usuario: Optional[int] = None,
-    id_proyecto: Optional[int] = None,
     descripcion: Optional[str] = None,
+    id_proyecto: Optional[int] = None,
     ip: Optional[str] = None,
 ) -> None:
-    """Registra una entrada en la bitácora. No lanza excepciones para no interrumpir el flujo."""
+    """Registra una entrada en la bitácora. No lanza excepciones."""
     try:
         log = Log(
             id_usuario=id_usuario,

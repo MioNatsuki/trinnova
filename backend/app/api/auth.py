@@ -42,10 +42,10 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_glo
     token = create_access_token(data={"sub": str(user.id), "rol": user.rol.nombre})
 
     registrar_log(
-        db=db,
-        id_usuario=user.id,
-        accion="login",
-        descripcion=f"Inicio de sesion exitoso: {user.correo}",
+        db,
+        user.id,
+        "login",
+        f"Inicio de sesión: {user.correo}",
         ip=request.client.host,
     )
 
@@ -53,24 +53,16 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_glo
 
 
 @router.get("/me", response_model=UsuarioMe)
-def me(current_user: Usuario = Depends(get_current_active_user), db: Session = Depends(get_global_db)):
-    print(f"Usuario autenticado: {current_user.id} - {current_user.correo}")
+def me(
+    current_user: Usuario = Depends(get_current_active_user),
+    db: Session = Depends(get_global_db),
+):
     user = _load_user_full(db, current_user.id)
-    print(f"Proyectos encontrados: {len(user.proyectos)}")
-
-    for up in user.proyectos:
-        print(f"   - {up.proyecto.nombre} ({up.proyecto.slug}) - activo: {up.proyecto.activo}")
-
     proyectos = [
-        ProyectoBasico(
-            id=up.proyecto.id,
-            nombre=up.proyecto.nombre,
-            slug=up.proyecto.slug,
-        )
+        ProyectoBasico(id=up.proyecto.id, nombre=up.proyecto.nombre, slug=up.proyecto.slug)
         for up in user.proyectos
         if up.proyecto.activo
     ]
-
     return UsuarioMe(
         id=user.id,
         nombre=user.nombre,
@@ -88,10 +80,10 @@ def logout(
     db: Session = Depends(get_global_db),
 ):
     registrar_log(
-        db=db,
-        id_usuario=current_user.id,
-        accion="logout",
-        descripcion=f"Cierre de sesion: {current_user.correo}",
+        db,
+        current_user.id,
+        "logout",
+        f"Cierre de sesión: {current_user.correo}",
         ip=request.client.host,
     )
-    return {"message": "Sesion cerrada"}
+    return {"message": "Sesión cerrada"}

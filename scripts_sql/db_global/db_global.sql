@@ -1,8 +1,5 @@
 -- ============================================================
--- db_global.sql
--- Base de datos global: usuarios, roles, proyectos, catálogos
--- compartidos, plantillas, logs, emisiones y versionado.
--- Guardar en: scripts_sql/db_global/db_global.sql
+-- db_global.sql  —  Base de datos global Trinnova
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS db_global
@@ -14,7 +11,7 @@ USE db_global;
 -- ------------------------------------------------------------
 -- ROLES
 -- ------------------------------------------------------------
-CREATE TABLE roles (
+CREATE TABLE IF NOT EXISTS roles (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     nombre      VARCHAR(50)  NOT NULL UNIQUE,
     descripcion VARCHAR(255)
@@ -23,12 +20,13 @@ CREATE TABLE roles (
 INSERT INTO roles (nombre, descripcion) VALUES
     ('superadmin', 'Acceso total a todos los proyectos y configuraciones'),
     ('analista',   'CRUD en su proyecto asignado, puede generar PDFs'),
-    ('auxiliar',   'Solo lectura y generacion de PDFs en su proyecto');
+    ('auxiliar',   'Solo lectura y generación de PDFs en su proyecto')
+ON DUPLICATE KEY UPDATE descripcion = VALUES(descripcion);
 
 -- ------------------------------------------------------------
 -- USUARIOS
 -- ------------------------------------------------------------
-CREATE TABLE usuarios (
+CREATE TABLE IF NOT EXISTS usuarios (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     nombre        VARCHAR(100) NOT NULL,
     apellidos     VARCHAR(100) NOT NULL,
@@ -44,7 +42,7 @@ CREATE TABLE usuarios (
 -- ------------------------------------------------------------
 -- PROYECTOS
 -- ------------------------------------------------------------
-CREATE TABLE proyectos (
+CREATE TABLE IF NOT EXISTS proyectos (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     nombre      VARCHAR(150) NOT NULL,
     slug        VARCHAR(50)  NOT NULL UNIQUE,
@@ -60,12 +58,13 @@ INSERT INTO proyectos (nombre, slug, db_name, descripcion) VALUES
     ('Licencias GDL',      'licencias_gdl',      'db_licencias_gdl',      'Licencias Guadalajara'),
     ('Predial GDL',        'predial_gdl',        'db_predial_gdl',        'Predial Guadalajara'),
     ('Proyecto del Estado','estado',             'db_estado',             'Proyecto del Estado de Jalisco'),
-    ('Pensiones',          'pensiones',          'db_pensiones',          'Instituto de Pensiones del Estado de Jalisco');
+    ('Pensiones',          'pensiones',          'db_pensiones',          'Instituto de Pensiones del Estado de Jalisco')
+ON DUPLICATE KEY UPDATE nombre = VALUES(nombre);
 
 -- ------------------------------------------------------------
 -- USUARIO <-> PROYECTO  (muchos a muchos)
 -- ------------------------------------------------------------
-CREATE TABLE usuario_proyecto (
+CREATE TABLE IF NOT EXISTS usuario_proyecto (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     id_usuario  INT NOT NULL,
     id_proyecto INT NOT NULL,
@@ -75,9 +74,9 @@ CREATE TABLE usuario_proyecto (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- CATALOGO DOCUMENTO  (global con filtro opcional por proyecto)
+-- CATÁLOGO DOCUMENTO
 -- ------------------------------------------------------------
-CREATE TABLE catalogo_documento (
+CREATE TABLE IF NOT EXISTS catalogo_documento (
     id_documento            INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto             INT          DEFAULT NULL,
     nombre_documento        VARCHAR(255) NOT NULL,
@@ -86,9 +85,9 @@ CREATE TABLE catalogo_documento (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- CATALOGO NOTIFICADORES  (global con filtro opcional por proyecto)
+-- CATÁLOGO NOTIFICADORES
 -- ------------------------------------------------------------
-CREATE TABLE catalogo_notificadores (
+CREATE TABLE IF NOT EXISTS catalogo_notificadores (
     id_notificador INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto    INT         DEFAULT NULL,
     nombre         VARCHAR(255) NOT NULL,
@@ -97,9 +96,9 @@ CREATE TABLE catalogo_notificadores (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- CATALOGO ZONA  (global con filtro por proyecto)
+-- CATÁLOGO ZONA
 -- ------------------------------------------------------------
-CREATE TABLE catalogo_zona (
+CREATE TABLE IF NOT EXISTS catalogo_zona (
     id_zona     INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto INT          DEFAULT NULL,
     zona_final  VARCHAR(255),
@@ -110,7 +109,7 @@ CREATE TABLE catalogo_zona (
 -- ------------------------------------------------------------
 -- PLANTILLAS
 -- ------------------------------------------------------------
-CREATE TABLE plantillas (
+CREATE TABLE IF NOT EXISTS plantillas (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto  INT NOT NULL,
     nombre       VARCHAR(150) NOT NULL,
@@ -128,7 +127,7 @@ CREATE TABLE plantillas (
 -- ------------------------------------------------------------
 -- PLANTILLA_CAMPOS  (mapeo placeholder -> campo de tabla_temporal)
 -- ------------------------------------------------------------
-CREATE TABLE plantilla_campos (
+CREATE TABLE IF NOT EXISTS plantilla_campos (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     id_plantilla INT          NOT NULL,
     placeholder  VARCHAR(100) NOT NULL,
@@ -138,24 +137,27 @@ CREATE TABLE plantilla_campos (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- PADRON_VERSIONES  (snapshot por cada carga de padron)
+-- PADRON_VERSIONES
+-- ruta_snapshot es NULLABLE — el snapshot se guarda si se implementa
+-- la funcionalidad de exportar a JSON/CSV; no es obligatorio.
 -- ------------------------------------------------------------
-CREATE TABLE padron_versiones (
+CREATE TABLE IF NOT EXISTS padron_versiones (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto     INT          NOT NULL,
     version         INT          NOT NULL,
-    ruta_snapshot   VARCHAR(500) NOT NULL,
-    total_registros INT,
-    cargado_por     INT NOT NULL,
+    ruta_snapshot   VARCHAR(500) NULL,          -- ← NULL permitido
+    total_registros INT          DEFAULT 0,
+    archivo_nombre  VARCHAR(255) NULL,
+    cargado_por     INT          NOT NULL,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_pv_proyecto FOREIGN KEY (id_proyecto) REFERENCES proyectos(id),
     CONSTRAINT fk_pv_usuario  FOREIGN KEY (cargado_por) REFERENCES usuarios(id)
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- EMISION_ARCHIVOS  (registro de PDFs generados)
+-- EMISION_ARCHIVOS
 -- ------------------------------------------------------------
-CREATE TABLE emision_archivos (
+CREATE TABLE IF NOT EXISTS emision_archivos (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     id_proyecto   INT NOT NULL,
     id_plantilla  INT NOT NULL,
@@ -172,9 +174,9 @@ CREATE TABLE emision_archivos (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- LOGS / BITACORA
+-- LOGS / BITÁCORA
 -- ------------------------------------------------------------
-CREATE TABLE logs (
+CREATE TABLE IF NOT EXISTS logs (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     id_usuario  INT          DEFAULT NULL,
     id_proyecto INT          DEFAULT NULL,
@@ -187,12 +189,12 @@ CREATE TABLE logs (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
--- SUPERADMIN por defecto  (password: Admin2024! — cambiar en produccion)
--- hash bcrypt generado con passlib
+-- SUPERADMIN por defecto
+-- password: Admin2024!
+-- Regenerar hash en producción:
+--   python -c "from passlib.context import CryptContext; print(CryptContext(['bcrypt']).hash('Admin2024!'))"
 -- ------------------------------------------------------------
-INSERT INTO usuarios (nombre, apellidos, correo, password_hash, id_rol) VALUES (
-    'Administrador', 'Sistema',
-    'admin@trinnova.mx',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TiGGMbVRmLmYTnKq3nH4y8eJq5gO',
-    1
-);
+INSERT INTO usuarios (nombre, apellidos, correo, password_hash, id_rol)
+SELECT 'Administrador', 'Sistema', 'admin@trinnova.mx',
+       '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TiGGMbVRmLmYTnKq3nH4y8eJq5gO', 1
+WHERE NOT EXISTS (SELECT 1 FROM usuarios WHERE correo = 'admin@trinnova.mx');

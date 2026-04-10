@@ -62,7 +62,7 @@ def crear_usuario(
     current_user: Usuario = Depends(require_superadmin),
 ):
     if db.query(Usuario).filter(Usuario.correo == payload.correo).first():
-        raise HTTPException(status_code=400, detail="El correo ya esta registrado")
+        raise HTTPException(status_code=400, detail="El correo ya está registrado")
 
     nuevo = Usuario(
         nombre=payload.nombre,

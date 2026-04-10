@@ -37,9 +37,9 @@ class Usuario(Base):
     created_at    = Column(DateTime, server_default=func.now())
     updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    rol      = relationship("Rol", back_populates="usuarios")
+    rol       = relationship("Rol", back_populates="usuarios")
     proyectos = relationship("UsuarioProyecto", back_populates="usuario", lazy="joined")
-    logs     = relationship("Log", back_populates="usuario")
+    logs      = relationship("Log", back_populates="usuario")
 
 
 class Proyecto(Base):
@@ -127,16 +127,19 @@ class EmisionArchivo(Base):
     created_at    = Column(DateTime, server_default=func.now())
     completado_at = Column(DateTime, nullable=True)
 
+
 class PadronVersion(Base):
     __tablename__ = "padron_versiones"
 
-    id = Column(Integer, primary_key=True, index=True)
-    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
-    version = Column(Integer, nullable=False)
+    id              = Column(Integer, primary_key=True, index=True)
+    id_proyecto     = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    version         = Column(Integer, nullable=False)
+    # ruta_snapshot es opcional — se puede guardar snapshot JSON en disco si se quiere
+    ruta_snapshot   = Column(String(500), nullable=True)
     total_registros = Column(Integer, default=0)
-    archivo_nombre = Column(String(255), nullable=True)  
-    cargado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    archivo_nombre  = Column(String(255), nullable=True)
+    cargado_por     = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    created_at      = Column(DateTime, server_default=func.now())
 
     proyecto = relationship("Proyecto")
-    usuario = relationship("Usuario")
+    usuario  = relationship("Usuario")

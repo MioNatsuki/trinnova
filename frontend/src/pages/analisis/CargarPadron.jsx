@@ -1,90 +1,77 @@
 // frontend/src/pages/analisis/CargarPadron.jsx
 import { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import api from '../../api/auth';
+import { useProyecto } from '../../hooks/useProyecto';
+import ProyectoSelector from '../../components/ProyectoSelector';
 import './Analisis.css';
 
 export default function CargarPadron() {
-  const { user } = useAuth();
-  const [file, setFile] = useState(null);
-  const [proyectoSeleccionado, setProyectoSeleccionado] = useState('');
-  const [proyectos, setProyectos] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
-  const [preview, setPreview] = useState(null);
+  const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
+  const [file, setFile]         = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState(null);
+  const [error, setError]       = useState('');
+  const [preview, setPreview]   = useState(null);   // {headers, rows}
+  const [versiones, setVersiones] = useState([]);
+  const [loadingVer, setLoadingVer] = useState(false);
 
-  // Cargar proyectos del usuario
+  // Cargar versiones cuando cambia el proyecto
   useEffect(() => {
-    if (user?.proyectos && user.proyectos.length > 0) {
-      setProyectos(user.proyectos);
-      if (user.proyectos.length === 1) {
-        setProyectoSeleccionado(user.proyectos[0].slug);
-      }
-    } else {
-      // Si no hay proyectos en el usuario, intentar cargar desde API
-      cargarProyectos();
-    }
-  }, [user]);
+    if (!proyectoSlug) { setVersiones([]); return; }
+    setLoadingVer(true);
+    api.get(`/analisis/${proyectoSlug}/versiones`)
+      .then(r => setVersiones(r.data))
+      .catch(() => setVersiones([]))
+      .finally(() => setLoadingVer(false));
+  }, [proyectoSlug]);
 
-  const cargarProyectos = async () => {
-    try {
-      const response = await api.get('/proyectos/');
-      setProyectos(response.data);
-    } catch (err) {
-      console.error('Error cargando proyectos:', err);
+  const handleFileChange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    setFile(f);
+    setError('');
+    setResult(null);
+    setPreview(null);
+
+    // Preview: solo para CSV podemos leerlo en el cliente sin la librería xlsx
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (ext === 'csv') {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const lines = ev.target.result.split('\n').filter(l => l.trim());
+          // Detectar separador: coma, punto y coma o tabulación
+          const first = lines[0];
+          const sep = first.includes(';') ? ';' : first.includes('\t') ? '\t' : ',';
+          const headers = first.split(sep).map(h => h.replace(/^"|"$/g, '').trim());
+          const rows = lines.slice(1, 6).map(l =>
+            l.split(sep).map(c => c.replace(/^"|"$/g, '').trim())
+          );
+          setPreview({ headers: headers, rows, total_cols: headers.length });
+        } catch {
+          // ignore preview error
+        }
+      };
+      reader.readAsText(f, 'utf-8');
+    } else {
+      // Para Excel mostramos solo el nombre — el preview real vendrá del servidor
+      setPreview({ excel: true, name: f.name });
     }
   };
 
-  const handleFileChange = async (e) => {
-    const selectedFile = e.target.files[0];
-    if (!selectedFile) return;
-    
-    setFile(selectedFile);
-    setError('');
-    setPreview(null);
-    
-    // Vista previa del archivo
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    
-    try {
-      // Leer primeras filas para preview
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target.result;
-        const lines = content.split('\n').slice(0, 6);
-        const headers = lines[0].split(',');
-        const rows = lines.slice(1).map(line => line.split(','));
-        
-        setPreview({
-          headers: headers.slice(0, 8),
-          rows: rows.slice(0, 5).map(row => row.slice(0, 8))
-        });
-      };
-      reader.readAsText(selectedFile);
-    } catch (err) {
-      console.error('Error leyendo preview:', err);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (f) {
+      const fakeEvent = { target: { files: [f] } };
+      handleFileChange(fakeEvent);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!file) {
-      setError('Selecciona un archivo');
-      return;
-    }
-    
-    if (!proyectoSeleccionado && proyectos.length === 0) {
-      setError('No tienes proyectos asignados. Contacta al administrador.');
-      return;
-    }
-    
-    if (!proyectoSeleccionado && proyectos.length > 0) {
-      setError('Selecciona un proyecto');
-      return;
-    }
+    if (!file)         { setError('Selecciona un archivo.'); return; }
+    if (!proyectoSlug) { setError('Selecciona un proyecto.'); return; }
 
     setLoading(true);
     setError('');
@@ -94,225 +81,317 @@ export default function CargarPadron() {
     formData.append('file', file);
 
     try {
-      const response = await api.post(`/analisis/${proyectoSeleccionado}/cargar-padron`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const res = await api.post(`/analisis/${proyectoSlug}/cargar-padron`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setResult(response.data);
+      setResult(res.data);
+      // Recargar versiones
+      const ver = await api.get(`/analisis/${proyectoSlug}/versiones`);
+      setVersiones(ver.data);
+      // Mostrar preview del servidor si no la tenemos
+      if (!preview?.headers && res.data.preview?.length) {
+        const serverHeaders = Object.keys(res.data.preview[0]);
+        const serverRows = res.data.preview.map(r => serverHeaders.map(h => r[h] ?? ''));
+        setPreview({ headers: serverHeaders, rows: serverRows, total_cols: serverHeaders.length });
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Error al cargar el archivo');
+      setError(err.response?.data?.detail || 'Error al cargar el archivo.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!user) {
-    return <div className="analisis-loading">Cargando usuario...</div>;
-  }
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+  };
 
   return (
     <div className="analisis-container">
-      <h1>Cargar Padrón</h1>
-      
-      {/* Selector de proyecto */}
-      {proyectos.length > 0 && (
-        <div className="proyecto-selector">
-          <label>Proyecto:</label>
-          <select 
-            value={proyectoSeleccionado} 
-            onChange={(e) => setProyectoSeleccionado(e.target.value)}
-            required
-          >
-            <option value="">Selecciona un proyecto</option>
-            {proyectos.map(proy => (
-              <option key={proy.id || proy.slug} value={proy.slug}>
-                {proy.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      
-      {proyectos.length === 0 && (
-        <div className="error-message">
-          ⚠️ No tienes proyectos asignados. Contacta al administrador.
-        </div>
-      )}
-
-      <div className="cargar-card">
-        <form onSubmit={handleSubmit}>
-          <div className="file-zone">
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              onChange={handleFileChange}
-              id="file-input"
-              style={{ display: 'none' }}
-            />
-            <label htmlFor="file-input" className="file-label">
-              📁 {file ? file.name : 'Seleccionar archivo CSV o Excel'}
-            </label>
-            <p className="file-hint">Formatos soportados: CSV, Excel (.xlsx, .xls)</p>
-          </div>
-          
-          {/* Preview del archivo */}
-          {preview && (
-            <div className="preview-table">
-              <h4>Vista previa (primeras 5 filas)</h4>
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      {preview.headers.map((header, i) => (
-                        <th key={i}>{header}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.rows.map((row, i) => (
-                      <tr key={i}>
-                        {row.map((cell, j) => (
-                          <td key={j}>{cell}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          
-          <button 
-            type="submit" 
-            disabled={loading || !file || !proyectoSeleccionado}
-            className="btn-submit"
-          >
-            {loading ? 'Cargando...' : 'Subir padrón'}
-          </button>
-        </form>
-
-        {error && <div className="error-message">{error}</div>}
-
-        {result && (
-          <div className={`result-message ${result.success ? 'success' : 'error'}`}>
-            <h3>{result.message}</h3>
-            {result.success && (
-              <>
-                <p>✅ Registros importados: <strong>{result.total_registros}</strong></p>
-                <p>📊 Columnas detectadas: {result.columnas?.length || 0}</p>
-                {result.columnas && result.columnas.length > 0 && (
-                  <details>
-                    <summary>Ver columnas</summary>
-                    <ul>
-                      {result.columnas.slice(0, 20).map(col => (
-                        <li key={col}>{col}</li>
-                      ))}
-                      {result.columnas.length > 20 && <li>... y {result.columnas.length - 20} más</li>}
-                    </ul>
-                  </details>
-                )}
-                {result.errores && result.errores.length > 0 && (
-                  <div className="warnings">
-                    <p>⚠️ Advertencias: {result.errores.length}</p>
-                    <ul>
-                      {result.errores.slice(0, 5).map((err, i) => (
-                        <li key={i}>{err}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
+      <div className="analisis-header">
+        <h1>Cargar Padrón</h1>
       </div>
 
+      <ProyectoSelector
+        proyectos={proyectos}
+        value={proyectoSlug}
+        onChange={setProyectoSlug}
+      />
+
+      {proyectoSlug && (
+        <div className="cp-grid">
+          {/* Panel izquierdo: formulario de carga */}
+          <div className="cargar-card">
+            <form onSubmit={handleSubmit}>
+              {/* Zona de drop */}
+              <div
+                className={`drop-zone ${file ? 'drop-zone--has-file' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={e => e.preventDefault()}
+                onClick={() => document.getElementById('file-input').click()}
+              >
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleFileChange}
+                  id="file-input"
+                  style={{ display: 'none' }}
+                />
+                {file ? (
+                  <>
+                    <div className="drop-zone__icon drop-zone__icon--ok">✓</div>
+                    <p className="drop-zone__filename">{file.name}</p>
+                    <p className="drop-zone__hint">Haz clic para cambiar el archivo</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="drop-zone__icon">📂</div>
+                    <p className="drop-zone__text">Arrastra aquí o haz clic para seleccionar</p>
+                    <p className="drop-zone__hint">CSV, Excel (.xlsx, .xls)</p>
+                  </>
+                )}
+              </div>
+
+              {/* Vista previa columnas detectadas */}
+              {preview && !preview.excel && preview.headers && (
+                <div className="preview-section">
+                  <div className="preview-header">
+                    <span className="preview-title">Vista previa</span>
+                    <span className="preview-badge">{preview.total_cols} columnas detectadas</span>
+                  </div>
+                  <div className="table-container-preview">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          {preview.headers.map((h, i) => <th key={i}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.rows.map((row, i) => (
+                          <tr key={i}>
+                            {row.map((cell, j) => <td key={j}>{cell}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {preview?.excel && (
+                <div className="preview-section preview-section--excel">
+                  📊 Archivo Excel seleccionado: <strong>{preview.name}</strong>
+                  <br />
+                  <small style={{ color: 'var(--clr-muted)' }}>La vista previa se mostrará tras importar.</small>
+                </div>
+              )}
+
+              {error && <div className="cp-error">{error}</div>}
+
+              <button
+                type="submit"
+                className="btn-primary btn-full"
+                disabled={loading || !file || !proyectoSlug}
+              >
+                {loading ? 'Importando…' : 'Importar padrón'}
+              </button>
+            </form>
+
+            {/* Resultado de la importación */}
+            {result && (
+              <div className={`cp-result ${result.success ? 'cp-result--ok' : 'cp-result--err'}`}>
+                <p className="cp-result__title">{result.message}</p>
+
+                {result.success && (
+                  <div className="cp-result__body">
+                    <div className="cp-stats">
+                      <div className="cp-stat">
+                        <span className="cp-stat__num">{result.total_registros}</span>
+                        <span className="cp-stat__label">Registros procesados</span>
+                      </div>
+                      <div className="cp-stat">
+                        <span className="cp-stat__num">{result.columnas_bd?.length || 0}</span>
+                        <span className="cp-stat__label">Columnas mapeadas</span>
+                      </div>
+                      <div className="cp-stat">
+                        <span className="cp-stat__num">{result.columnas_csv?.length || 0}</span>
+                        <span className="cp-stat__label">Columnas en archivo</span>
+                      </div>
+                    </div>
+
+                    {/* Columnas mapeadas */}
+                    {result.columnas_bd?.length > 0 && (
+                      <details className="cp-details">
+                        <summary>Columnas mapeadas ({result.columnas_bd.length})</summary>
+                        <div className="cp-tags">
+                          {result.columnas_bd.map(c => <span key={c} className="cp-tag">{c}</span>)}
+                        </div>
+                      </details>
+                    )}
+
+                    {/* Advertencias */}
+                    {result.errores?.length > 0 && (
+                      <details className="cp-details cp-details--warn">
+                        <summary>⚠️ {result.errores.length} advertencias</summary>
+                        <ul className="cp-errores">
+                          {result.errores.map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Panel derecho: historial de versiones */}
+          <div className="versiones-panel">
+            <h3 className="versiones-title">Historial de versiones</h3>
+            {loadingVer ? (
+              <p style={{ color: 'var(--clr-muted)', fontSize: 13 }}>Cargando…</p>
+            ) : versiones.length === 0 ? (
+              <p style={{ color: 'var(--clr-muted)', fontSize: 13 }}>
+                Aún no se han cargado padrones para este proyecto.
+              </p>
+            ) : (
+              <div className="versiones-list">
+                {versiones.map((v, i) => (
+                  <div key={v.id} className={`version-item ${i === 0 ? 'version-item--latest' : ''}`}>
+                    <div className="version-badge">v{v.version}</div>
+                    <div className="version-body">
+                      <div className="version-file">{v.archivo_nombre || '—'}</div>
+                      <div className="version-meta">
+                        {v.total_registros?.toLocaleString()} registros · {fmtDate(v.created_at)}
+                      </div>
+                    </div>
+                    {i === 0 && <span className="version-latest-badge">Más reciente</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <style>{`
-        .proyecto-selector {
-          background: var(--clr-white);
-          border-radius: var(--radius);
-          padding: 16px 20px;
+        .cp-grid {
+          display: grid;
+          grid-template-columns: 1fr 320px;
+          gap: 20px;
+          align-items: start;
+        }
+        @media (max-width: 900px) { .cp-grid { grid-template-columns: 1fr; } }
+
+        .drop-zone {
+          border: 2px dashed var(--clr-border);
+          border-radius: 12px;
+          padding: 40px 20px;
+          text-align: center;
+          cursor: pointer;
+          transition: all .2s;
           margin-bottom: 20px;
-          border: 1px solid var(--clr-border);
-          display: flex;
-          align-items: center;
-          gap: 16px;
+          background: var(--clr-bg);
         }
-        .proyecto-selector label {
-          font-weight: 600;
-          color: var(--clr-text);
+        .drop-zone:hover, .drop-zone--has-file {
+          border-color: var(--clr-accent);
+          background: var(--clr-accent-lt);
         }
-        .proyecto-selector select {
-          padding: 8px 16px;
-          border: 1px solid var(--clr-border);
+        .drop-zone__icon { font-size: 32px; margin-bottom: 10px; }
+        .drop-zone__icon--ok { color: var(--clr-green); }
+        .drop-zone__text  { font-size: 14px; color: var(--clr-text); margin-bottom: 6px; }
+        .drop-zone__filename { font-size: 14px; font-weight: 600; color: var(--clr-accent); margin-bottom: 4px; }
+        .drop-zone__hint  { font-size: 12px; color: var(--clr-muted); }
+
+        .preview-section {
+          background: var(--clr-bg);
           border-radius: 8px;
-          font-size: 14px;
-          min-width: 250px;
+          padding: 14px;
+          margin-bottom: 16px;
+          font-size: 12px;
         }
-        .preview-table {
-          margin: 20px 0;
+        .preview-section--excel { color: var(--clr-text); line-height: 1.6; }
+        .preview-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .preview-title  { font-size: 13px; font-weight: 600; color: var(--clr-text); }
+        .preview-badge  {
+          font-size: 11px; padding: 2px 8px; border-radius: 20px;
+          background: var(--clr-active-bg); color: var(--clr-active-tx); font-weight: 600;
         }
-        .preview-table h4 {
-          margin-bottom: 12px;
-          font-size: 14px;
+
+        .cp-error {
+          background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px;
+          padding: 10px 14px; font-size: 13px; color: var(--clr-red); margin-bottom: 14px;
         }
-        .table-wrapper {
-          overflow-x: auto;
+
+        .cp-result { border-radius: var(--radius); padding: 20px; margin-top: 20px; }
+        .cp-result--ok  { background: #f0fff4; border: 1px solid #9ae6b4; }
+        .cp-result--err { background: #fff5f5; border: 1px solid #feb2b2; }
+        .cp-result__title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--clr-text); }
+
+        .cp-stats { display: flex; gap: 20px; margin-bottom: 14px; flex-wrap: wrap; }
+        .cp-stat  { display: flex; flex-direction: column; gap: 2px; }
+        .cp-stat__num   { font-size: 24px; font-weight: 300; color: var(--clr-text); }
+        .cp-stat__label { font-size: 11px; color: var(--clr-muted); }
+
+        .cp-details { font-size: 12px; margin-top: 8px; }
+        .cp-details summary { cursor: pointer; color: var(--clr-accent); font-weight: 500; padding: 4px 0; }
+        .cp-details--warn summary { color: var(--clr-orange); }
+        .cp-tags  { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+        .cp-tag   {
+          background: var(--clr-active-bg); color: var(--clr-active-tx);
+          padding: 2px 8px; border-radius: 4px; font-size: 11px;
+        }
+        .cp-errores { margin: 8px 0 0 16px; display: flex; flex-direction: column; gap: 3px; }
+        .cp-errores li { color: var(--clr-red); }
+
+        /* Versiones */
+        .versiones-panel {
+          background: var(--clr-white);
+          border: 1px solid var(--clr-border);
+          border-radius: var(--radius);
+          padding: 20px;
+        }
+        .versiones-title {
+          font-size: 14px; font-weight: 600; color: var(--clr-text);
+          margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--clr-border);
+        }
+        .versiones-list { display: flex; flex-direction: column; gap: 10px; }
+
+        /* Contenedor de tabla preview con scroll limitado */
+        .table-container-preview {
           max-height: 300px;
-        }
-        .preview-table table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
-        }
-        .preview-table th,
-        .preview-table td {
-          border: 1px solid var(--clr-border);
-          padding: 8px;
-          text-align: left;
-        }
-        .preview-table th {
-          background: #f8f9fa;
-          font-weight: 600;
-        }
-        .file-hint {
-          font-size: 12px;
-          color: var(--clr-muted);
-          margin-top: 8px;
-        }
-        .btn-submit {
-          background: var(--clr-accent);
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-weight: 600;
-          cursor: pointer;
-          width: 100%;
-          margin-top: 16px;
-        }
-        .btn-submit:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        .warnings {
-          margin-top: 16px;
-          padding: 12px;
-          background: #fff3cd;
-          border-radius: 8px;
-          color: #856404;
-        }
-        details {
-          margin-top: 12px;
-        }
-        details summary {
-          cursor: pointer;
-          color: var(--clr-accent);
-        }
-        details ul {
-          margin-top: 8px;
-          margin-left: 20px;
-          max-height: 150px;
+          overflow-x: auto;
           overflow-y: auto;
+          border: 1px solid var(--clr-border);
+          border-radius: 6px;
+        }
+        .table-container-preview .data-table {
+          width: 100%;
+          table-layout: auto;
+        }
+
+        .version-item {
+          display: flex; align-items: center; gap: 12px;
+          padding: 10px 12px; border-radius: 8px;
+          border: 1px solid var(--clr-border); background: var(--clr-bg);
+          position: relative;
+        }
+        .version-item--latest {
+          border-color: var(--clr-accent);
+          background: var(--clr-accent-lt);
+        }
+        .version-badge {
+          width: 36px; height: 36px; border-radius: 50%;
+          background: var(--clr-white); border: 1px solid var(--clr-border);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 11px; font-weight: 600; color: var(--clr-accent);
+          flex-shrink: 0;
+        }
+        .version-body { flex: 1; min-width: 0; }
+        .version-file { font-size: 12px; font-weight: 500; color: var(--clr-text); truncate; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .version-meta { font-size: 11px; color: var(--clr-muted); margin-top: 2px; }
+        .version-latest-badge {
+          font-size: 10px; padding: 2px 7px; border-radius: 20px;
+          background: var(--clr-accent); color: white; font-weight: 600; flex-shrink: 0;
         }
       `}</style>
     </div>

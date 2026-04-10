@@ -1,0 +1,44 @@
+.ps-bar {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ps-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--clr-text);
+  white-space: nowrap;
+}
+
+.ps-select {
+  padding: 7px 14px;
+  border: 1px solid var(--clr-border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  min-width: 220px;
+  background: var(--clr-white);
+  color: var(--clr-text);
+  outline: none;
+  transition: border-color .2s;
+}
+
+.ps-select:focus {
+  border-color: var(--clr-accent);
+}
+
+.ps-warn {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #856404;
+}

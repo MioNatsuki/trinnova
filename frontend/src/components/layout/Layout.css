@@ -180,4 +180,11 @@
   flex: 1;
   padding: 24px;
   min-height: calc(100vh - var(--header-h));
+  overflow-y: auto; /* Permitir scroll en content si es necesario */
+  position: relative;
+}
+
+/* Asegurar que el contenido interno no desborde */
+.content > * {
+  max-width: 100%;
 }

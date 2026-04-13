@@ -5,16 +5,35 @@
 
 .analisis-container {
   width: 100%;
+  height: calc(100vh - var(--header-h) - 48px); /* Restar header y padding */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* Evita scroll en la página */
 }
 
 /* Encabezado */
 .analisis-header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
   flex-wrap: wrap;
   gap: 14px;
+}
+
+.analisis-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.cp-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 20px;
+  align-items: start;
+  min-height: 0; /* Importante para flex en grid */
 }
 
 .analisis-header h1 {
@@ -38,6 +57,21 @@
   border-radius: var(--radius);
   padding: 28px;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--header-h) - 100px);
+  overflow-y: auto;
+}
+
+.versiones-panel {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  max-height: calc(100vh - var(--header-h) - 100px);
+  overflow-y: auto;
+  position: sticky;
+  top: 20px;
 }
 
 /* Búsqueda */
@@ -309,4 +343,41 @@
   text-align: center;
   color: var(--clr-muted);
   font-size: 14px;
+}
+
+.preview-section {
+  background: var(--clr-bg);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.table-container-preview {
+  max-height: 300px;
+  overflow: auto; /* Scroll SOLO aquí */
+  border: 1px solid var(--clr-border);
+  border-radius: 6px;
+}
+
+.table-container-preview .data-table {
+  width: 100%;
+  table-layout: auto;
+  min-width: 600px; /* Para que se pueda scroll horizontal */
+}
+
+.table-container-preview .data-table th,
+.table-container-preview .data-table td {
+  white-space: nowrap; /* Evita que las celdas se rompan */
+}
+
+/* Ajustes para pantallas pequeñas */
+@media (max-width: 900px) { 
+  .cp-grid { 
+    grid-template-columns: 1fr; 
+  }
+  .versiones-panel {
+    position: static;
+    max-height: 300px;
+  }
 }

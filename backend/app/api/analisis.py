@@ -1,15 +1,16 @@
 # backend/app/api/analisis.py
 """
 Módulo de Análisis — Fase 3
-Endpoints:
-  POST  /{slug}/cargar-padron          — sube CSV/Excel, detecta columnas, inserta en tabla_padron
-  GET   /{slug}/complementar           — tabla paginada padron + complementaria
-  POST  /{slug}/guardar-complemento    — guarda ediciones y reconstruye tabla_analisis
-  GET   /{slug}/analisis               — tabla_analisis con filtros de viabilidad
-  POST  /{slug}/acciones-manuales      — marcar viable/no_viable/pagada/nd en lote
-  POST  /{slug}/limpieza/normalizar-calles  — regex via Python sobre tabla_analisis
-  POST  /{slug}/limpieza/limpiar-espacios   — trim y espacios dobles
-  GET   /{slug}/versiones              — historial de versiones de padrón cargadas
+  POST  /{slug}/cargar-padron
+  GET   /{slug}/complementar
+  POST  /{slug}/guardar-complemento    — SOLO tabla_complementaria
+  POST  /{slug}/generar-analisis       — reconstruye tabla_analisis (padron JOIN complementaria)
+  GET   /{slug}/analisis
+  POST  /{slug}/acciones-manuales
+  POST  /{slug}/limpieza/normalizar-calles
+  POST  /{slug}/limpieza/limpiar-espacios
+  GET   /{slug}/versiones
+  GET   /{slug}/estadisticas
 """
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -30,7 +31,9 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-# Schemas de respuesta / request
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
 
 class CargaPadronResponse(BaseModel):
     success: bool
@@ -50,11 +53,13 @@ class FilaComplementar(BaseModel):
 
 class AccionManualRequest(BaseModel):
     ids: List[Any]
-    accion: str          # viable | no_viable | quitar_pagada | quitar_nd
+    accion: str
     valor: Optional[str] = None
 
 
-# Metadata por proyecto: pk, columnas de padrón y complementaria
+# ---------------------------------------------------------------------------
+# Metadata por proyecto
+# ---------------------------------------------------------------------------
 
 _INFO: Dict[str, Dict] = {
     "apa_tlajomulco": {
@@ -143,6 +148,8 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["nombre"],
         "col_calle":  ["afiliado_calle"],
         "col_adeudo": ["adeudo"],
+        # Solo columnas propias de tabla_padron (no incluye los campos que ya
+        # existen en tabla_complementaria para evitar duplicidad en el mapeo CSV)
         "columnas_padron": [
             "afiliado","nombre","rfc","tipo_prestamo","prestamo","saldo_por_vencer",
             "adeudo","liquidacion","moratorio","ultimo_abono","sub_estatus","estatus",
@@ -156,6 +163,7 @@ _INFO: Dict[str, Dict] = {
             "garantia_colonia","garantia_calles_cruces","garantia_poblacion",
             "garantia_municipio",
         ],
+        # Todas las columnas de tabla_complementaria (sin id_comp ni pk)
         "columnas_complementaria": [
             "num_convenio","fecha_convenio","estatus_prestamo","estatus_captura",
             "demanda","juzgado","expediente","estatus_despacho","juicio_caduca",
@@ -165,7 +173,6 @@ _INFO: Dict[str, Dict] = {
     },
 }
 
-# Alias de columnas: nombre_en_csv -> nombre_en_bd (para cada proyecto)
 _COL_ALIAS: Dict[str, Dict[str, str]] = {
     "pensiones": {
         "subestatus":            "sub_estatus",
@@ -180,27 +187,24 @@ _COL_ALIAS: Dict[str, Dict[str, str]] = {
 }
 
 _DATE_COLS: Dict[str, List[str]] = {
-    "pensiones": [
-        "ultimo_abono", "fecha_alta", "ultima_aportacion",
-        "fecha_convenio", "fecha_asignacion",
-    ],
-    "apa_tlajomulco": ["fecha_lectura"],
-    "licencias_gdl":  ["fecemi"],
-    "predial_gdl":    [],
+    "pensiones":          ["ultimo_abono","fecha_alta","ultima_aportacion","fecha_convenio","fecha_asignacion"],
+    "apa_tlajomulco":     ["fecha_lectura"],
+    "licencias_gdl":      ["fecemi"],
+    "predial_gdl":        [],
     "predial_tlajomulco": [],
-    "estado": ["fecha_recepcion", "fecha_documento_determinante", "fecha_notificacion"],
+    "estado":             ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion"],
 }
 
-# Formatos de fecha que puede traer el CSV (se prueban en orden)
 _DATE_FORMATS = [
-    "%Y-%m-%d %H:%M:%S",
-    "%Y-%m-%d",
-    "%d/%m/%Y %H:%M:%S",
-    "%d/%m/%Y",
-    "%m/%d/%Y",
-    "%d-%m-%Y",
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d",
+    "%d/%m/%Y %H:%M:%S", "%d/%m/%Y",
+    "%m/%d/%Y", "%d-%m-%Y",
 ]
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _info(slug: str) -> Dict:
     if slug not in _INFO:
@@ -209,40 +213,24 @@ def _info(slug: str) -> Dict:
 
 
 def _normalizar_col(nombre: str) -> str:
-    """Quita tildes, minúsculas, reemplaza espacios por _"""
     txt = unicodedata.normalize("NFKD", nombre).encode("ASCII", "ignore").decode()
     return re.sub(r"\s+", "_", txt.lower().strip())
 
 
 def _mapear_columnas(slug: str, df_cols: List[str]) -> Dict[str, str]:
-    """
-    Devuelve {col_csv: col_bd} para las columnas reconocidas.
-    Usa coincidencia exacta primero, luego alias por proyecto, luego parcial.
-    """
     info = _info(slug)
-    cols_bd = info["columnas_padron"]
     alias = _COL_ALIAS.get(slug, {})
-
-    # Índice de BD normalizada -> nombre real
-    bd_idx = {_normalizar_col(c): c for c in cols_bd}
-
+    bd_idx = {_normalizar_col(c): c for c in info["columnas_padron"]}
     mapeo: Dict[str, str] = {}
     for csv_col in df_cols:
         norm = _normalizar_col(csv_col)
-        # 1. Exacto
         if norm in bd_idx:
-            mapeo[csv_col] = bd_idx[norm]
-            continue
-        # 2. Alias explícito del proyecto
+            mapeo[csv_col] = bd_idx[norm]; continue
         if norm in alias:
-            mapeo[csv_col] = alias[norm]
-            continue
-        # 3. Parcial (uno contiene al otro)
+            mapeo[csv_col] = alias[norm]; continue
         for bd_norm, bd_real in bd_idx.items():
             if bd_norm in norm or norm in bd_norm:
-                mapeo[csv_col] = bd_real
-                break
-
+                mapeo[csv_col] = bd_real; break
     return mapeo
 
 
@@ -257,7 +245,6 @@ def _siguiente_version(db_global: Session, proyecto_id: int) -> int:
 
 
 def _parse_fecha(val: Any) -> Any:
-    """Intenta parsear un string a datetime probando varios formatos."""
     if not isinstance(val, str):
         return None
     val = val.strip()
@@ -268,15 +255,10 @@ def _parse_fecha(val: Any) -> Any:
             return datetime.strptime(val, fmt)
         except ValueError:
             continue
-    return None  # no se pudo parsear → se guarda NULL
+    return None
 
 
 def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
-    """
-    Convierte NaN, NaT y Timestamp a tipos Python seguros para SQLAlchemy.
-    FIX: Si la columna es de tipo fecha y el valor es un string, intenta
-    parsearlo a datetime en lugar de enviarlo como texto crudo.
-    """
     if val is None:
         return None
     try:
@@ -286,31 +268,64 @@ def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
         pass
     if isinstance(val, pd.Timestamp):
         return val.to_pydatetime()
-
-    # FIX — parseo de fechas en strings para columnas fecha conocidas
-    date_cols = _DATE_COLS.get(slug, [])
-    if isinstance(val, str) and col_name in date_cols:
-        parsed = _parse_fecha(val)
-        return parsed  # puede ser datetime o None si no se reconoció
-
+    if isinstance(val, str) and col_name in _DATE_COLS.get(slug, []):
+        return _parse_fecha(val)
     return val
 
-# Helper: construir SELECT para complementar evitando duplicar la PK
 
-def _build_complementar_select(pk: str, cols_complementaria: List[str]) -> str:
+def _get_tabla_cols(db_session, tabla: str) -> List[str]:
+    """Devuelve las columnas reales de una tabla leyéndolas de la BD."""
+    from sqlalchemy import text
+    rows = db_session.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
+    return [r[0] for r in rows]
+
+
+def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) -> str:
     """
-    Genera: SELECT p.*, c.col1, c.col2, ...
-    Se omite c.`pk` y c.`id_comp` para evitar nombres duplicados con p.*
+    Construye INSERT INTO tabla_analisis (...cols...) SELECT p.col, c.col, ...
+    con columnas explícitas para evitar error 1136 (column count mismatch).
+
+    Lógica de resolución por columna de tabla_analisis:
+      - 'viabilidad'  → literal 'pendiente' (columna de control, no viene del JOIN)
+      - en cols_complementaria Y existe en tabla_complementaria → c.`col`
+      - existe en tabla_padron → p.`col`
+      - existe en tabla_complementaria → c.`col`
+      - no existe en ninguna → NULL
     """
-    cols_excluir = {pk, "id_comp"}
-    cols_c = [col for col in cols_complementaria if col not in cols_excluir]
-    if not cols_c:
-        return "SELECT p.*"
-    alias_str = ", ".join(f"c.`{col}`" for col in cols_c)
-    return f"SELECT p.*, {alias_str}"
+    from sqlalchemy import text
+
+    cols_analisis  = _get_tabla_cols(db_session, "tabla_analisis")
+    set_padron     = set(_get_tabla_cols(db_session, "tabla_padron"))
+    set_comp       = set(_get_tabla_cols(db_session, "tabla_complementaria"))
+    set_comp_edit  = set(cols_complementaria)
+
+    select_parts = []
+    for col in cols_analisis:
+        if col == "viabilidad":
+            select_parts.append("'pendiente'")
+        elif col in set_comp_edit and col in set_comp:
+            select_parts.append(f"c.`{col}`")
+        elif col in set_padron:
+            select_parts.append(f"p.`{col}`")
+        elif col in set_comp:
+            select_parts.append(f"c.`{col}`")
+        else:
+            select_parts.append("NULL")
+
+    cols_str   = ", ".join(f"`{c}`" for c in cols_analisis)
+    select_str = ", ".join(select_parts)
+
+    return (
+        f"INSERT INTO tabla_analisis ({cols_str})\n"
+        f"SELECT {select_str}\n"
+        f"FROM tabla_padron p\n"
+        f"LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`\n"
+    )
 
 
+# ---------------------------------------------------------------------------
 # CARGAR PADRÓN
+# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/cargar-padron", response_model=CargaPadronResponse)
 async def cargar_padron(
@@ -329,7 +344,6 @@ async def cargar_padron(
     pk = info["pk"]
     errores: List[str] = []
 
-    # --- Leer archivo ---
     contents = await file.read()
     try:
         if file.filename.lower().endswith(".csv"):
@@ -347,7 +361,6 @@ async def cargar_padron(
 
     df.columns = [c.strip() for c in df.columns]
     columnas_csv = list(df.columns)
-
     mapeo = _mapear_columnas(proyecto_slug, columnas_csv)
     columnas_bd_detectadas = list(set(mapeo.values()))
 
@@ -357,32 +370,26 @@ async def cargar_padron(
     if pk not in df_mapped.columns:
         raise HTTPException(
             status_code=400,
-            detail=f"No se encontró la columna primaria '{pk}' en el archivo. "
-                   f"Columnas detectadas: {columnas_csv[:15]}",
+            detail=f"No se encontró la columna primaria '{pk}'. Columnas detectadas: {columnas_csv[:15]}",
         )
 
     db_proyecto = next(get_project_db(proyecto_slug))
-    insertados = 0
-    actualizados = 0
-
+    insertados = actualizados = 0
     registros = df_mapped.to_dict("records")
 
     for idx, registro in enumerate(registros):
         try:
-            # Limpiar valores 
-            limpio: Dict[str, Any] = {}
-            for k, v in registro.items():
-                limpio[k] = _safe_value(v, col_name=k, slug=proyecto_slug)
-
+            limpio: Dict[str, Any] = {
+                k: _safe_value(v, col_name=k, slug=proyecto_slug)
+                for k, v in registro.items()
+            }
             pk_val = limpio.get(pk)
             if pk_val is None:
-                errores.append(f"Fila {idx + 2}: sin valor en columna '{pk}', se omite.")
+                errores.append(f"Fila {idx + 2}: sin valor en '{pk}', se omite.")
                 continue
-
             if info["pk_type"] == "int":
                 try:
-                    pk_val = int(pk_val)
-                    limpio[pk] = pk_val
+                    pk_val = int(pk_val); limpio[pk] = pk_val
                 except (ValueError, TypeError):
                     errores.append(f"Fila {idx + 2}: '{pk}' = '{pk_val}' no es entero.")
                     continue
@@ -404,9 +411,7 @@ async def cargar_padron(
                 cols_str = ", ".join(f"`{k}`" for k in limpio)
                 vals_str = ", ".join(f":{k}" for k in limpio)
                 db_proyecto.execute(
-                    text(f"INSERT INTO tabla_padron ({cols_str}) VALUES ({vals_str})"),
-                    limpio,
-                )
+                    text(f"INSERT INTO tabla_padron ({cols_str}) VALUES ({vals_str})"), limpio)
                 insertados += 1
 
             if (insertados + actualizados) % 200 == 0:
@@ -415,7 +420,7 @@ async def cargar_padron(
         except Exception as e:
             errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
             if len(errores) >= 30:
-                errores.append("Se alcanzó el límite de 30 errores, se detuvo la importación.")
+                errores.append("Límite de 30 errores alcanzado, importación detenida.")
                 break
 
     db_proyecto.commit()
@@ -426,22 +431,16 @@ async def cargar_padron(
         version = PadronVersion(
             id_proyecto=proyecto.id,
             version=_siguiente_version(db_global, proyecto.id),
-            ruta_snapshot="",
-            total_registros=total,
-            archivo_nombre=file.filename,
-            cargado_por=current_user.id,
+            ruta_snapshot="", total_registros=total,
+            archivo_nombre=file.filename, cargado_por=current_user.id,
         )
         db_global.add(version)
         db_global.commit()
         version_id = version.id
 
-    registrar_log(
-        db_global,
-        current_user.id,
-        "cargar_padron",
+    registrar_log(db_global, current_user.id, "cargar_padron",
         f"Padrón {proyecto_slug}: {insertados} nuevos, {actualizados} actualizados. Archivo: {file.filename}",
-        proyecto.id,
-    )
+        proyecto.id)
 
     preview_cols = list(df_mapped.columns[:10])
     preview = [
@@ -453,14 +452,15 @@ async def cargar_padron(
     return CargaPadronResponse(
         success=total > 0,
         message=f"{insertados} registros nuevos, {actualizados} actualizados de {len(registros)} en el archivo.",
-        total_registros=total,
-        columnas_csv=columnas_csv,
-        columnas_bd=columnas_bd_detectadas,
-        preview=preview,
-        version_id=version_id,
-        errores=errores[:30],
+        total_registros=total, columnas_csv=columnas_csv,
+        columnas_bd=columnas_bd_detectadas, preview=preview,
+        version_id=version_id, errores=errores[:30],
     )
 
+
+# ---------------------------------------------------------------------------
+# COMPLEMENTAR — GET
+# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/complementar")
 def get_complementar(
@@ -476,9 +476,7 @@ def get_complementar(
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-
-    search_cols = info["col_nombre"] + info["col_calle"] + [pk]
-    search_cols = list(dict.fromkeys(search_cols))
+    search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
 
     search_cond = ""
     params: Dict[str, Any] = {}
@@ -488,20 +486,19 @@ def get_complementar(
         params["search"] = f"%{search}%"
 
     db_proyecto = next(get_project_db(proyecto_slug))
-
-    total_row = db_proyecto.execute(
-        text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE 1=1 {search_cond}"),
-        params,
-    ).first()
-    total = total_row.total if total_row else 0
+    total = db_proyecto.execute(
+        text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE 1=1 {search_cond}"), params
+    ).first().total
 
     offset = (page - 1) * limit
 
-    select_clause = _build_complementar_select(pk, info["columnas_complementaria"])
+    # SELECT explícito: p.* + solo las cols editables de c (sin repetir pk ni id_comp)
+    cols_c = [col for col in info["columnas_complementaria"] if col != pk and col != "id_comp"]
+    cols_c_str = (", " + ", ".join(f"c.`{col}`" for col in cols_c)) if cols_c else ""
 
     rows = db_proyecto.execute(
         text(f"""
-            {select_clause}
+            SELECT p.*{cols_c_str}
             FROM tabla_padron p
             LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
             WHERE 1=1 {search_cond}
@@ -511,16 +508,19 @@ def get_complementar(
         params,
     ).fetchall()
 
-    result = [dict(r._mapping) for r in rows]
-
     return {
-        "rows":               result,
+        "rows":               [dict(r._mapping) for r in rows],
         "columnas_editables": info["columnas_complementaria"],
         "total":              total,
         "page":               page,
         "limit":              limit,
         "pk":                 pk,
     }
+
+
+# ---------------------------------------------------------------------------
+# GUARDAR COMPLEMENTO — SOLO tabla_complementaria, NO toca tabla_analisis
+# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/guardar-complemento")
 def guardar_complemento(
@@ -529,12 +529,12 @@ def guardar_complemento(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
+    """Guarda cambios únicamente en tabla_complementaria."""
     from sqlalchemy import text
 
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-
     db_proyecto = next(get_project_db(proyecto_slug))
     guardados = 0
 
@@ -562,36 +562,65 @@ def guardar_complemento(
                 text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
                 all_fields,
             )
-
-        # Reconstruir tabla_analisis para esta fila
-        db_proyecto.execute(
-            text(f"DELETE FROM tabla_analisis WHERE `{pk}` = :pk_val"),
-            {"pk_val": pk_val},
-        )
-        db_proyecto.execute(
-            text(f"""
-                INSERT INTO tabla_analisis
-                SELECT p.*, c.*
-                FROM tabla_padron p
-                LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
-                WHERE p.`{pk}` = :pk_val
-            """),
-            {"pk_val": pk_val},
-        )
         guardados += 1
 
     db_proyecto.commit()
+    registrar_log(db_global, current_user.id, "guardar_complemento",
+        f"Complemento guardado: {guardados} registros en {proyecto_slug}", proyecto.id)
 
-    registrar_log(
-        db_global,
-        current_user.id,
-        "guardar_complemento",
-        f"Complemento guardado: {guardados} registros en {proyecto_slug}",
-        proyecto.id,
-    )
+    return {"success": True, "message": f"{guardados} registros guardados en tabla complementaria."}
 
-    return {"success": True, "message": f"Guardados y sincronizados {guardados} registros."}
 
+# ---------------------------------------------------------------------------
+# GENERAR ANÁLISIS — reconstruye tabla_analisis completa con columnas explícitas
+# ---------------------------------------------------------------------------
+
+@router.post("/{proyecto_slug}/generar-analisis")
+def generar_analisis(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Trunca tabla_analisis y la reconstruye desde tabla_padron JOIN tabla_complementaria.
+    Usa INSERT con columnas explícitas (via _build_analisis_insert) para evitar
+    el error MySQL 1136 (column count mismatch) que ocurre con SELECT p.*, c.*
+    cuando tabla_padron tiene columnas que también existen en tabla_complementaria.
+    """
+    from sqlalchemy import text
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    db_proyecto = next(get_project_db(proyecto_slug))
+
+    # Registrar cuántos había antes
+    previo = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
+
+    # Construir el INSERT con columnas explícitas
+    insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"])
+
+    # Borrar y reconstruir en una sola transacción
+    db_proyecto.execute(text("DELETE FROM tabla_analisis"))
+    db_proyecto.execute(text(insert_sql))
+    db_proyecto.commit()
+
+    total = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
+
+    registrar_log(db_global, current_user.id, "generar_analisis",
+        f"tabla_analisis reconstruida en {proyecto_slug}: {total} registros", proyecto.id)
+
+    return {
+        "success": True,
+        "message": f"Análisis generado: {total} registros en tabla_analisis.",
+        "total":   total,
+        "previo":  previo,
+    }
+
+
+# ---------------------------------------------------------------------------
+# ANALISIS — GET
+# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/analisis")
 def get_analisis(
@@ -608,7 +637,6 @@ def get_analisis(
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-
     conditions = []
     params: Dict[str, Any] = {}
 
@@ -617,14 +645,12 @@ def get_analisis(
         params["viabilidad"] = viabilidad
 
     if busqueda:
-        search_cols = info["col_nombre"] + info["col_calle"] + [pk]
-        search_cols = list(dict.fromkeys(search_cols))
+        search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
         parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
         conditions.append("(" + " OR ".join(parts) + ")")
         params["busqueda"] = f"%{busqueda}%"
 
     where = " AND ".join(conditions) if conditions else "1=1"
-
     db_proyecto = next(get_project_db(proyecto_slug))
 
     total = db_proyecto.execute(
@@ -637,18 +663,15 @@ def get_analisis(
         params,
     ).fetchall()
 
-    adeudo_cols = info["col_adeudo"]
-
     result = []
     for r in rows:
         row_dict = dict(r._mapping)
         adeudo_val = 0
-        for col in adeudo_cols:
+        for col in info["col_adeudo"]:
             v = row_dict.get(col)
             if v is not None:
                 try:
-                    adeudo_val = float(v)
-                    break
+                    adeudo_val = float(v); break
                 except (TypeError, ValueError):
                     pass
         row_dict["_adeudo_display"] = adeudo_val
@@ -656,26 +679,22 @@ def get_analisis(
         for col in info["col_nombre"]:
             v = row_dict.get(col)
             if v:
-                nombre_val = str(v)
-                break
+                nombre_val = str(v); break
         row_dict["_nombre_display"] = nombre_val
         calle_val = ""
         for col in info["col_calle"]:
             v = row_dict.get(col)
             if v:
-                calle_val = str(v)
-                break
+                calle_val = str(v); break
         row_dict["_calle_display"] = calle_val
         result.append(row_dict)
 
-    return {
-        "rows":  result,
-        "total": total,
-        "page":  page,
-        "limit": limit,
-        "pk":    pk,
-    }
+    return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
 
+
+# ---------------------------------------------------------------------------
+# ACCIONES MANUALES
+# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/acciones-manuales")
 def acciones_manuales(
@@ -694,66 +713,48 @@ def acciones_manuales(
         raise HTTPException(status_code=400, detail="No se enviaron IDs.")
 
     db_proyecto = next(get_project_db(proyecto_slug))
-
     ph = {f"id{i}": v for i, v in enumerate(request.ids)}
     in_clause = ", ".join(f":id{i}" for i in range(len(request.ids)))
 
     accion = request.accion
     if accion == "viable":
         db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET viabilidad = 'viable' WHERE `{pk}` IN ({in_clause})"), ph
-        )
+            text(f"UPDATE tabla_analisis SET viabilidad = 'viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como Viables"
-
     elif accion == "no_viable":
         db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph
-        )
+            text(f"UPDATE tabla_analisis SET viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como No Viables"
-
     elif accion == "quitar_pagada":
         db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET pagada = 1, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph
-        )
+            text(f"UPDATE tabla_analisis SET pagada = 1, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como Pagados"
-
     elif accion == "quitar_nd":
         motivo = request.valor or "ND"
         ph["motivo_nd"] = motivo
         db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET nd = :motivo_nd, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph
-        )
+            text(f"UPDATE tabla_analisis SET nd = :motivo_nd, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como No Deudores ({motivo})"
-
     else:
         raise HTTPException(status_code=400, detail=f"Acción '{accion}' no reconocida.")
 
     db_proyecto.commit()
-
     registrar_log(db_global, current_user.id, f"accion_{accion}", msg, proyecto.id)
     return {"success": True, "message": msg}
 
 
+# ---------------------------------------------------------------------------
+# LIMPIEZA
+# ---------------------------------------------------------------------------
 
 _REGLAS_CALLES = [
-    (r"\bAv\.?\b",          "Avenida"),
-    (r"\bBlvd\.?\b",        "Boulevard"),
-    (r"\bBlvrd\.?\b",       "Boulevard"),
-    (r"\bProlong\.?\b",     "Prolongación"),
-    (r"\bProle\.?\b",       "Prolongación"),
-    (r"\bPriv\.?\b",        "Privada"),
-    (r"\bFracc\.?\b",       "Fraccionamiento"),
-    (r"\bCol\.?\b",         "Colonia"),
-    (r"\bMz\.?\b",          "Manzana"),
-    (r"\bLt\.?\b",          "Lote"),
-    (r"\bCda\.?\b",         "Cerrada"),
-    (r"\bClle\.?\b",        "Calle"),
-    (r"\bAndador\b",        "Andador"),
-    (r"\bCallejon\b",       "Callejón"),
-    (r"\bGpe\.?\b",         "Guadalupe"),
-    (r" {2,}",              " "),
+    (r"\bAv\.?\b","Avenida"),(r"\bBlvd\.?\b","Boulevard"),(r"\bBlvrd\.?\b","Boulevard"),
+    (r"\bProlong\.?\b","Prolongación"),(r"\bProle\.?\b","Prolongación"),(r"\bPriv\.?\b","Privada"),
+    (r"\bFracc\.?\b","Fraccionamiento"),(r"\bCol\.?\b","Colonia"),(r"\bMz\.?\b","Manzana"),
+    (r"\bLt\.?\b","Lote"),(r"\bCda\.?\b","Cerrada"),(r"\bClle\.?\b","Calle"),
+    (r"\bAndador\b","Andador"),(r"\bCallejon\b","Callejón"),(r"\bGpe\.?\b","Guadalupe"),
+    (r" {2,}"," "),
 ]
-
 _COMPILED_REGLAS = [(re.compile(pat, re.IGNORECASE), repl) for pat, repl in _REGLAS_CALLES]
 
 
@@ -772,26 +773,17 @@ def normalizar_calles(
     db_global: Session = Depends(get_global_db),
 ):
     from sqlalchemy import text
-
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    cols_calle_bd = info["col_calle"]
-    extra_cols = ["calle", "domicilio", "ubicacion", "calle_numero"]
-    all_calle_cols = list(dict.fromkeys(cols_calle_bd + extra_cols))
-
+    all_calle_cols = list(dict.fromkeys(info["col_calle"] + ["calle","domicilio","ubicacion","calle_numero"]))
     db_proyecto = next(get_project_db(proyecto_slug))
-
-    cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-    cols_existentes = {row[0] for row in cols_result}
+    cols_existentes = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
     cols_a_procesar = [c for c in all_calle_cols if c in cols_existentes]
-
     if not cols_a_procesar:
         return {"success": True, "message": "No se encontraron columnas de calle para normalizar."}
-
     sel_cols = ", ".join(f"`{c}`" for c in [pk] + cols_a_procesar)
     filas = db_proyecto.execute(text(f"SELECT {sel_cols} FROM tabla_analisis")).fetchall()
-
     actualizados = 0
     for fila in filas:
         row = dict(fila._mapping)
@@ -802,19 +794,15 @@ def normalizar_calles(
             normalizado = _aplicar_regex_calles(str(original))
             if normalizado != original:
                 cambios[col] = normalizado
-
         if cambios:
             set_parts = [f"`{k}` = :{k}" for k in cambios]
             db_proyecto.execute(
                 text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                {**cambios, "pk_val": pk_val},
-            )
+                {**cambios, "pk_val": pk_val})
             actualizados += 1
-
     db_proyecto.commit()
-
     registrar_log(db_global, current_user.id, "normalizar_calles",
-                  f"Normalizadas calles en {actualizados} filas de {proyecto_slug}", proyecto.id)
+        f"Normalizadas calles en {actualizados} filas de {proyecto_slug}", proyecto.id)
     return {"success": True, "message": f"Calles normalizadas: {actualizados} registros actualizados."}
 
 
@@ -825,21 +813,11 @@ def limpiar_espacios(
     db_global: Session = Depends(get_global_db),
 ):
     from sqlalchemy import text
-
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
-    pk = info["pk"]
-
     db_proyecto = next(get_project_db(proyecto_slug))
-
     cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-    cols_texto = [
-        row[0] for row in cols_result
-        if row[1].upper() in ("LONGTEXT", "TEXT", "MEDIUMTEXT", "VARCHAR(255)", "VARCHAR(150)", "VARCHAR(100)")
-        or "VARCHAR" in str(row[1]).upper()
-        or "TEXT" in str(row[1]).upper()
-    ]
-
+    cols_texto = [r[0] for r in cols_result if "VARCHAR" in str(r[1]).upper() or "TEXT" in str(r[1]).upper()]
     actualizados = 0
     for col in cols_texto[:20]:
         try:
@@ -852,20 +830,20 @@ def limpiar_espacios(
         except Exception:
             try:
                 result = db_proyecto.execute(text(f"""
-                    UPDATE tabla_analisis
-                    SET `{col}` = TRIM(`{col}`)
-                    WHERE `{col}` IS NOT NULL
+                    UPDATE tabla_analisis SET `{col}` = TRIM(`{col}`) WHERE `{col}` IS NOT NULL
                 """))
                 actualizados += result.rowcount
             except Exception:
                 pass
-
     db_proyecto.commit()
-
     registrar_log(db_global, current_user.id, "limpiar_espacios",
-                  f"Espacios limpiados en {proyecto_slug}: {actualizados} celdas", proyecto.id)
+        f"Espacios limpiados en {proyecto_slug}: {actualizados} celdas", proyecto.id)
     return {"success": True, "message": f"Espacios limpiados: {actualizados} celdas actualizadas."}
 
+
+# ---------------------------------------------------------------------------
+# VERSIONES
+# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/versiones")
 def get_versiones(
@@ -874,26 +852,23 @@ def get_versiones(
     db_global: Session = Depends(get_global_db),
 ):
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-
     versiones = (
         db_global.query(PadronVersion)
         .filter(PadronVersion.id_proyecto == proyecto.id)
         .order_by(PadronVersion.version.desc())
         .all()
     )
-
     return [
-        {
-            "id":              v.id,
-            "version":         v.version,
-            "total_registros": v.total_registros,
-            "archivo_nombre":  v.archivo_nombre,
-            "cargado_por":     v.cargado_por,
-            "created_at":      v.created_at.isoformat() if v.created_at else None,
-        }
+        {"id": v.id, "version": v.version, "total_registros": v.total_registros,
+         "archivo_nombre": v.archivo_nombre, "cargado_por": v.cargado_por,
+         "created_at": v.created_at.isoformat() if v.created_at else None}
         for v in versiones
     ]
 
+
+# ---------------------------------------------------------------------------
+# ESTADÍSTICAS
+# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/estadisticas")
 def get_estadisticas(
@@ -902,7 +877,6 @@ def get_estadisticas(
     db_global: Session = Depends(get_global_db),
 ):
     from sqlalchemy import text
-
     check_project_access(proyecto_slug, current_user, db_global)
     db_proyecto = next(get_project_db(proyecto_slug))
 
@@ -912,19 +886,16 @@ def get_estadisticas(
         except Exception:
             return 0
 
-    def count_viabilidad(valor: str) -> int:
+    def count_via(valor: str) -> int:
         try:
             return db_proyecto.execute(
-                text("SELECT COUNT(*) AS c FROM tabla_analisis WHERE viabilidad = :v"),
-                {"v": valor},
+                text("SELECT COUNT(*) AS c FROM tabla_analisis WHERE viabilidad = :v"), {"v": valor}
             ).first().c
         except Exception:
             return 0
 
     return {
-        "padron":    count("tabla_padron"),
-        "analisis":  count("tabla_analisis"),
-        "viable":    count_viabilidad("viable"),
-        "no_viable": count_viabilidad("no_viable"),
-        "pendiente": count_viabilidad("pendiente"),
+        "padron": count("tabla_padron"), "analisis": count("tabla_analisis"),
+        "viable": count_via("viable"), "no_viable": count_via("no_viable"),
+        "pendiente": count_via("pendiente"),
     }

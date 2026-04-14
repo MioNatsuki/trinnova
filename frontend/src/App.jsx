@@ -1,8 +1,10 @@
+// frontend/src/App.jsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/auth/Login';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
+import Proyectos from './pages/Proyectos';
 import UsuariosCRUD from './pages/usuarios/UsuariosCRUD';
 import CargarPadron from './pages/analisis/CargarPadron';
 import Complementar from './pages/analisis/Complementar';
@@ -20,7 +22,6 @@ function AppRoutes() {
   const rol = user?.rol;
   const isSuperadmin = rol === 'superadmin';
   const isAnalista   = rol === 'analista' || isSuperadmin;
-  // Auxiliar y superiores acceden a emisión; análisis solo analista+
   const canAnalisis  = isAnalista;
 
   return (
@@ -34,20 +35,20 @@ function AppRoutes() {
       }>
         <Route index element={<Dashboard />} />
 
+        {/* Proyectos — visible para todos los roles */}
+        <Route path="proyectos" element={<Proyectos />} />
+
         {/* Administración — solo superadmin */}
         {isSuperadmin && (
-          <>
-            <Route path="usuarios"  element={<UsuariosCRUD />} />
-            <Route path="proyectos" element={<div style={{ padding: 24 }}>Gestión de proyectos — próximamente</div>} />
-          </>
+          <Route path="usuarios" element={<UsuariosCRUD />} />
         )}
 
         {/* Análisis — analista y superadmin */}
         {canAnalisis && (
           <>
-            <Route path="analisis/cargar"      element={<CargarPadron />} />
+            <Route path="analisis/cargar"       element={<CargarPadron />} />
             <Route path="analisis/complementar" element={<Complementar />} />
-            <Route path="analisis/limpieza"    element={<LimpiezaAnalisis />} />
+            <Route path="analisis/limpieza"     element={<LimpiezaAnalisis />} />
           </>
         )}
 

@@ -7,6 +7,9 @@ import './Analisis.css';
 
 const LIMIT = 20;
 
+// Columnas del padrón que NO queremos mostrar en la tabla (pk se muestra aparte, ids internos, etc.)
+const COLS_OCULTAS = new Set(['id_comp']);
+
 export default function Complementar() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
 
@@ -21,6 +24,9 @@ export default function Complementar() {
   const [message, setMessage]   = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
 
+  // Columnas del padrón derivadas de los datos recibidos (excluye editables y ocultas)
+  const [columnasPadron, setColumnasPadron] = useState([]);
+
   const totalPages = Math.max(1, Math.ceil(data.total / LIMIT));
 
   const loadData = useCallback(async () => {
@@ -33,6 +39,17 @@ export default function Complementar() {
       setData(res.data);
       setEditedRows({});
       setPendingCount(0);
+
+      // Derivar columnas del padrón a partir de la primera fila
+      if (res.data.rows.length > 0 && res.data.pk) {
+        const editables = new Set(res.data.columnas_editables);
+        const pk = res.data.pk;
+        const todasCols = Object.keys(res.data.rows[0]);
+        const padronCols = todasCols.filter(
+          col => col !== pk && !editables.has(col) && !COLS_OCULTAS.has(col)
+        );
+        setColumnasPadron(padronCols);
+      }
     } catch (err) {
       showMessage('error', err.response?.data?.detail || 'Error cargando datos.');
     } finally {
@@ -56,7 +73,6 @@ export default function Complementar() {
         ...prev,
         [pkValue]: { ...(prev[pkValue] || {}), [field]: value },
       };
-      // Contar filas con cambios
       setPendingCount(Object.keys(updated).length);
       return updated;
     });
@@ -88,7 +104,7 @@ export default function Complementar() {
     setPage(1);
   };
 
-  const renderCell = (row, col) => {
+  const renderEditableCell = (row, col) => {
     const pkValue = row[data.pk];
     const currentValue = editedRows[pkValue]?.[col] ?? (row[col] ?? '');
     const isDirty = editedRows[pkValue]?.[col] !== undefined;
@@ -119,6 +135,8 @@ export default function Complementar() {
       </div>
     );
   }
+
+  const totalCols = 1 + columnasPadron.length + data.columnas_editables.length; // pk + padrón + editables
 
   return (
     <div className="analisis-container">
@@ -165,20 +183,65 @@ export default function Complementar() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ minWidth: 80 }}>ID / Clave</th>
-                  <th style={{ minWidth: 160 }}>Nombre / Propietario</th>
-                  <th style={{ minWidth: 180 }}>Dirección</th>
-                  {data.columnas_editables.map(col => (
-                    <th key={col} style={{ minWidth: 130 }}>
+                  {/* PK */}
+                  <th style={{ minWidth: 80, position: 'sticky', left: 0, background: '#f8f9fa', zIndex: 2 }}>
+                    {data.pk ? data.pk.replace(/_/g, ' ') : 'ID'}
+                  </th>
+
+                  {/* Columnas del padrón (solo lectura) */}
+                  {columnasPadron.map(col => (
+                    <th key={col} style={{ minWidth: 120 }}>
                       {col.replace(/_/g, ' ')}
                     </th>
                   ))}
+
+                  {/* Divisor visual entre padrón y complementaria */}
+                  {data.columnas_editables.length > 0 && (
+                    <th
+                      colSpan={data.columnas_editables.length}
+                      style={{
+                        background: '#e8f0f9',
+                        color: '#2b5fa8',
+                        textAlign: 'center',
+                        fontSize: 10,
+                        letterSpacing: 1,
+                        borderLeft: '2px solid #4a7fb5',
+                      }}
+                    >
+                      ✏️ COMPLEMENTARIA (editable)
+                    </th>
+                  )}
                 </tr>
+
+                {/* Segunda fila de headers para columnas editables */}
+                {data.columnas_editables.length > 0 && (
+                  <tr>
+                    {/* espacio pk + padrón */}
+                    <th style={{ background: '#f8f9fa', position: 'sticky', left: 0, zIndex: 2 }} />
+                    {columnasPadron.map(col => (
+                      <th key={col} style={{ background: '#f8f9fa', padding: '2px 14px' }} />
+                    ))}
+                    {data.columnas_editables.map(col => (
+                      <th
+                        key={col}
+                        style={{
+                          minWidth: 130,
+                          background: '#eef3f9',
+                          color: '#2b5fa8',
+                          borderLeft: col === data.columnas_editables[0] ? '2px solid #4a7fb5' : undefined,
+                        }}
+                      >
+                        {col.replace(/_/g, ' ')}
+                      </th>
+                    ))}
+                  </tr>
+                )}
               </thead>
+
               <tbody>
                 {data.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={3 + data.columnas_editables.length}
+                    <td colSpan={totalCols}
                         style={{ textAlign: 'center', padding: 40, color: 'var(--clr-muted)' }}>
                       {search ? 'Sin resultados para la búsqueda.' : 'No hay registros en el padrón.'}
                     </td>
@@ -189,17 +252,26 @@ export default function Complementar() {
                     const isDirtyRow = !!editedRows[pkVal];
                     return (
                       <tr key={pkVal} className={isDirtyRow ? 'row-dirty' : ''}>
-                        <td className="pk-cell">{safeStr(pkVal)}</td>
-                        <td>{safeStr(
-                          row.propietario || row.nombre || row.nombre_razon_social ||
-                          row.propietariotitular_n || ''
-                        )}</td>
-                        <td>{safeStr(
-                          row.calle || row.domicilio || row.ubicacion ||
-                          row.calle_numero || row.afiliado_calle || ''
-                        )}</td>
-                        {data.columnas_editables.map(col => (
-                          <td key={col}>{renderCell(row, col)}</td>
+                        {/* PK */}
+                        <td className="pk-cell" style={{ position: 'sticky', left: 0, background: isDirtyRow ? '#fffbea' : '#fff', zIndex: 1 }}>
+                          {safeStr(pkVal)}
+                        </td>
+
+                        {/* Columnas padrón (solo lectura) */}
+                        {columnasPadron.map(col => (
+                          <td key={col} style={{ whiteSpace: 'nowrap', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }} title={safeStr(row[col])}>
+                            {safeStr(row[col])}
+                          </td>
+                        ))}
+
+                        {/* Columnas complementaria (editables) */}
+                        {data.columnas_editables.map((col, i) => (
+                          <td
+                            key={col}
+                            style={{ borderLeft: i === 0 ? '2px solid #4a7fb5' : undefined }}
+                          >
+                            {renderEditableCell(row, col)}
+                          </td>
                         ))}
                       </tr>
                     );
@@ -225,6 +297,7 @@ export default function Complementar() {
         .row-dirty { background: #fffbea !important; }
         .editable-cell--dirty { border-color: var(--clr-orange) !important; background: #fffbea; }
         .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .data-table th { white-space: nowrap; }
       `}</style>
     </div>
   );

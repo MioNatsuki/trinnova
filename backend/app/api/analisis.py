@@ -30,9 +30,7 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------------
 # Schemas de respuesta / request
-# ---------------------------------------------------------------------------
 
 class CargaPadronResponse(BaseModel):
     success: bool
@@ -56,9 +54,7 @@ class AccionManualRequest(BaseModel):
     valor: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
 # Metadata por proyecto: pk, columnas de padrón y complementaria
-# ---------------------------------------------------------------------------
 
 _INFO: Dict[str, Dict] = {
     "apa_tlajomulco": {
@@ -160,23 +156,50 @@ _INFO: Dict[str, Dict] = {
             "garantia_colonia","garantia_calles_cruces","garantia_poblacion",
             "garantia_municipio",
         ],
-        "columnas_complementaria": ["num_convenio","estatus_prestamo","juzgado","expediente"],
+        "columnas_complementaria": [
+            "num_convenio","fecha_convenio","estatus_prestamo","estatus_captura",
+            "demanda","juzgado","expediente","estatus_despacho","juicio_caduca",
+            "afiliado_coordenadas","lat","lon","fecha_asignacion",
+            "id_zona_afiliado","id_zona_aval","id_zona_garantia",
+        ],
     },
 }
 
 # Alias de columnas: nombre_en_csv -> nombre_en_bd (para cada proyecto)
 _COL_ALIAS: Dict[str, Dict[str, str]] = {
     "pensiones": {
-        "subestatus":         "sub_estatus",
-        "alta":               "fecha_alta",
-        "afiliado_cruza1":    "afiliado_cruza",
-        "afiliado_cruza2":    "afiliado_cruza_2",
-        "aval":               "aval_nombre",
-        "aval_cruza1":        "aval_cruza",
-        "aval_cruza2":        "aval_cruza_2",
+        "subestatus":            "sub_estatus",
+        "alta":                  "fecha_alta",
+        "afiliado_cruza1":       "afiliado_cruza",
+        "afiliado_cruza2":       "afiliado_cruza_2",
+        "aval":                  "aval_nombre",
+        "aval_cruza1":           "aval_cruza",
+        "aval_cruza2":           "aval_cruza_2",
         "garantia_calles_cruza": "garantia_calles_cruces",
     }
 }
+
+_DATE_COLS: Dict[str, List[str]] = {
+    "pensiones": [
+        "ultimo_abono", "fecha_alta", "ultima_aportacion",
+        "fecha_convenio", "fecha_asignacion",
+    ],
+    "apa_tlajomulco": ["fecha_lectura"],
+    "licencias_gdl":  ["fecemi"],
+    "predial_gdl":    [],
+    "predial_tlajomulco": [],
+    "estado": ["fecha_recepcion", "fecha_documento_determinante", "fecha_notificacion"],
+}
+
+# Formatos de fecha que puede traer el CSV (se prueban en orden)
+_DATE_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y",
+    "%m/%d/%Y",
+    "%d-%m-%Y",
+]
 
 
 def _info(slug: str) -> Dict:
@@ -193,7 +216,7 @@ def _normalizar_col(nombre: str) -> str:
 
 def _mapear_columnas(slug: str, df_cols: List[str]) -> Dict[str, str]:
     """
-    Devuelve {col_csv_normalizada: col_bd} para las columnas reconocidas.
+    Devuelve {col_csv: col_bd} para las columnas reconocidas.
     Usa coincidencia exacta primero, luego alias por proyecto, luego parcial.
     """
     info = _info(slug)
@@ -233,8 +256,27 @@ def _siguiente_version(db_global: Session, proyecto_id: int) -> int:
     return (ultima.version + 1) if ultima else 1
 
 
-def _safe_value(val: Any) -> Any:
-    """Convierte NaN, NaT y Timestamp a tipos Python seguros para SQLAlchemy."""
+def _parse_fecha(val: Any) -> Any:
+    """Intenta parsear un string a datetime probando varios formatos."""
+    if not isinstance(val, str):
+        return None
+    val = val.strip()
+    if not val:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(val, fmt)
+        except ValueError:
+            continue
+    return None  # no se pudo parsear → se guarda NULL
+
+
+def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
+    """
+    Convierte NaN, NaT y Timestamp a tipos Python seguros para SQLAlchemy.
+    FIX: Si la columna es de tipo fecha y el valor es un string, intenta
+    parsearlo a datetime en lugar de enviarlo como texto crudo.
+    """
     if val is None:
         return None
     try:
@@ -244,12 +286,31 @@ def _safe_value(val: Any) -> Any:
         pass
     if isinstance(val, pd.Timestamp):
         return val.to_pydatetime()
+
+    # FIX — parseo de fechas en strings para columnas fecha conocidas
+    date_cols = _DATE_COLS.get(slug, [])
+    if isinstance(val, str) and col_name in date_cols:
+        parsed = _parse_fecha(val)
+        return parsed  # puede ser datetime o None si no se reconoció
+
     return val
 
+# Helper: construir SELECT para complementar evitando duplicar la PK
 
-# ---------------------------------------------------------------------------
+def _build_complementar_select(pk: str, cols_complementaria: List[str]) -> str:
+    """
+    Genera: SELECT p.*, c.col1, c.col2, ...
+    Se omite c.`pk` y c.`id_comp` para evitar nombres duplicados con p.*
+    """
+    cols_excluir = {pk, "id_comp"}
+    cols_c = [col for col in cols_complementaria if col not in cols_excluir]
+    if not cols_c:
+        return "SELECT p.*"
+    alias_str = ", ".join(f"c.`{col}`" for col in cols_c)
+    return f"SELECT p.*, {alias_str}"
+
+
 # CARGAR PADRÓN
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/cargar-padron", response_model=CargaPadronResponse)
 async def cargar_padron(
@@ -272,7 +333,6 @@ async def cargar_padron(
     contents = await file.read()
     try:
         if file.filename.lower().endswith(".csv"):
-            # Detectar separador y encoding
             try:
                 df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", sep=None, engine="python")
             except UnicodeDecodeError:
@@ -285,18 +345,13 @@ async def cargar_padron(
     if df.empty:
         raise HTTPException(status_code=400, detail="El archivo está vacío.")
 
-    # Normalizar nombres de columna del CSV (quitar espacios extras, sin lowercase aún para display)
     df.columns = [c.strip() for c in df.columns]
     columnas_csv = list(df.columns)
 
-    # Mapear CSV -> BD
     mapeo = _mapear_columnas(proyecto_slug, columnas_csv)
-    # Columnas de BD que se van a insertar
     columnas_bd_detectadas = list(set(mapeo.values()))
 
-    # Renombrar el DataFrame según el mapeo (solo columnas mapeadas)
     df_mapped = df[[c for c in df.columns if c in mapeo]].rename(columns=mapeo)
-    # Eliminar columnas duplicadas si el mapeo produce dos CSV → misma BD col
     df_mapped = df_mapped.loc[:, ~df_mapped.columns.duplicated()]
 
     if pk not in df_mapped.columns:
@@ -314,17 +369,16 @@ async def cargar_padron(
 
     for idx, registro in enumerate(registros):
         try:
-            # Limpiar valores
+            # Limpiar valores 
             limpio: Dict[str, Any] = {}
             for k, v in registro.items():
-                limpio[k] = _safe_value(v)
+                limpio[k] = _safe_value(v, col_name=k, slug=proyecto_slug)
 
             pk_val = limpio.get(pk)
             if pk_val is None:
                 errores.append(f"Fila {idx + 2}: sin valor en columna '{pk}', se omite.")
                 continue
 
-            # Convertir pk al tipo correcto
             if info["pk_type"] == "int":
                 try:
                     pk_val = int(pk_val)
@@ -333,7 +387,6 @@ async def cargar_padron(
                     errores.append(f"Fila {idx + 2}: '{pk}' = '{pk_val}' no es entero.")
                     continue
 
-            # UPSERT manual
             existe = db_proyecto.execute(
                 text(f"SELECT 1 FROM tabla_padron WHERE `{pk}` = :pk_val LIMIT 1"),
                 {"pk_val": pk_val},
@@ -348,8 +401,8 @@ async def cargar_padron(
                     )
                     actualizados += 1
             else:
-                cols_str  = ", ".join(f"`{k}`" for k in limpio)
-                vals_str  = ", ".join(f":{k}" for k in limpio)
+                cols_str = ", ".join(f"`{k}`" for k in limpio)
+                vals_str = ", ".join(f":{k}" for k in limpio)
                 db_proyecto.execute(
                     text(f"INSERT INTO tabla_padron ({cols_str}) VALUES ({vals_str})"),
                     limpio,
@@ -367,7 +420,6 @@ async def cargar_padron(
 
     db_proyecto.commit()
 
-    # --- Versionado ---
     version_id = None
     total = insertados + actualizados
     if total > 0:
@@ -391,7 +443,6 @@ async def cargar_padron(
         proyecto.id,
     )
 
-    # Preview — primeras 5 filas del DataFrame mapeado (solo cols mapeadas)
     preview_cols = list(df_mapped.columns[:10])
     preview = [
         {k: str(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else ""
@@ -411,10 +462,6 @@ async def cargar_padron(
     )
 
 
-# ---------------------------------------------------------------------------
-# COMPLEMENTAR — GET
-# ---------------------------------------------------------------------------
-
 @router.get("/{proyecto_slug}/complementar")
 def get_complementar(
     proyecto_slug: str,
@@ -430,9 +477,8 @@ def get_complementar(
     info = _info(proyecto_slug)
     pk = info["pk"]
 
-    # Columnas de texto en las que buscar (las que existen en cada proyecto)
     search_cols = info["col_nombre"] + info["col_calle"] + [pk]
-    search_cols = list(dict.fromkeys(search_cols))  # deduplica manteniendo orden
+    search_cols = list(dict.fromkeys(search_cols))
 
     search_cond = ""
     params: Dict[str, Any] = {}
@@ -450,9 +496,12 @@ def get_complementar(
     total = total_row.total if total_row else 0
 
     offset = (page - 1) * limit
+
+    select_clause = _build_complementar_select(pk, info["columnas_complementaria"])
+
     rows = db_proyecto.execute(
         text(f"""
-            SELECT p.*, c.*
+            {select_clause}
             FROM tabla_padron p
             LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
             WHERE 1=1 {search_cond}
@@ -465,18 +514,13 @@ def get_complementar(
     result = [dict(r._mapping) for r in rows]
 
     return {
-        "rows":              result,
+        "rows":               result,
         "columnas_editables": info["columnas_complementaria"],
-        "total":             total,
-        "page":              page,
-        "limit":             limit,
-        "pk":                pk,
+        "total":              total,
+        "page":               page,
+        "limit":              limit,
+        "pk":                 pk,
     }
-
-
-# ---------------------------------------------------------------------------
-# COMPLEMENTAR — POST (guarda + reconstruye tabla_analisis)
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/guardar-complemento")
 def guardar_complemento(
@@ -498,7 +542,6 @@ def guardar_complemento(
         pk_val = fila.pk_value
         campos = {k: v for k, v in fila.campos_complementarios.items() if v is not None and v != ""}
 
-        # UPSERT en tabla_complementaria
         existe = db_proyecto.execute(
             text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
             {"pk_val": pk_val},
@@ -520,7 +563,7 @@ def guardar_complemento(
                 all_fields,
             )
 
-        # Reconstruir tabla_analisis para esta fila: DELETE + INSERT SELECT JOIN
+        # Reconstruir tabla_analisis para esta fila
         db_proyecto.execute(
             text(f"DELETE FROM tabla_analisis WHERE `{pk}` = :pk_val"),
             {"pk_val": pk_val},
@@ -549,10 +592,6 @@ def guardar_complemento(
 
     return {"success": True, "message": f"Guardados y sincronizados {guardados} registros."}
 
-
-# ---------------------------------------------------------------------------
-# ANALISIS — GET (tabla_analisis con filtros)
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/analisis")
 def get_analisis(
@@ -598,13 +637,11 @@ def get_analisis(
         params,
     ).fetchall()
 
-    # Campos de adeudo según proyecto
     adeudo_cols = info["col_adeudo"]
 
     result = []
     for r in rows:
         row_dict = dict(r._mapping)
-        # Campo unificado adeudo_display para la UI
         adeudo_val = 0
         for col in adeudo_cols:
             v = row_dict.get(col)
@@ -615,7 +652,6 @@ def get_analisis(
                 except (TypeError, ValueError):
                     pass
         row_dict["_adeudo_display"] = adeudo_val
-        # Campo unificado nombre
         nombre_val = ""
         for col in info["col_nombre"]:
             v = row_dict.get(col)
@@ -623,7 +659,6 @@ def get_analisis(
                 nombre_val = str(v)
                 break
         row_dict["_nombre_display"] = nombre_val
-        # Campo unificado calle
         calle_val = ""
         for col in info["col_calle"]:
             v = row_dict.get(col)
@@ -641,10 +676,6 @@ def get_analisis(
         "pk":    pk,
     }
 
-
-# ---------------------------------------------------------------------------
-# ACCIONES MANUALES (viable / no_viable / quitar_pagada / quitar_nd)
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/acciones-manuales")
 def acciones_manuales(
@@ -664,7 +695,6 @@ def acciones_manuales(
 
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Construir IN clause con parámetros nombrados
     ph = {f"id{i}": v for i, v in enumerate(request.ids)}
     in_clause = ", ".join(f":id{i}" for i in range(len(request.ids)))
 
@@ -704,9 +734,6 @@ def acciones_manuales(
     return {"success": True, "message": msg}
 
 
-# ---------------------------------------------------------------------------
-# LIMPIEZA — Normalizar calles (Python regex, no MySQL REPLACE con regex)
-# ---------------------------------------------------------------------------
 
 _REGLAS_CALLES = [
     (r"\bAv\.?\b",          "Avenida"),
@@ -723,9 +750,7 @@ _REGLAS_CALLES = [
     (r"\bClle\.?\b",        "Calle"),
     (r"\bAndador\b",        "Andador"),
     (r"\bCallejon\b",       "Callejón"),
-    # Abreviaturas de Guadalupe
     (r"\bGpe\.?\b",         "Guadalupe"),
-    # Dobles espacios
     (r" {2,}",              " "),
 ]
 
@@ -751,24 +776,19 @@ def normalizar_calles(
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    # Columnas de calle en tabla_analisis para este proyecto
     cols_calle_bd = info["col_calle"]
-    # También intentamos columnas genéricas si existen
     extra_cols = ["calle", "domicilio", "ubicacion", "calle_numero"]
     all_calle_cols = list(dict.fromkeys(cols_calle_bd + extra_cols))
 
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Obtener columnas reales de tabla_analisis para no usar cols inexistentes
     cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
     cols_existentes = {row[0] for row in cols_result}
-
     cols_a_procesar = [c for c in all_calle_cols if c in cols_existentes]
 
     if not cols_a_procesar:
         return {"success": True, "message": "No se encontraron columnas de calle para normalizar."}
 
-    # Traer todos los registros (pk + cols de calle)
     sel_cols = ", ".join(f"`{c}`" for c in [pk] + cols_a_procesar)
     filas = db_proyecto.execute(text(f"SELECT {sel_cols} FROM tabla_analisis")).fetchall()
 
@@ -798,10 +818,6 @@ def normalizar_calles(
     return {"success": True, "message": f"Calles normalizadas: {actualizados} registros actualizados."}
 
 
-# ---------------------------------------------------------------------------
-# LIMPIEZA — Limpiar espacios dobles y trim
-# ---------------------------------------------------------------------------
-
 @router.post("/{proyecto_slug}/limpieza/limpiar-espacios")
 def limpiar_espacios(
     proyecto_slug: str,
@@ -816,7 +832,6 @@ def limpiar_espacios(
 
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Columnas de texto candidatas
     cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
     cols_texto = [
         row[0] for row in cols_result
@@ -826,9 +841,7 @@ def limpiar_espacios(
     ]
 
     actualizados = 0
-    # Usamos MySQL TRIM + REGEXP_REPLACE (disponible desde MySQL 8)
-    # Si el servidor es MySQL 5.7, caemos al fallback Python
-    for col in cols_texto[:20]:  # límite razonable
+    for col in cols_texto[:20]:
         try:
             result = db_proyecto.execute(text(f"""
                 UPDATE tabla_analisis
@@ -837,7 +850,6 @@ def limpiar_espacios(
             """))
             actualizados += result.rowcount
         except Exception:
-            # Fallback para MySQL 5.7 (sin REGEXP_REPLACE)
             try:
                 result = db_proyecto.execute(text(f"""
                     UPDATE tabla_analisis
@@ -854,10 +866,6 @@ def limpiar_espacios(
                   f"Espacios limpiados en {proyecto_slug}: {actualizados} celdas", proyecto.id)
     return {"success": True, "message": f"Espacios limpiados: {actualizados} celdas actualizadas."}
 
-
-# ---------------------------------------------------------------------------
-# VERSIONES DEL PADRÓN
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/versiones")
 def get_versiones(
@@ -887,10 +895,6 @@ def get_versiones(
     ]
 
 
-# ---------------------------------------------------------------------------
-# ESTADÍSTICAS RÁPIDAS para el módulo de análisis
-# ---------------------------------------------------------------------------
-
 @router.get("/{proyecto_slug}/estadisticas")
 def get_estadisticas(
     proyecto_slug: str,
@@ -918,9 +922,9 @@ def get_estadisticas(
             return 0
 
     return {
-        "padron":     count("tabla_padron"),
-        "analisis":   count("tabla_analisis"),
-        "viable":     count_viabilidad("viable"),
-        "no_viable":  count_viabilidad("no_viable"),
-        "pendiente":  count_viabilidad("pendiente"),
+        "padron":    count("tabla_padron"),
+        "analisis":  count("tabla_analisis"),
+        "viable":    count_viabilidad("viable"),
+        "no_viable": count_viabilidad("no_viable"),
+        "pendiente": count_viabilidad("pendiente"),
     }

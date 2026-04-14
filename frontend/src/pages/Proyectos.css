@@ -1,0 +1,189 @@
+/* frontend/src/pages/Proyectos.css */
+
+.proyectos-page {
+  width: 100%;
+}
+
+/* ── Header ── */
+.proyectos-header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.proyectos-header h1 {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--clr-text);
+  margin: 0;
+}
+
+.proyectos-count {
+  font-size: 13px;
+  color: var(--clr-muted);
+}
+
+/* ── Grid ── */
+.proyectos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+}
+
+/* ── Tarjeta ── */
+.proyecto-card {
+  background: var(--card-bg, var(--clr-white));
+  border: 1px solid var(--card-border, var(--clr-border));
+  border-radius: var(--radius);
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow .2s, transform .15s;
+}
+
+.proyecto-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* Borde izquierdo de acento */
+.proyecto-card::before {
+  content: '';
+  display: block;
+  height: 4px;
+  background: var(--card-accent, var(--clr-accent));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+/* ── Cabecera de tarjeta ── */
+.proyecto-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--card-border, var(--clr-border));
+}
+
+.proyecto-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--card-accent, var(--clr-accent));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: .9;
+}
+
+.proyecto-card-nombre {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--clr-text);
+  margin: 0 0 3px;
+  line-height: 1.2;
+}
+
+.proyecto-card-slug {
+  font-size: 11px;
+  color: var(--clr-muted);
+  font-family: monospace;
+  letter-spacing: .3px;
+}
+
+/* ── Secciones dentro de la tarjeta ── */
+.proyecto-card-sections {
+  padding: 14px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.proyecto-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.proyecto-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--clr-muted);
+}
+
+.proyecto-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+/* ── Botones de acción ── */
+.proyecto-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--card-border, var(--clr-border));
+  border-radius: 7px;
+  background: var(--clr-white);
+  font-size: 12.5px;
+  font-family: 'Outfit', sans-serif;
+  color: var(--clr-text);
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.proyecto-action-btn:hover {
+  background: var(--card-bg, var(--clr-accent-lt));
+  border-color: var(--card-accent, var(--clr-accent));
+  color: var(--card-accent, var(--clr-accent));
+}
+
+.proyecto-action-btn svg {
+  flex-shrink: 0;
+  opacity: .8;
+}
+
+/* ── Estado vacío ── */
+.proyectos-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+  color: var(--clr-muted);
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+}
+
+.proyectos-empty-icon {
+  margin-bottom: 16px;
+  opacity: .3;
+}
+
+.proyectos-empty p {
+  font-size: 16px;
+  color: var(--clr-text);
+  margin-bottom: 6px;
+}
+
+.proyectos-empty span {
+  font-size: 13px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 700px) {
+  .proyectos-grid {
+    grid-template-columns: 1fr;
+  }
+}

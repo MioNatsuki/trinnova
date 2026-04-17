@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
@@ -37,6 +38,22 @@ const SItem = ({ to, iconKey, label, sub = false }) => (
   </NavLink>
 );
 
+const Section = ({ label, children }) => {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="sidebar-section">
+      <div
+        className="sidebar-section-label"
+        onClick={() => setOpen(!open)}
+        style={{ cursor: 'pointer' }}
+      >
+        {label} {open ? '▾' : '▸'}
+      </div>
+      {open && <div className="sidebar-sub-items">{children}</div>}
+    </div>
+  );
+};
+
 export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -44,7 +61,6 @@ export default function Sidebar() {
 
   const isSuperadmin = rol === 'superadmin';
   const isAnalista   = rol === 'analista' || isSuperadmin;
-  // Auxiliar también ve emisión
   const canEmision   = true;
 
   const handleLogout = async () => {
@@ -58,52 +74,48 @@ export default function Sidebar() {
       <SItem to="/" iconKey="home" label="Inicio" />
 
       {/* PROYECTOS */}
-      <div className="sidebar-section-label">Proyectos</div>
-      <SItem to="/proyectos" iconKey="folder" label="Proyectos" />
+      <Section label="Proyectos">
+        <SItem to="/proyectos" iconKey="folder" label="Proyectos" />
+      </Section>
 
-      {/* ANÁLISIS — analista y superadmin */}
+      {/* ANÁLISIS */}
       {isAnalista && (
-        <>
-          <div className="sidebar-section-label">Análisis</div>
+        <Section label="Análisis">
           <SItem to="/analisis/cargar"       iconKey="upload"   label="Cargar Padrón"       sub />
           <SItem to="/analisis/complementar" iconKey="edit"     label="Complementar"        sub />
           <SItem to="/analisis/limpieza"     iconKey="broom"    label="Limpieza y análisis" sub />
-        </>
+        </Section>
       )}
 
-      {/* PLANTILLAS — analista y superadmin */}
+      {/* PLANTILLAS */}
       {isAnalista && (
-        <>
-          <div className="sidebar-section-label">Plantillas</div>
+        <Section label="Plantillas">
           <SItem to="/plantillas"       iconKey="template" label="Dashboard Plantillas" sub />
           <SItem to="/plantillas/crear" iconKey="plus"     label="Subir / Crear"        sub />
-        </>
+        </Section>
       )}
 
-      {/* EMISIÓN — todos los roles */}
+      {/* EMISIÓN */}
       {canEmision && (
-        <>
-          <div className="sidebar-section-label">Emisión</div>
+        <Section label="Emisión">
           <SItem to="/emision/preparacion" iconKey="settings" label="Preparación" sub />
           <SItem to="/emision/emitir"      iconKey="print"    label="Emisión"     sub />
-        </>
+        </Section>
       )}
 
-      {/* CATÁLOGOS — superadmin */}
+      {/* CATÁLOGOS */}
       {isSuperadmin && (
-        <>
-          <div className="sidebar-section-label">Catálogos</div>
+        <Section label="Catálogos">
           <SItem to="/catalogo/documentos" iconKey="catalog" label="Catálogo Documentos" sub />
           <SItem to="/catalogo/zonas"      iconKey="map"     label="Catálogo Zonas"      sub />
-        </>
+        </Section>
       )}
 
-      {/* ADMINISTRACIÓN — superadmin */}
+      {/* ADMINISTRACIÓN */}
       {isSuperadmin && (
-        <>
-          <div className="sidebar-section-label">Administración</div>
+        <Section label="Administración">
           <SItem to="/usuarios" iconKey="users" label="Usuarios" sub />
-        </>
+        </Section>
       )}
 
       {/* FOOTER */}

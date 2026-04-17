@@ -1,16 +1,17 @@
-# backend/app/api/analisis.py
+# backend/app/api/analisis.py  — Fase 4
 """
-Módulo de Análisis — Fase 3
-  POST  /{slug}/cargar-padron
-  GET   /{slug}/complementar
-  POST  /{slug}/guardar-complemento    — SOLO tabla_complementaria
-  POST  /{slug}/generar-analisis       — reconstruye tabla_analisis (padron JOIN complementaria)
-  GET   /{slug}/analisis
+Nuevos endpoints en esta versión:
+  GET   /{slug}/programas               — lista programas del proyecto
+  POST  /{slug}/cargar-viabilidad-csv   — carga masiva viabilidad/pagos desde CSV
+  POST  /{slug}/guardar-complemento     — SOLO tabla_complementaria (sin tocar analisis)
+  POST  /{slug}/generar-analisis        — reconstruye tabla_analisis con INSERT explícito
+  GET   /{slug}/analisis                — ahora filtra también por programa
+  GET   /{slug}/complementar            — ahora filtra también por programa
+  GET   /{slug}/estadisticas
+  GET   /{slug}/versiones
   POST  /{slug}/acciones-manuales
   POST  /{slug}/limpieza/normalizar-calles
   POST  /{slug}/limpieza/limpiar-espacios
-  GET   /{slug}/versiones
-  GET   /{slug}/estadisticas
 """
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -24,7 +25,7 @@ from datetime import datetime
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
-from app.models.global_models import Usuario, PadronVersion
+from app.models.global_models import Usuario, PadronVersion, Programa
 from app.db.router import get_project_db
 from app.services.log_service import registrar_log
 from pydantic import BaseModel
@@ -57,6 +58,13 @@ class AccionManualRequest(BaseModel):
     valor: Optional[str] = None
 
 
+class CargaViabilidadCSVResponse(BaseModel):
+    success: bool
+    message: str
+    procesados: int = 0
+    errores: List[str] = []
+
+
 # ---------------------------------------------------------------------------
 # Metadata por proyecto
 # ---------------------------------------------------------------------------
@@ -68,6 +76,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["propietario"],
         "col_calle":  ["calle"],
         "col_adeudo": ["saldo"],
+        "col_ext":    ["exterior"],
+        "col_int":    ["interior"],
+        "col_tel":    [],
+        "col_gastos": ["gastos"],
+        "col_fechas": ["fecha_lectura","periodo_desde","periodo_hasta"],
         "columnas_padron": [
             "despacho","clave_APA","propietario","calle","exterior","interior",
             "poblacion","localidad","tipo_servicio","tipo_tarifa","adeudo_agua",
@@ -85,6 +98,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["domicilio"],
         "col_calle":  ["domicilio"],
         "col_adeudo": ["saldo"],
+        "col_ext":    ["no_ext","ubic_no_ext","no_ext_3"],
+        "col_int":    ["no_int","ubic_no_int","no_int_3"],
+        "col_tel":    [],
+        "col_gastos": ["total_gastos","gastos_requerimiento"],
+        "col_fechas": [],
         "columnas_padron": [
             "control_req","axo_req","folio_req","cve_cuenta","cuenta","cve_catastral",
             "domicilio","no_ext","no_int","estado","municipio","poblacion","ubicacion",
@@ -102,6 +120,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["propietario"],
         "col_calle":  ["ubicacion"],
         "col_adeudo": ["total"],
+        "col_ext":    ["numext_ubic"],
+        "col_int":    ["numint_ubic"],
+        "col_tel":    [],
+        "col_gastos": ["gastos"],
+        "col_fechas": ["fecemi"],
         "columnas_padron": [
             "cvereq","axoreq","folioreq","cveproceso","fecemi","recaud","id_licencia",
             "licencia","propietario","ubicacion","numext_ubic","letraext_ubic",
@@ -118,6 +141,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["propietariotitular_n"],
         "col_calle":  ["calle"],
         "col_adeudo": ["saldo2025"],
+        "col_ext":    ["num_exterior","numero_exterior"],
+        "col_int":    ["num_interior","numero_interior"],
+        "col_tel":    [],
+        "col_gastos": ["gastos","incp"],
+        "col_fechas": [],
         "columnas_padron": [
             "despacho","cuenta_n","estatus_n","clavecatastral","subpredio","infonavit",
             "propietariotitular_n","calle","num_exterior","num_interior","colonia",
@@ -133,6 +161,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["nombre_razon_social"],
         "col_calle":  ["calle_numero"],
         "col_adeudo": ["importe_historico_determinado"],
+        "col_ext":    [],
+        "col_int":    [],
+        "col_tel":    [],
+        "col_gastos": [],
+        "col_fechas": ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion"],
         "columnas_padron": [
             "id","rfc","credito","nombre_razon_social","calle_numero","colonia","cp",
             "municipio","coordinadora","area_asignacion","autoridad_determinante",
@@ -148,8 +181,11 @@ _INFO: Dict[str, Dict] = {
         "col_nombre": ["nombre"],
         "col_calle":  ["afiliado_calle"],
         "col_adeudo": ["adeudo"],
-        # Solo columnas propias de tabla_padron (no incluye los campos que ya
-        # existen en tabla_complementaria para evitar duplicidad en el mapeo CSV)
+        "col_ext":    ["afiliado_exterior","aval_exterior"],
+        "col_int":    ["afiliado_interior","aval_interior"],
+        "col_tel":    ["afiliado_telefono","afiliado_celular","aval_telefono","aval_celular","afiliado_lada","aval_lada"],
+        "col_gastos": [],
+        "col_fechas": ["ultimo_abono","fecha_alta","ultima_aportacion"],
         "columnas_padron": [
             "afiliado","nombre","rfc","tipo_prestamo","prestamo","saldo_por_vencer",
             "adeudo","liquidacion","moratorio","ultimo_abono","sub_estatus","estatus",
@@ -163,7 +199,6 @@ _INFO: Dict[str, Dict] = {
             "garantia_colonia","garantia_calles_cruces","garantia_poblacion",
             "garantia_municipio",
         ],
-        # Todas las columnas de tabla_complementaria (sin id_comp ni pk)
         "columnas_complementaria": [
             "num_convenio","fecha_convenio","estatus_prestamo","estatus_captura",
             "demanda","juzgado","expediente","estatus_despacho","juicio_caduca",
@@ -274,30 +309,17 @@ def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
 
 
 def _get_tabla_cols(db_session, tabla: str) -> List[str]:
-    """Devuelve las columnas reales de una tabla leyéndolas de la BD."""
     from sqlalchemy import text
     rows = db_session.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
     return [r[0] for r in rows]
 
 
 def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) -> str:
-    """
-    Construye INSERT INTO tabla_analisis (...cols...) SELECT p.col, c.col, ...
-    con columnas explícitas para evitar error 1136 (column count mismatch).
-
-    Lógica de resolución por columna de tabla_analisis:
-      - 'viabilidad'  → literal 'pendiente' (columna de control, no viene del JOIN)
-      - en cols_complementaria Y existe en tabla_complementaria → c.`col`
-      - existe en tabla_padron → p.`col`
-      - existe en tabla_complementaria → c.`col`
-      - no existe en ninguna → NULL
-    """
-    from sqlalchemy import text
-
-    cols_analisis  = _get_tabla_cols(db_session, "tabla_analisis")
-    set_padron     = set(_get_tabla_cols(db_session, "tabla_padron"))
-    set_comp       = set(_get_tabla_cols(db_session, "tabla_complementaria"))
-    set_comp_edit  = set(cols_complementaria)
+    """INSERT explícito para evitar error MySQL 1136."""
+    cols_analisis = _get_tabla_cols(db_session, "tabla_analisis")
+    set_padron    = set(_get_tabla_cols(db_session, "tabla_padron"))
+    set_comp      = set(_get_tabla_cols(db_session, "tabla_complementaria"))
+    set_comp_edit = set(cols_complementaria)
 
     select_parts = []
     for col in cols_analisis:
@@ -314,12 +336,241 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) 
 
     cols_str   = ", ".join(f"`{c}`" for c in cols_analisis)
     select_str = ", ".join(select_parts)
-
     return (
         f"INSERT INTO tabla_analisis ({cols_str})\n"
         f"SELECT {select_str}\n"
         f"FROM tabla_padron p\n"
         f"LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PROGRAMAS — GET (lee de db_global)
+# ---------------------------------------------------------------------------
+
+@router.get("/{proyecto_slug}/programas")
+def get_programas(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Devuelve los programas activos del proyecto desde db_global."""
+    from sqlalchemy import text
+
+    check_project_access(proyecto_slug, current_user, db_global)
+
+    proyecto = db_global.execute(
+        text("SELECT id FROM proyectos WHERE slug = :s AND activo = 1"), {"s": proyecto_slug}
+    ).first()
+
+    if not proyecto:
+        return []
+
+    # Usa el modelo Programa si está disponible, si no hace raw SQL
+    try:
+        programas = db_global.query(Programa).filter(
+            Programa.id_proyecto == proyecto.id,
+            Programa.activo == True,
+        ).order_by(Programa.nombre).all()
+        return [{"id": p.id, "nombre": p.nombre, "slug": p.slug} for p in programas]
+    except Exception:
+        # Fallback raw si el modelo ORM aún no está actualizado
+        rows = db_global.execute(
+            text("SELECT id, nombre, slug FROM programas WHERE id_proyecto = :pid AND activo = 1 ORDER BY nombre"),
+            {"pid": proyecto.id},
+        ).fetchall()
+        return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# CARGAR VIABILIDAD / PAGOS — CSV masivo
+# ---------------------------------------------------------------------------
+
+@router.post("/{proyecto_slug}/cargar-viabilidad-csv", response_model=CargaViabilidadCSVResponse)
+async def cargar_viabilidad_csv(
+    proyecto_slug: str,
+    file: UploadFile = File(...),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Carga masiva de viabilidad y estatus de pago desde CSV/Excel.
+
+    Columnas esperadas (cualquier orden, nombres flexibles):
+      - cuenta / pk / prestamo / licencia / credito   → PK del registro
+      - viabilidad                                     → 'viable', 'no_viable', 'pendiente'
+      - estatus_pago / pago / status_pago              → texto libre
+      - fecha_pago                                     → fecha
+      - monto_pago / monto                             → numérico
+      - observaciones / obs                            → texto
+      - programa                                       → slug de programa
+
+    Comportamiento:
+      - Actualiza viabilidad en tabla_analisis si la columna está presente.
+      - Hace UPSERT en tabla_pagos si estatus_pago está presente.
+    """
+    from sqlalchemy import text
+
+    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Formato no soportado. Usa CSV o Excel.")
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    errores: List[str] = []
+
+    contents = await file.read()
+    try:
+        if file.filename.lower().endswith(".csv"):
+            try:
+                df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", sep=None, engine="python")
+            except UnicodeDecodeError:
+                df = pd.read_csv(io.BytesIO(contents), encoding="latin-1", sep=None, engine="python")
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el archivo: {e}")
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+
+    # Normalizar nombres de columnas
+    df.columns = [_normalizar_col(c) for c in df.columns]
+
+    # Mapear columna PK: acepta varios nombres
+    pk_norm = _normalizar_col(pk)
+    pk_col_csv = None
+    for candidate in [pk_norm, "cuenta", "pk", "prestamo", "licencia", "credito", "cuenta_n"]:
+        if candidate in df.columns:
+            pk_col_csv = candidate
+            break
+
+    if not pk_col_csv:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se encontró columna de PK. Se esperaba '{pk}' o 'cuenta'. "
+                   f"Columnas en el archivo: {list(df.columns)[:10]}"
+        )
+
+    # Detectar columnas opcionales
+    def _find_col(candidates: List[str]) -> Optional[str]:
+        for c in candidates:
+            if c in df.columns:
+                return c
+        return None
+
+    via_col  = _find_col(["viabilidad"])
+    pago_col = _find_col(["estatus_pago","pago","status_pago","estatus"])
+    fech_col = _find_col(["fecha_pago","fecha"])
+    mont_col = _find_col(["monto_pago","monto"])
+    obs_col  = _find_col(["observaciones","obs"])
+    prog_col = _find_col(["programa","program"])
+
+    VIABILIDADES_VALIDAS = {"viable", "no_viable", "pendiente"}
+    db_proyecto = next(get_project_db(proyecto_slug))
+    procesados = 0
+
+    for idx, row in df.iterrows():
+        try:
+            pk_val = row[pk_col_csv]
+            if pd.isna(pk_val):
+                errores.append(f"Fila {idx + 2}: PK vacío, se omite.")
+                continue
+
+            if info["pk_type"] == "int":
+                try:
+                    pk_val = int(pk_val)
+                except (ValueError, TypeError):
+                    errores.append(f"Fila {idx + 2}: PK '{pk_val}' no es entero.")
+                    continue
+
+            # 1. Actualizar viabilidad en tabla_analisis
+            if via_col:
+                via_val = str(row[via_col]).strip().lower() if not pd.isna(row[via_col]) else None
+                if via_val and via_val in VIABILIDADES_VALIDAS:
+                    db_proyecto.execute(
+                        text(f"UPDATE tabla_analisis SET viabilidad = :v WHERE `{pk}` = :pk"),
+                        {"v": via_val, "pk": pk_val},
+                    )
+
+            # 2. UPSERT en tabla_pagos
+            if pago_col and not pd.isna(row.get(pago_col, None)):
+                estatus_pago = str(row[pago_col]).strip()
+                fecha_pago   = None
+                if fech_col and not pd.isna(row.get(fech_col)):
+                    fp = row[fech_col]
+                    if isinstance(fp, pd.Timestamp):
+                        fecha_pago = fp.date()
+                    else:
+                        parsed = _parse_fecha(str(fp))
+                        if parsed:
+                            fecha_pago = parsed.date()
+
+                monto  = None
+                if mont_col and not pd.isna(row.get(mont_col)):
+                    try:
+                        monto = float(row[mont_col])
+                    except (ValueError, TypeError):
+                        pass
+
+                obs = str(row[obs_col]).strip() if obs_col and not pd.isna(row.get(obs_col)) else None
+                prog = str(row[prog_col]).strip() if prog_col and not pd.isna(row.get(prog_col)) else None
+
+                existe_pago = db_proyecto.execute(
+                    text("SELECT id FROM tabla_pagos WHERE pk_cuenta = :pk LIMIT 1"),
+                    {"pk": str(pk_val)},
+                ).first()
+
+                if existe_pago:
+                    db_proyecto.execute(
+                        text("""
+                            UPDATE tabla_pagos
+                            SET estatus_pago = :ep,
+                                fecha_pago   = :fp,
+                                monto_pago   = :mp,
+                                observaciones = :obs,
+                                programa     = :prog,
+                                updated_at   = NOW()
+                            WHERE pk_cuenta = :pk
+                        """),
+                        {"ep": estatus_pago, "fp": fecha_pago, "mp": monto,
+                         "obs": obs, "prog": prog, "pk": str(pk_val)},
+                    )
+                else:
+                    db_proyecto.execute(
+                        text("""
+                            INSERT INTO tabla_pagos
+                                (pk_cuenta, estatus_pago, fecha_pago, monto_pago, observaciones, programa, creado_por)
+                            VALUES
+                                (:pk, :ep, :fp, :mp, :obs, :prog, :usr)
+                        """),
+                        {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
+                         "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
+                    )
+
+            if (procesados + 1) % 200 == 0:
+                db_proyecto.commit()
+
+            procesados += 1
+
+        except Exception as e:
+            errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
+            if len(errores) >= 30:
+                errores.append("Límite de 30 errores alcanzado.")
+                break
+
+    db_proyecto.commit()
+
+    registrar_log(
+        db_global, current_user.id, "cargar_viabilidad_csv",
+        f"CSV viabilidad/pagos {proyecto_slug}: {procesados} filas procesadas.", proyecto.id,
+    )
+
+    return CargaViabilidadCSVResponse(
+        success=procesados > 0,
+        message=f"{procesados} registros procesados de {len(df)} en el archivo.",
+        procesados=procesados,
+        errores=errores[:30],
     )
 
 
@@ -459,7 +710,7 @@ async def cargar_padron(
 
 
 # ---------------------------------------------------------------------------
-# COMPLEMENTAR — GET
+# COMPLEMENTAR — GET (con filtro de programa)
 # ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/complementar")
@@ -468,6 +719,7 @@ def get_complementar(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = None,
+    programa: Optional[str] = Query(None),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -478,21 +730,25 @@ def get_complementar(
     pk = info["pk"]
     search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
 
-    search_cond = ""
+    conditions = ["1=1"]
     params: Dict[str, Any] = {}
+
     if search:
         parts = [f"CAST(p.`{c}` AS CHAR) LIKE :search" for c in search_cols]
-        search_cond = " AND (" + " OR ".join(parts) + ")"
+        conditions.append("(" + " OR ".join(parts) + ")")
         params["search"] = f"%{search}%"
 
+    if programa and programa != "todos":
+        conditions.append("p.`programa` = :programa")
+        params["programa"] = programa
+
+    where = " AND ".join(conditions)
     db_proyecto = next(get_project_db(proyecto_slug))
     total = db_proyecto.execute(
-        text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE 1=1 {search_cond}"), params
+        text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE {where}"), params
     ).first().total
 
     offset = (page - 1) * limit
-
-    # SELECT explícito: p.* + solo las cols editables de c (sin repetir pk ni id_comp)
     cols_c = [col for col in info["columnas_complementaria"] if col != pk and col != "id_comp"]
     cols_c_str = (", " + ", ".join(f"c.`{col}`" for col in cols_c)) if cols_c else ""
 
@@ -501,7 +757,7 @@ def get_complementar(
             SELECT p.*{cols_c_str}
             FROM tabla_padron p
             LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
-            WHERE 1=1 {search_cond}
+            WHERE {where}
             ORDER BY p.`{pk}`
             LIMIT {limit} OFFSET {offset}
         """),
@@ -519,7 +775,7 @@ def get_complementar(
 
 
 # ---------------------------------------------------------------------------
-# GUARDAR COMPLEMENTO — SOLO tabla_complementaria, NO toca tabla_analisis
+# GUARDAR COMPLEMENTO — SOLO tabla_complementaria
 # ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/guardar-complemento")
@@ -529,7 +785,6 @@ def guardar_complemento(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """Guarda cambios únicamente en tabla_complementaria."""
     from sqlalchemy import text
 
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
@@ -567,12 +822,11 @@ def guardar_complemento(
     db_proyecto.commit()
     registrar_log(db_global, current_user.id, "guardar_complemento",
         f"Complemento guardado: {guardados} registros en {proyecto_slug}", proyecto.id)
-
     return {"success": True, "message": f"{guardados} registros guardados en tabla complementaria."}
 
 
 # ---------------------------------------------------------------------------
-# GENERAR ANÁLISIS — reconstruye tabla_analisis completa con columnas explícitas
+# GENERAR ANÁLISIS
 # ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/generar-analisis")
@@ -581,12 +835,6 @@ def generar_analisis(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """
-    Trunca tabla_analisis y la reconstruye desde tabla_padron JOIN tabla_complementaria.
-    Usa INSERT con columnas explícitas (via _build_analisis_insert) para evitar
-    el error MySQL 1136 (column count mismatch) que ocurre con SELECT p.*, c.*
-    cuando tabla_padron tiene columnas que también existen en tabla_complementaria.
-    """
     from sqlalchemy import text
 
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
@@ -594,32 +842,22 @@ def generar_analisis(
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Registrar cuántos había antes
     previo = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
-
-    # Construir el INSERT con columnas explícitas
     insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"])
 
-    # Borrar y reconstruir en una sola transacción
     db_proyecto.execute(text("DELETE FROM tabla_analisis"))
     db_proyecto.execute(text(insert_sql))
     db_proyecto.commit()
 
     total = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
-
     registrar_log(db_global, current_user.id, "generar_analisis",
         f"tabla_analisis reconstruida en {proyecto_slug}: {total} registros", proyecto.id)
 
-    return {
-        "success": True,
-        "message": f"Análisis generado: {total} registros en tabla_analisis.",
-        "total":   total,
-        "previo":  previo,
-    }
+    return {"success": True, "message": f"Análisis generado: {total} registros.", "total": total, "previo": previo}
 
 
 # ---------------------------------------------------------------------------
-# ANALISIS — GET
+# ANALISIS — GET (con filtros viabilidad + programa + búsqueda)
 # ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/analisis")
@@ -627,6 +865,7 @@ def get_analisis(
     proyecto_slug: str,
     viabilidad: Optional[str] = Query(None),
     busqueda: Optional[str] = None,
+    programa: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     current_user: Usuario = Depends(get_current_active_user),
@@ -643,6 +882,10 @@ def get_analisis(
     if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
         conditions.append("viabilidad = :viabilidad")
         params["viabilidad"] = viabilidad
+
+    if programa and programa != "todos":
+        conditions.append("`programa` = :programa")
+        params["programa"] = programa
 
     if busqueda:
         search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
@@ -708,10 +951,8 @@ def acciones_manuales(
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-
     if not request.ids:
         raise HTTPException(status_code=400, detail="No se enviaron IDs.")
-
     db_proyecto = next(get_project_db(proyecto_slug))
     ph = {f"id{i}": v for i, v in enumerate(request.ids)}
     in_clause = ", ".join(f":id{i}" for i in range(len(request.ids)))
@@ -829,9 +1070,8 @@ def limpiar_espacios(
             actualizados += result.rowcount
         except Exception:
             try:
-                result = db_proyecto.execute(text(f"""
-                    UPDATE tabla_analisis SET `{col}` = TRIM(`{col}`) WHERE `{col}` IS NOT NULL
-                """))
+                result = db_proyecto.execute(text(
+                    f"UPDATE tabla_analisis SET `{col}` = TRIM(`{col}`) WHERE `{col}` IS NOT NULL"))
                 actualizados += result.rowcount
             except Exception:
                 pass

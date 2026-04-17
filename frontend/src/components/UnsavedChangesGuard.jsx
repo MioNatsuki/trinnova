@@ -1,7 +1,4 @@
 // frontend/src/components/UnsavedChangesGuard.jsx
-// Muestra un modal de confirmación si el usuario intenta navegar fuera
-// de la página cuando hay cambios no guardados (isDirty = true).
-// También intercepta el cierre/recarga de la pestaña del navegador.
 
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation, UNSAFE_NavigationContext } from 'react-router-dom';
@@ -78,7 +75,7 @@ export default function UnsavedChangesGuard({ isDirty }) {
   return (
     <div className="modal-overlay" onClick={handleCancel}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
-        <h2 className="modal-title">⚠️ Cambios no guardados</h2>
+        <h2 className="modal-title">Cambios no guardados</h2>
         <p className="modal-body">
           Tienes cambios pendientes que no se han guardado.
           Si continúas, <strong>todos los cambios se perderán</strong>.

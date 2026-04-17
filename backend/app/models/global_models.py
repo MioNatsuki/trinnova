@@ -143,3 +143,17 @@ class PadronVersion(Base):
 
     proyecto = relationship("Proyecto")
     usuario  = relationship("Usuario")
+
+
+class Programa(Base):
+    __tablename__ = "programas"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    id_proyecto  = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    nombre       = Column(String(150), nullable=False)
+    slug         = Column(String(50), nullable=False)
+    activo       = Column(Boolean, default=True)
+    created_at   = Column(DateTime, server_default=func.now())
+    updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    proyecto = relationship("Proyecto")

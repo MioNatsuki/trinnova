@@ -1,5 +1,7 @@
 // frontend/src/pages/analisis/CargarPadron.jsx
+// FIX: preview de Excel en cliente usando SheetJS (xlsx ya disponible como dep)
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
@@ -7,15 +9,14 @@ import './Analisis.css';
 
 export default function CargarPadron() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
-  const [file, setFile]         = useState(null);
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState('');
-  const [preview, setPreview]   = useState(null);   // {headers, rows}
+  const [file, setFile]           = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [result, setResult]       = useState(null);
+  const [error, setError]         = useState('');
+  const [preview, setPreview]     = useState(null);   // {headers, rows, total_cols}
   const [versiones, setVersiones] = useState([]);
   const [loadingVer, setLoadingVer] = useState(false);
 
-  // Cargar versiones cuando cambia el proyecto
   useEffect(() => {
     if (!proyectoSlug) { setVersiones([]); return; }
     setLoadingVer(true);
@@ -25,6 +26,136 @@ export default function CargarPadron() {
       .finally(() => setLoadingVer(false));
   }, [proyectoSlug]);
 
+  // ── Leer preview en cliente (CSV y Excel) ──────────────────────────────
+  const convertExcelDate = (value) => {
+  // Si no es número, devolver el valor original
+  if (typeof value !== 'number') return value;
+  
+  // Los números de fecha en Excel están entre ~30000 y ~50000
+  // (Ej: 45987 = 2025-11-15 aproximadamente)
+  if (value < 1 || value > 100000) return value;
+  
+  // Excel cuenta días desde 1900-01-01 (con bug de 1900 como año bisiesto)
+  // Para fechas desde 1900-03-01 en adelante
+  const excelEpoch = new Date(1900, 0, 1);
+  const millisecondsPerDay = 86400000;
+  
+  // Ajuste por el bug de Excel (considera 1900 como bisiesto)
+  const daysOffset = value > 59 ? value - 1 : value;
+  
+  const date = new Date(excelEpoch.getTime() + (daysOffset - 1) * millisecondsPerDay);
+  
+  // Formatear como YYYY-MM-DD
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+};
+
+// También puedes crear una versión más completa que intente detectar si es fecha
+const tryConvertToDate = (value) => {
+  // Si ya es string, intentar parsear
+  if (typeof value === 'string') {
+    // Si parece fecha ISO o formato común
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value;
+    if (/^\d{2}\/\d{2}\/\d{4}/.test(value)) {
+      const [d, m, y] = value.split('/');
+      return `${y}-${m}-${d}`;
+    }
+    return value;
+  }
+  
+  // Si es número, intentar convertir como fecha Excel
+  if (typeof value === 'number') {
+    // Rango típico de fechas Excel (1900-2100)
+    if (value > 30000 && value < 100000) {
+      return convertExcelDate(value);
+    }
+    // Si es número pero no parece fecha, devolver como está
+    return value;
+  }
+  
+  return value;
+};
+
+// Modifica la función readPreview existente:
+const readPreview = (f) => {
+  const ext = f.name.split('.').pop().toLowerCase();
+
+  if (ext === 'csv') {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const lines = ev.target.result.split('\n').filter(l => l.trim());
+        const first = lines[0];
+        const sep = first.includes(';') ? ';' : first.includes('\t') ? '\t' : ',';
+        const headers = first.split(sep).map(h => h.replace(/^"|"$/g, '').trim());
+        const rows = lines.slice(1, 6).map(l =>
+          l.split(sep).map(c => c.replace(/^"|"$/g, '').trim())
+        );
+        setPreview({ headers, rows, total_cols: headers.length });
+      } catch { /* ignore */ }
+    };
+    reader.readAsText(f, 'utf-8');
+
+  } else {
+    // Excel: usar SheetJS en el cliente para preview inmediato
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target.result);
+        const workbook = XLSX.read(data, { 
+          type: 'array', 
+          sheetRows: 6,
+          // Opcional: Configurar opciones para mejor detección de fechas
+          cellDates: true,  // Intenta convertir fechas automáticamente
+          dateNF: 'yyyy-mm-dd' // Formato de fecha deseado
+        });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        
+        // Obtener array de arrays: primera fila = headers, resto = datos
+        const aoa = XLSX.utils.sheet_to_json(sheet, { 
+          header: 1, 
+          defval: '',
+          raw: false  // IMPORTANTE: Obtener valores formateados en lugar de crudos
+        });
+        
+        if (aoa.length === 0) return;
+        
+        const headers = aoa[0].map(h => String(h ?? '').trim());
+        
+        // Procesar las filas convirtiendo fechas
+        const rows = aoa.slice(1, 6).map(row =>
+          headers.map((_, i) => {
+            let cellValue = row[i] ?? '';
+            // Si es un objeto Date (cuando cellDates=true)
+            if (cellValue instanceof Date) {
+              return cellValue.toISOString().split('T')[0];
+            }
+            // Convertir a string y limpiar
+            const strValue = String(cellValue).trim();
+            // Intentar convertir números de fecha Excel
+            const numValue = parseFloat(strValue);
+            if (!isNaN(numValue) && strValue === String(numValue) && numValue > 30000 && numValue < 100000) {
+              return convertExcelDate(numValue);
+            }
+            return strValue;
+          })
+        );
+        
+        setPreview({ headers, rows, total_cols: headers.length });
+      } catch (err) {
+        console.error('Error al leer Excel:', err);
+        // Si falla SheetJS, mostrar al menos el nombre
+        setPreview({ excel: true, name: f.name });
+      }
+    };
+    reader.readAsArrayBuffer(f);
+  }
+};
+
   const handleFileChange = (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -32,40 +163,13 @@ export default function CargarPadron() {
     setError('');
     setResult(null);
     setPreview(null);
-
-    // Preview: solo para CSV podemos leerlo en el cliente sin la librería xlsx
-    const ext = f.name.split('.').pop().toLowerCase();
-    if (ext === 'csv') {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const lines = ev.target.result.split('\n').filter(l => l.trim());
-          // Detectar separador: coma, punto y coma o tabulación
-          const first = lines[0];
-          const sep = first.includes(';') ? ';' : first.includes('\t') ? '\t' : ',';
-          const headers = first.split(sep).map(h => h.replace(/^"|"$/g, '').trim());
-          const rows = lines.slice(1, 6).map(l =>
-            l.split(sep).map(c => c.replace(/^"|"$/g, '').trim())
-          );
-          setPreview({ headers: headers, rows, total_cols: headers.length });
-        } catch {
-          // ignore preview error
-        }
-      };
-      reader.readAsText(f, 'utf-8');
-    } else {
-      // Para Excel mostramos solo el nombre — el preview real vendrá del servidor
-      setPreview({ excel: true, name: f.name });
-    }
+    readPreview(f);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     const f = e.dataTransfer.files[0];
-    if (f) {
-      const fakeEvent = { target: { files: [f] } };
-      handleFileChange(fakeEvent);
-    }
+    if (f) handleFileChange({ target: { files: [f] } });
   };
 
   const handleSubmit = async (e) => {
@@ -85,15 +189,8 @@ export default function CargarPadron() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(res.data);
-      // Recargar versiones
       const ver = await api.get(`/analisis/${proyectoSlug}/versiones`);
       setVersiones(ver.data);
-      // Mostrar preview del servidor si no la tenemos
-      if (!preview?.headers && res.data.preview?.length) {
-        const serverHeaders = Object.keys(res.data.preview[0]);
-        const serverRows = res.data.preview.map(r => serverHeaders.map(h => r[h] ?? ''));
-        setPreview({ headers: serverHeaders, rows: serverRows, total_cols: serverHeaders.length });
-      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Error al cargar el archivo.');
     } finally {
@@ -112,19 +209,14 @@ export default function CargarPadron() {
         <h1>Cargar Padrón</h1>
       </div>
 
-      <ProyectoSelector
-        proyectos={proyectos}
-        value={proyectoSlug}
-        onChange={setProyectoSlug}
-      />
+      <ProyectoSelector proyectos={proyectos} value={proyectoSlug} onChange={setProyectoSlug} />
 
       {proyectoSlug && (
         <div className="analisis-content">
           <div className="cp-grid">
-            {/* Panel izquierdo: formulario de carga */}
+            {/* Panel izquierdo */}
             <div className="cargar-card">
               <form onSubmit={handleSubmit}>
-                {/* Zona de drop */}
                 <div
                   className={`drop-zone ${file ? 'drop-zone--has-file' : ''}`}
                   onDrop={handleDrop}
@@ -153,7 +245,7 @@ export default function CargarPadron() {
                   )}
                 </div>
 
-                {/* Vista previa columnas detectadas - con scroll controlado */}
+                {/* Preview unificado CSV y Excel */}
                 {preview && !preview.excel && preview.headers && (
                   <div className="preview-section">
                     <div className="preview-header">
@@ -163,9 +255,7 @@ export default function CargarPadron() {
                     <div className="table-container-preview">
                       <table className="data-table">
                         <thead>
-                          <tr>
-                            {preview.headers.map((h, i) => <th key={i}>{h}</th>)}
-                          </tr>
+                          <tr>{preview.headers.map((h, i) => <th key={i}>{h}</th>)}</tr>
                         </thead>
                         <tbody>
                           {preview.rows.map((row, i) => (
@@ -179,11 +269,12 @@ export default function CargarPadron() {
                   </div>
                 )}
 
+                {/* Fallback si SheetJS falló */}
                 {preview?.excel && (
                   <div className="preview-section preview-section--excel">
                     📊 Archivo Excel seleccionado: <strong>{preview.name}</strong>
                     <br />
-                    <small style={{ color: 'var(--clr-muted)' }}>La vista previa se mostrará tras importar.</small>
+                    <small style={{ color: 'var(--clr-muted)' }}>No se pudo generar preview. Se importará correctamente.</small>
                   </div>
                 )}
 
@@ -198,11 +289,9 @@ export default function CargarPadron() {
                 </button>
               </form>
 
-              {/* Resultado de la importación */}
               {result && (
                 <div className={`cp-result ${result.success ? 'cp-result--ok' : 'cp-result--err'}`}>
                   <p className="cp-result__title">{result.message}</p>
-
                   {result.success && (
                     <div className="cp-result__body">
                       <div className="cp-stats">
@@ -219,7 +308,6 @@ export default function CargarPadron() {
                           <span className="cp-stat__label">Columnas en archivo</span>
                         </div>
                       </div>
-
                       {result.columnas_bd?.length > 0 && (
                         <details className="cp-details">
                           <summary>Columnas mapeadas ({result.columnas_bd.length})</summary>
@@ -228,7 +316,6 @@ export default function CargarPadron() {
                           </div>
                         </details>
                       )}
-
                       {result.errores?.length > 0 && (
                         <details className="cp-details cp-details--warn">
                           <summary>⚠️ {result.errores.length} advertencias</summary>
@@ -243,7 +330,7 @@ export default function CargarPadron() {
               )}
             </div>
 
-            {/* Panel derecho: historial de versiones */}
+            {/* Panel derecho: versiones */}
             <div className="versiones-panel">
               <h3 className="versiones-title">Historial de versiones</h3>
               {loadingVer ? (
@@ -273,29 +360,13 @@ export default function CargarPadron() {
         </div>
       )}
 
-      {/* Estilos adicionales inline solo para ajustes específicos */}
       <style>{`
-        .table-container-preview {
-          max-height: 280px;
-          overflow: auto;
-        }
-        .table-container-preview table {
-          min-width: 500px;
-        }
+        .table-container-preview { max-height: 280px; overflow: auto; }
+        .table-container-preview table { min-width: 500px; }
         .table-container-preview th,
-        .table-container-preview td {
-          white-space: nowrap;
-          padding: 6px 10px;
-        }
-        .cargar-card {
-          overflow-y: auto;
-          max-height: calc(100vh - 200px);
-        }
-        .analisis-content {
-          flex: 1;
-          overflow-y: auto;
-          min-height: 0;
-        }
+        .table-container-preview td { white-space: nowrap; padding: 6px 10px; }
+        .cargar-card { overflow-y: auto; max-height: calc(100vh - 200px); }
+        .analisis-content { flex: 1; overflow-y: auto; min-height: 0; }
       `}</style>
     </div>
   );

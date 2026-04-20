@@ -1,17 +1,17 @@
-# backend/app/api/analisis.py  — Fase 4
+# backend/app/api/analisis.py  — Fase 4 (fix alias estado, programas, sticky cols)
 """
-Nuevos endpoints en esta versión:
-  GET   /{slug}/programas               — lista programas del proyecto
-  POST  /{slug}/cargar-viabilidad-csv   — carga masiva viabilidad/pagos desde CSV
-  POST  /{slug}/guardar-complemento     — SOLO tabla_complementaria (sin tocar analisis)
-  POST  /{slug}/generar-analisis        — reconstruye tabla_analisis con INSERT explícito
-  GET   /{slug}/analisis                — ahora filtra también por programa
-  GET   /{slug}/complementar            — ahora filtra también por programa
-  GET   /{slug}/estadisticas
-  GET   /{slug}/versiones
+  GET   /{slug}/programas
+  POST  /{slug}/cargar-viabilidad-csv
+  POST  /{slug}/cargar-padron
+  GET   /{slug}/complementar
+  POST  /{slug}/guardar-complemento
+  POST  /{slug}/generar-analisis
+  GET   /{slug}/analisis
   POST  /{slug}/acciones-manuales
   POST  /{slug}/limpieza/normalizar-calles
   POST  /{slug}/limpieza/limpiar-espacios
+  GET   /{slug}/versiones
+  GET   /{slug}/estadisticas
 """
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -25,7 +25,7 @@ from datetime import datetime
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
-from app.models.global_models import Usuario, PadronVersion, Programa
+from app.models.global_models import Usuario, PadronVersion
 from app.db.router import get_project_db
 from app.services.log_service import registrar_log
 from pydantic import BaseModel
@@ -165,7 +165,7 @@ _INFO: Dict[str, Dict] = {
         "col_int":    [],
         "col_tel":    [],
         "col_gastos": [],
-        "col_fechas": ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion"],
+        "col_fechas": ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion","exigible"],
         "columnas_padron": [
             "id","rfc","credito","nombre_razon_social","calle_numero","colonia","cp",
             "municipio","coordinadora","area_asignacion","autoridad_determinante",
@@ -173,7 +173,7 @@ _INFO: Dict[str, Dict] = {
             "importe_historico_determinado","concepto","fecha_notificacion","exigible",
             "tipo_credito","tipo_cartera",
         ],
-        "columnas_complementaria": ["tipo_tipo","firma","cargo"],
+        "columnas_complementaria": ["tipo_tipo","tipo_razon_social","firma","cargo"],
     },
     "pensiones": {
         "pk": "prestamo",
@@ -208,6 +208,12 @@ _INFO: Dict[str, Dict] = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Alias de columnas CSV → nombre real en BD
+# ---------------------------------------------------------------------------
+# Clave: nombre normalizado del CSV  →  nombre real en tabla_padron
+# "Normalizado" = sin tildes, lowercase, espacios→guion_bajo
+
 _COL_ALIAS: Dict[str, Dict[str, str]] = {
     "pensiones": {
         "subestatus":            "sub_estatus",
@@ -218,7 +224,41 @@ _COL_ALIAS: Dict[str, Dict[str, str]] = {
         "aval_cruza1":           "aval_cruza",
         "aval_cruza2":           "aval_cruza_2",
         "garantia_calles_cruza": "garantia_calles_cruces",
-    }
+    },
+    # FIX: alias completos para "estado" — el Excel usa nombres en español con
+    # espacios, preposiciones y sin caracteres especiales que el normalizador
+    # no puede resolver solo con coincidencia parcial.
+    "estado": {
+        # Exactos normalizados que difieren del nombre BD
+        "nombre_o_razon_social":                   "nombre_razon_social",
+        "nombre_razon_social_2":                   "nombre_razon_social",
+        "calle_y_numero":                          "calle_numero",
+        "calle_numero_2":                          "calle_numero",
+        "codigo_postal":                           "cp",
+        "area_de_asignacion":                      "area_asignacion",
+        "fecha_de_recepcion":                      "fecha_recepcion",
+        "expediente_de_procedencia":               "expediente_procedencia",
+        "fecha_del_documento_determinante":        "fecha_documento_determinante",
+        "fecha_documento_determinante_2":          "fecha_documento_determinante",
+        "importe_historico_determinado":           "importe_historico_determinado",
+        "importe_historico_determinado_2":         "importe_historico_determinado",
+        "fecha_de_notificacion":                   "fecha_notificacion",
+        "tipo_de_credito":                         "tipo_credito",
+        "tipo_cartera_2":                          "tipo_cartera",
+        # Alias adicionales para variantes comunes del Excel
+        "id":                                      "id",
+        "rfc":                                     "rfc",
+        "credito":                                 "credito",
+        "colonia":                                 "colonia",
+        "cp":                                      "cp",
+        "municipio":                               "municipio",
+        "coordinadora":                            "coordinadora",
+        "autoridad_determinante":                  "autoridad_determinante",
+        "concepto":                                "concepto",
+        "exigible":                                "exigible",
+        "tipo_credito":                            "tipo_credito",
+        "tipo_cartera":                            "tipo_cartera",
+    },
 }
 
 _DATE_COLS: Dict[str, List[str]] = {
@@ -227,7 +267,7 @@ _DATE_COLS: Dict[str, List[str]] = {
     "licencias_gdl":      ["fecemi"],
     "predial_gdl":        [],
     "predial_tlajomulco": [],
-    "estado":             ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion"],
+    "estado":             ["fecha_recepcion","fecha_documento_determinante","fecha_notificacion","exigible"],
 }
 
 _DATE_FORMATS = [
@@ -248,24 +288,50 @@ def _info(slug: str) -> Dict:
 
 
 def _normalizar_col(nombre: str) -> str:
+    """Quita tildes, convierte a minúsculas, reemplaza espacios/guiones por _"""
     txt = unicodedata.normalize("NFKD", nombre).encode("ASCII", "ignore").decode()
-    return re.sub(r"\s+", "_", txt.lower().strip())
+    txt = re.sub(r"[\s\-/]+", "_", txt.lower().strip())
+    # Quitar caracteres que no sean letras, números o guión bajo
+    txt = re.sub(r"[^\w]", "", txt)
+    return txt
 
 
 def _mapear_columnas(slug: str, df_cols: List[str]) -> Dict[str, str]:
+    """
+    Mapea columnas CSV → nombres reales en BD.
+    Orden de resolución:
+      1. Coincidencia exacta normalizada con columnas_padron
+      2. Alias explícito del proyecto (_COL_ALIAS)
+      3. Coincidencia parcial (una contiene a la otra)
+    """
     info = _info(slug)
     alias = _COL_ALIAS.get(slug, {})
     bd_idx = {_normalizar_col(c): c for c in info["columnas_padron"]}
+
     mapeo: Dict[str, str] = {}
     for csv_col in df_cols:
         norm = _normalizar_col(csv_col)
+        # 1. Exacto
         if norm in bd_idx:
-            mapeo[csv_col] = bd_idx[norm]; continue
+            mapeo[csv_col] = bd_idx[norm]
+            continue
+        # 2. Alias explícito
         if norm in alias:
-            mapeo[csv_col] = alias[norm]; continue
+            mapeo[csv_col] = alias[norm]
+            continue
+        # 3. Parcial
+        matched = None
+        best_len = 0
         for bd_norm, bd_real in bd_idx.items():
             if bd_norm in norm or norm in bd_norm:
-                mapeo[csv_col] = bd_real; break
+                # Preferir el match más largo para evitar falsos positivos
+                match_len = max(len(bd_norm), len(norm))
+                if match_len > best_len:
+                    best_len = match_len
+                    matched = bd_real
+        if matched:
+            mapeo[csv_col] = matched
+
     return mapeo
 
 
@@ -345,7 +411,8 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) 
 
 
 # ---------------------------------------------------------------------------
-# PROGRAMAS — GET (lee de db_global)
+# PROGRAMAS — GET
+# Lee primero de db_global.programas; si falla, lee de tabla_programas local
 # ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/programas")
@@ -354,32 +421,40 @@ def get_programas(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """Devuelve los programas activos del proyecto desde db_global."""
     from sqlalchemy import text
 
     check_project_access(proyecto_slug, current_user, db_global)
 
-    proyecto = db_global.execute(
-        text("SELECT id FROM proyectos WHERE slug = :s AND activo = 1"), {"s": proyecto_slug}
-    ).first()
-
-    if not proyecto:
-        return []
-
-    # Usa el modelo Programa si está disponible, si no hace raw SQL
+    # Intentar desde db_global.programas
     try:
-        programas = db_global.query(Programa).filter(
-            Programa.id_proyecto == proyecto.id,
-            Programa.activo == True,
-        ).order_by(Programa.nombre).all()
-        return [{"id": p.id, "nombre": p.nombre, "slug": p.slug} for p in programas]
+        proyecto = db_global.execute(
+            text("SELECT id FROM proyectos WHERE slug = :s AND activo = 1"),
+            {"s": proyecto_slug},
+        ).first()
+        if proyecto:
+            rows = db_global.execute(
+                text("""
+                    SELECT id, nombre, slug
+                    FROM programas
+                    WHERE id_proyecto = :pid AND activo = 1
+                    ORDER BY nombre
+                """),
+                {"pid": proyecto.id},
+            ).fetchall()
+            if rows:
+                return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
     except Exception:
-        # Fallback raw si el modelo ORM aún no está actualizado
-        rows = db_global.execute(
-            text("SELECT id, nombre, slug FROM programas WHERE id_proyecto = :pid AND activo = 1 ORDER BY nombre"),
-            {"pid": proyecto.id},
+        pass  # tabla programas aún no existe en db_global → fallback a local
+
+    # Fallback: tabla_programas local del proyecto
+    try:
+        db_proyecto = next(get_project_db(proyecto_slug))
+        rows = db_proyecto.execute(
+            text("SELECT id, nombre, slug FROM tabla_programas WHERE activo = 1 ORDER BY nombre")
         ).fetchall()
         return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -393,22 +468,6 @@ async def cargar_viabilidad_csv(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """
-    Carga masiva de viabilidad y estatus de pago desde CSV/Excel.
-
-    Columnas esperadas (cualquier orden, nombres flexibles):
-      - cuenta / pk / prestamo / licencia / credito   → PK del registro
-      - viabilidad                                     → 'viable', 'no_viable', 'pendiente'
-      - estatus_pago / pago / status_pago              → texto libre
-      - fecha_pago                                     → fecha
-      - monto_pago / monto                             → numérico
-      - observaciones / obs                            → texto
-      - programa                                       → slug de programa
-
-    Comportamiento:
-      - Actualiza viabilidad en tabla_analisis si la columna está presente.
-      - Hace UPSERT en tabla_pagos si estatus_pago está presente.
-    """
     from sqlalchemy import text
 
     if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
@@ -434,10 +493,8 @@ async def cargar_viabilidad_csv(
     if df.empty:
         raise HTTPException(status_code=400, detail="El archivo está vacío.")
 
-    # Normalizar nombres de columnas
     df.columns = [_normalizar_col(c) for c in df.columns]
 
-    # Mapear columna PK: acepta varios nombres
     pk_norm = _normalizar_col(pk)
     pk_col_csv = None
     for candidate in [pk_norm, "cuenta", "pk", "prestamo", "licencia", "credito", "cuenta_n"]:
@@ -448,12 +505,10 @@ async def cargar_viabilidad_csv(
     if not pk_col_csv:
         raise HTTPException(
             status_code=400,
-            detail=f"No se encontró columna de PK. Se esperaba '{pk}' o 'cuenta'. "
-                   f"Columnas en el archivo: {list(df.columns)[:10]}"
+            detail=f"No se encontró columna de PK. Columnas en el archivo: {list(df.columns)[:10]}"
         )
 
-    # Detectar columnas opcionales
-    def _find_col(candidates: List[str]) -> Optional[str]:
+    def _find_col(candidates):
         for c in candidates:
             if c in df.columns:
                 return c
@@ -484,7 +539,6 @@ async def cargar_viabilidad_csv(
                     errores.append(f"Fila {idx + 2}: PK '{pk_val}' no es entero.")
                     continue
 
-            # 1. Actualizar viabilidad en tabla_analisis
             if via_col:
                 via_val = str(row[via_col]).strip().lower() if not pd.isna(row[via_col]) else None
                 if via_val and via_val in VIABILIDADES_VALIDAS:
@@ -493,11 +547,10 @@ async def cargar_viabilidad_csv(
                         {"v": via_val, "pk": pk_val},
                     )
 
-            # 2. UPSERT en tabla_pagos
-            if pago_col and not pd.isna(row.get(pago_col, None)):
+            if pago_col and not pd.isna(row.get(pago_col, float('nan'))):
                 estatus_pago = str(row[pago_col]).strip()
-                fecha_pago   = None
-                if fech_col and not pd.isna(row.get(fech_col)):
+                fecha_pago = None
+                if fech_col and not pd.isna(row.get(fech_col, float('nan'))):
                     fp = row[fech_col]
                     if isinstance(fp, pd.Timestamp):
                         fecha_pago = fp.date()
@@ -506,15 +559,15 @@ async def cargar_viabilidad_csv(
                         if parsed:
                             fecha_pago = parsed.date()
 
-                monto  = None
-                if mont_col and not pd.isna(row.get(mont_col)):
+                monto = None
+                if mont_col and not pd.isna(row.get(mont_col, float('nan'))):
                     try:
                         monto = float(row[mont_col])
                     except (ValueError, TypeError):
                         pass
 
-                obs = str(row[obs_col]).strip() if obs_col and not pd.isna(row.get(obs_col)) else None
-                prog = str(row[prog_col]).strip() if prog_col and not pd.isna(row.get(prog_col)) else None
+                obs = str(row[obs_col]).strip() if obs_col and not pd.isna(row.get(obs_col, float('nan'))) else None
+                prog = str(row[prog_col]).strip() if prog_col and not pd.isna(row.get(prog_col, float('nan'))) else None
 
                 existe_pago = db_proyecto.execute(
                     text("SELECT id FROM tabla_pagos WHERE pk_cuenta = :pk LIMIT 1"),
@@ -525,13 +578,9 @@ async def cargar_viabilidad_csv(
                     db_proyecto.execute(
                         text("""
                             UPDATE tabla_pagos
-                            SET estatus_pago = :ep,
-                                fecha_pago   = :fp,
-                                monto_pago   = :mp,
-                                observaciones = :obs,
-                                programa     = :prog,
-                                updated_at   = NOW()
-                            WHERE pk_cuenta = :pk
+                            SET estatus_pago=:ep, fecha_pago=:fp, monto_pago=:mp,
+                                observaciones=:obs, programa=:prog, updated_at=NOW()
+                            WHERE pk_cuenta=:pk
                         """),
                         {"ep": estatus_pago, "fp": fecha_pago, "mp": monto,
                          "obs": obs, "prog": prog, "pk": str(pk_val)},
@@ -539,10 +588,9 @@ async def cargar_viabilidad_csv(
                 else:
                     db_proyecto.execute(
                         text("""
-                            INSERT INTO tabla_pagos
-                                (pk_cuenta, estatus_pago, fecha_pago, monto_pago, observaciones, programa, creado_por)
-                            VALUES
-                                (:pk, :ep, :fp, :mp, :obs, :prog, :usr)
+                            INSERT INTO tabla_pagos (pk_cuenta, estatus_pago, fecha_pago,
+                                monto_pago, observaciones, programa, creado_por)
+                            VALUES (:pk, :ep, :fp, :mp, :obs, :prog, :usr)
                         """),
                         {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
                          "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
@@ -560,11 +608,8 @@ async def cargar_viabilidad_csv(
                 break
 
     db_proyecto.commit()
-
-    registrar_log(
-        db_global, current_user.id, "cargar_viabilidad_csv",
-        f"CSV viabilidad/pagos {proyecto_slug}: {procesados} filas procesadas.", proyecto.id,
-    )
+    registrar_log(db_global, current_user.id, "cargar_viabilidad_csv",
+        f"CSV viabilidad/pagos {proyecto_slug}: {procesados} filas procesadas.", proyecto.id)
 
     return CargaViabilidadCSVResponse(
         success=procesados > 0,
@@ -621,7 +666,9 @@ async def cargar_padron(
     if pk not in df_mapped.columns:
         raise HTTPException(
             status_code=400,
-            detail=f"No se encontró la columna primaria '{pk}'. Columnas detectadas: {columnas_csv[:15]}",
+            detail=f"No se encontró la columna primaria '{pk}'. "
+                   f"Columnas en archivo: {columnas_csv[:20]}. "
+                   f"Columnas mapeadas: {list(mapeo.values())[:20]}",
         )
 
     db_proyecto = next(get_project_db(proyecto_slug))
@@ -693,7 +740,8 @@ async def cargar_padron(
         f"Padrón {proyecto_slug}: {insertados} nuevos, {actualizados} actualizados. Archivo: {file.filename}",
         proyecto.id)
 
-    preview_cols = list(df_mapped.columns[:10])
+    # Preview: primeras 5 filas del DataFrame mapeado
+    preview_cols = list(df_mapped.columns[:12])
     preview = [
         {k: str(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else ""
          for k, v in row.items() if k in preview_cols}
@@ -710,7 +758,7 @@ async def cargar_padron(
 
 
 # ---------------------------------------------------------------------------
-# COMPLEMENTAR — GET (con filtro de programa)
+# COMPLEMENTAR — GET
 # ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/complementar")
@@ -775,7 +823,7 @@ def get_complementar(
 
 
 # ---------------------------------------------------------------------------
-# GUARDAR COMPLEMENTO — SOLO tabla_complementaria
+# GUARDAR COMPLEMENTO
 # ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/guardar-complemento")
@@ -857,7 +905,7 @@ def generar_analisis(
 
 
 # ---------------------------------------------------------------------------
-# ANALISIS — GET (con filtros viabilidad + programa + búsqueda)
+# ANALISIS — GET
 # ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/analisis")
@@ -959,22 +1007,18 @@ def acciones_manuales(
 
     accion = request.accion
     if accion == "viable":
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET viabilidad = 'viable' WHERE `{pk}` IN ({in_clause})"), ph)
+        db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como Viables"
     elif accion == "no_viable":
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+        db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como No Viables"
     elif accion == "quitar_pagada":
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET pagada = 1, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+        db_proyecto.execute(text(f"UPDATE tabla_analisis SET pagada=1, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como Pagados"
     elif accion == "quitar_nd":
         motivo = request.valor or "ND"
         ph["motivo_nd"] = motivo
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET nd = :motivo_nd, viabilidad = 'no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+        db_proyecto.execute(text(f"UPDATE tabla_analisis SET nd=:motivo_nd, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
         msg = f"{len(request.ids)} registros marcados como No Deudores ({motivo})"
     else:
         raise HTTPException(status_code=400, detail=f"Acción '{accion}' no reconocida.")
@@ -997,7 +1041,6 @@ _REGLAS_CALLES = [
     (r" {2,}"," "),
 ]
 _COMPILED_REGLAS = [(re.compile(pat, re.IGNORECASE), repl) for pat, repl in _REGLAS_CALLES]
-
 
 def _aplicar_regex_calles(texto: str) -> str:
     if not texto:

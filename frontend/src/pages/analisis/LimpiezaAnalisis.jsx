@@ -6,100 +6,165 @@ import './LimpiezaAnalisis.css';
 
 const LIMIT = 50;
 
-// ── Reglas de detección de errores ──────────────────────────────────────────
-// Cada regla recibe (valor, colName, allRow) y devuelve string con motivo o null
+// ── Columnas de fecha exactas por proyecto ───────────────────────────────────
+// Usamos la misma lista que el backend _DATE_COLS para no detectar falsos positivos.
+const FECHA_COLS_POR_PROYECTO = {
+  pensiones:          new Set(['ultimo_abono','fecha_alta','ultima_aportacion','fecha_convenio','fecha_asignacion']),
+  apa_tlajomulco:     new Set(['fecha_lectura']),
+  licencias_gdl:      new Set(['fecemi']),
+  predial_gdl:        new Set([]),
+  predial_tlajomulco: new Set([]),
+  estado:             new Set(['fecha_recepcion','fecha_documento_determinante','fecha_notificacion','exigible']),
+};
 
+// Columnas de RFC exactas (solo si la columna se llama exactamente "rfc")
+function isRFCCol(col) { return col === 'rfc'; }
+
+// Columnas que DEFINITIVAMENTE son fechas para este proyecto
+function isDateColForProject(col, slug) {
+  const cols = FECHA_COLS_POR_PROYECTO[slug];
+  return cols ? cols.has(col) : false;
+}
+
+// Formato de fechas por proyecto (para visualización y validación)
+const FORMATO_FECHA = {
+  estado:             'es-long',
+  apa_tlajomulco:     'dd/mm/yyyy',
+  predial_tlajomulco: 'dd/mm/yyyy',
+  predial_gdl:        'dd/mm/yyyy',
+  licencias_gdl:      'dd/mm/yyyy',
+  pensiones:          'dd/mes/yyyy',
+};
+
+const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+function formatDateForProject(val, slug) {
+  if (!val) return val;
+  const s = String(val).trim();
+  // Parsear: soporta "YYYY-MM-DD", "YYYY-MM-DD HH:MM:SS", ISO
+  let d;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    d = new Date(s.substring(0, 10) + 'T00:00:00');
+  } else {
+    d = new Date(s);
+  }
+  if (isNaN(d.getTime())) return s; // no parseable, devolver tal cual
+
+  const fmt = FORMATO_FECHA[slug] || 'dd/mm/yyyy';
+  const day  = String(d.getDate()).padStart(2, '0');
+  const mon  = String(d.getMonth() + 1).padStart(2, '0');
+  const mes  = MESES_ES[d.getMonth()];
+  const year = d.getFullYear();
+
+  if (fmt === 'es-long')    return `${parseInt(day)} de ${mes} de ${year}`;
+  if (fmt === 'dd/mes/yyyy') return `${day}/${mes}/${year}`;
+  return `${day}/${mon}/${year}`;
+}
+
+function checkDateFormat(val, slug) {
+  // Verifica si el valor ya está en el formato correcto del proyecto.
+  // El backend almacena fechas en ISO (YYYY-MM-DD o datetime). Si viene así, es correcto.
+  // Si viene en otro formato de texto ya formateado, verificamos.
+  if (!val) return null;
+  const s = String(val).trim();
+  // Si viene en formato ISO del backend → correcto, no reportar error
+  if (/^\d{4}-\d{2}-\d{2}(T| |$)/.test(s)) return null;
+
+  const fmt = FORMATO_FECHA[slug] || 'dd/mm/yyyy';
+  let ok = false;
+  if (fmt === 'es-long')     ok = /^\d{1,2} de [a-záéíóú]+ de \d{4}$/i.test(s);
+  else if (fmt === 'dd/mes/yyyy') ok = /^\d{2}\/[a-záéíóú]+\/\d{4}$/i.test(s);
+  else                       ok = /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+
+  if (!ok) {
+    const label = { 'es-long': '"10 de marzo de 2026"', 'dd/mes/yyyy': '"10/marzo/2026"', 'dd/mm/yyyy': '"10/03/2026"' }[fmt] || '"dd/mm/aaaa"';
+    return `Formato de fecha incorrecto (esperado ${label})`;
+  }
+  return null;
+}
+
+// Columnas de colonia/calle/CP con nombre EXACTO o muy específico
+function isColoniaCol(col) {
+  return col === 'colonia' || col === 'colonia_ubic' || col === 'ubic_colonia' ||
+    col === 'afiliado_colonia' || col === 'aval_colonia' || col === 'colonia_3';
+}
+function isCalleCol(col) {
+  return col === 'calle' || col === 'calle_numero' || col === 'ubicacion' ||
+    col === 'domicilio' || col === 'afiliado_calle' || col === 'aval_calle';
+}
+function isCPCol(col) { return col === 'cp' || col === 'afiliado_cp' || col === 'aval_cp'; }
+
+function isPhoneCol(col) {
+  return col === 'afiliado_telefono' || col === 'afiliado_celular' || col === 'afiliado_lada' ||
+    col === 'aval_telefono' || col === 'aval_celular' || col === 'aval_lada';
+}
+
+// ── Detección de errores (solo cuando hay un valor presente) ─────────────────
 const today = new Date();
 today.setHours(0, 0, 0, 0);
 const EPOCH_ERROR = new Date('1900-01-02');
 
-function isDateCol(col) {
-  return /fecha|abono|aportacion|alta|fec|convenio|asignacion|emision/i.test(col);
-}
-function isExtIntCol(col) {
-  return /num.*ext|ext.*num|n.*ext|no.*ext|num.*int|int.*num|n.*int|no.*int|exterior|interior/i.test(col);
-}
-function isPhoneCol(col) {
-  return /telefono|celular|lada|tel|cel/i.test(col);
-}
-function isNumericOnlyCol(col) {
-  return /^(cp|codigo_postal|afiliado_cp|aval_cp|zona|subzona|folio|cvereq|axoreq|recaud|cuenta$|afiliado$|prestamo$|licencia$|credito$)/i.test(col);
-}
-function isGastosCol(col) {
-  return /gastos|cobro|ejecucion|notif|multa(?!_virtual)|actualizacion/i.test(col);
-}
+function detectErrors(val, col, slug) {
+  const s = val !== null && val !== undefined ? String(val).trim() : '';
 
-const DATE_FORMATS_DETECT = [
-  /^\d{4}-\d{2}-\d{2}/, /^\d{2}\/\d{2}\/\d{4}/, /^\d{2}-\d{2}-\d{4}/
-];
+  // Vacíos en campos de dirección importantes
+  if (s === '') {
+    if (isColoniaCol(col)) return 'Colonia vacía';
+    if (isCalleCol(col))   return 'Calle/domicilio vacío';
+    if (isCPCol(col))      return 'CP vacío';
+    return null;
+  }
 
-function parseAnyDate(val) {
-  if (!val) return null;
-  const s = String(val).trim();
-  // Check for zero-date patterns
-  if (/^0+[-/]0+[-/]0+/.test(s)) return 'zero';
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d;
-  return null;
-}
-
-function detectErrors(val, col, row) {
-  if (val === null || val === undefined || val === '') return null;
-  const s = String(val).trim();
-  const reasons = [];
-
-  // 1. Fecha futura, cero, o 1900
-  if (isDateCol(col)) {
-    const d = parseAnyDate(s);
-    if (d === 'zero') reasons.push('Fecha en cero');
-    else if (d instanceof Date) {
-      if (d <= EPOCH_ERROR) reasons.push('Fecha inválida (1900)');
-      else if (d > today) reasons.push('Fecha futura');
+  // RFC: exactamente la columna "rfc", longitud 12 o 13
+  if (isRFCCol(col)) {
+    const clean = s.replace(/\s/g, '');
+    if (clean.length < 12 || clean.length > 13) {
+      return `RFC con longitud inválida (${clean.length} caracteres, esperado 12-13)`;
     }
+    return null;
   }
 
-  // 2. Número exterior/interior parece fecha
-  if (isExtIntCol(col) && DATE_FORMATS_DETECT.some(r => r.test(s))) {
-    reasons.push('Número con formato de fecha');
+  // Fechas: solo para columnas que son fechas en este proyecto
+  if (isDateColForProject(col, slug)) {
+    // Intentar parsear
+    let d = null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      d = new Date(s.substring(0, 10) + 'T00:00:00');
+    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+      const [dd, mm, yyyy] = s.substring(0, 10).split('/');
+      d = new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+    }
+
+    if (d && !isNaN(d.getTime())) {
+      if (d <= EPOCH_ERROR) return 'Fecha inválida (época 1900)';
+      if (d > today)        return 'Fecha futura';
+    }
+
+    // Verificar formato solo si no viene en ISO del backend
+    const fmtErr = checkDateFormat(s, slug);
+    if (fmtErr) return fmtErr;
+
+    return null;
   }
 
-  // 3. Gastos en cero o vacío
-  if (isGastosCol(col)) {
-    const n = parseFloat(s);
-    if (!isNaN(n) && n === 0) reasons.push('Gasto en cero');
-  }
-
-  // 4. Caracteres mal codificados (mojibake típico)
+  // Mojibake — solo si hay caracteres claramente corruptos
   if (/[ÃÂ§Â¡Â©Ã¼Ã³Ã±Ã©Ã­Ã¡]/u.test(s)) {
-    reasons.push('Posible error de codificación (tildes/caracteres)');
+    return 'Posible error de codificación';
   }
 
-  // 5. Palabras cortadas: texto corto que termina en consonante inusual sin vocal final
-  if (typeof val === 'string' && s.length > 3 && s.length < 8
-    && /[bcdfghjklmnpqrstvwxyz]$/i.test(s)
-    && !/\d/.test(s)
-    && !isNumericOnlyCol(col)) {
-    reasons.push('Posible texto cortado');
-  }
-
-  // 6. Letras donde solo deberían ir números
-  if (isNumericOnlyCol(col) && /[a-zA-Z]/.test(s)) {
-    reasons.push('Letras en campo numérico');
-  }
-
-  // 7. Teléfono con longitud incorrecta
+  // Teléfono
   if (isPhoneCol(col)) {
     const digits = s.replace(/\D/g, '');
     if (digits.length > 0 && digits.length !== 8 && digits.length !== 10 && digits.length !== 13) {
-      reasons.push(`Teléfono inválido (${digits.length} dígitos, esperado 8, 10 o 13)`);
+      return `Teléfono inválido (${digits.length} dígitos, esperado 8, 10 o 13)`;
     }
+    return null;
   }
 
-  return reasons.length > 0 ? reasons.join(' · ') : null;
+  return null;
 }
 
-// ── Íconos SVG inline ───────────────────────────────────────────────────────
-
+// ── Íconos SVG inline ────────────────────────────────────────────────────────
 const Icon = ({ d, d2, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -108,12 +173,15 @@ const Icon = ({ d, d2, size = 16 }) => (
 );
 
 const ICONS = {
-  spaces:  { d:"M4 6h16M4 12h16M4 18h7", d2:"M15 18l4-4m0 0l4 4m-4-4v8" },
-  streets: { d:"M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3" },
-  upload:  { d:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", d2:"M17 8l-5-5-5 5M12 3v12" },
-  search:  { d:"M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0" },
-  filter:  { d:"M22 3H2l8 9.46V19l4 2V12.46L22 3z" },
-  chevron: { d:"M6 9l6 6 6-6" },
+  spaces:    { d:"M4 6h16M4 12h16M4 18h7", d2:"M15 18l4-4m0 0l4 4m-4-4v8" },
+  streets:   { d:"M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3" },
+  upload:    { d:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", d2:"M17 8l-5-5-5 5M12 3v12" },
+  search:    { d:"M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0" },
+  chevron:   { d:"M6 9l6 6 6-6" },
+  save:      { d:"M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z", d2:"M17 21v-8H7v8M7 3v5h8" },
+  sort_asc:  { d:"M12 5l-7 7h14l-7-7z" },
+  sort_desc: { d:"M12 19l7-7H5l7 7z" },
+  sort_none: { d:"M12 5l-4 4h8l-4-4zM12 19l4-4H8l4 4z" },
 };
 
 const VIABILIDAD_CONFIG = {
@@ -122,37 +190,44 @@ const VIABILIDAD_CONFIG = {
   pendiente: { label: 'Pendiente', bg: '#feebc8', color: '#9c4221', dot: '#ed8936' },
 };
 
-// ── Componente principal ────────────────────────────────────────────────────
-
+// ── Componente principal ─────────────────────────────────────────────────────
 export default function LimpiezaAnalisis() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
 
-  const [programas,     setProgramas]     = useState([]);
-  const [programa,      setPrograma]      = useState('todos');
+  const [programas,   setProgramas]   = useState([]);
+  const [programa,    setPrograma]    = useState('todos');
+  const [data,        setData]        = useState({ rows: [], total: 0, pk: null });
+  const [loading,     setLoading]     = useState(false);
+  const [page,        setPage]        = useState(1);
+  const [filtroVia,   setFiltroVia]   = useState('');
+  const [busqueda,    setBusqueda]    = useState('');
+  const [draftBusq,   setDraftBusq]   = useState('');
+  const [selected,    setSelected]    = useState(new Set());
+  const [message,     setMessage]     = useState(null);
+  const [ejecutando,  setEjecutando]  = useState(false);
+  const [stats,       setStats]       = useState(null);
+  const [ndMotivo,    setNdMotivo]    = useState('');
+  const [showNdInput, setShowNdInput] = useState(false);
 
-  const [data,          setData]          = useState({ rows: [], total: 0, pk: null });
-  const [loading,       setLoading]       = useState(false);
-  const [page,          setPage]          = useState(1);
-  const [filtroVia,     setFiltroVia]     = useState('');
-  const [busqueda,      setBusqueda]      = useState('');
-  const [draftBusq,     setDraftBusq]     = useState('');
-  const [selected,      setSelected]      = useState(new Set());
-  const [message,       setMessage]       = useState(null);
-  const [ejecutando,    setEjecutando]    = useState(false);
-  const [stats,         setStats]         = useState(null);
-  const [ndMotivo,      setNdMotivo]      = useState('');
-  const [showNdInput,   setShowNdInput]   = useState(false);
+  // Edición inline
+  const [editedCells,  setEditedCells]  = useState({});
+  const [savingCells,  setSavingCells]  = useState(false);
+  const [editingCell,  setEditingCell]  = useState(null);
+
+  // Ordenamiento
+  const [sortCol,  setSortCol]  = useState(null);
+  const [sortDir,  setSortDir]  = useState('asc');
 
   // CSV masivo
-  const [showCsvModal,  setShowCsvModal]  = useState(false);
-  const [csvFile,       setCsvFile]       = useState(null);
-  const [csvLoading,    setCsvLoading]    = useState(false);
-  const [csvResult,     setCsvResult]     = useState(null);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFile,      setCsvFile]      = useState(null);
+  const [csvLoading,   setCsvLoading]   = useState(false);
+  const [csvResult,    setCsvResult]    = useState(null);
   const csvInputRef = useRef();
 
   const totalPages = Math.max(1, Math.ceil(data.total / LIMIT));
+  const pendingCellCount = Object.keys(editedCells).length;
 
-  // ── Cargar programas cuando cambia proyecto ───────────────────────────────
   useEffect(() => {
     if (!proyectoSlug) { setProgramas([]); setPrograma('todos'); return; }
     api.get(`/analisis/${proyectoSlug}/programas`)
@@ -160,24 +235,23 @@ export default function LimpiezaAnalisis() {
       .catch(() => setProgramas([]));
   }, [proyectoSlug]);
 
-  // ── Cargar datos ──────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
       const params = { page, limit: LIMIT };
-      if (filtroVia)              params.viabilidad = filtroVia;
-      if (busqueda)               params.busqueda   = busqueda;
-      if (programa !== 'todos')   params.programa   = programa;
+      if (filtroVia)            params.viabilidad = filtroVia;
+      if (busqueda)             params.busqueda   = busqueda;
+      if (programa !== 'todos') params.programa   = programa;
+      if (sortCol)              { params.sort_col = sortCol; params.sort_dir = sortDir; }
       const res = await api.get(`/analisis/${proyectoSlug}/analisis`, { params });
       setData(res.data);
       setSelected(new Set());
+      setEditedCells({});
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error cargando análisis.');
-    } finally {
-      setLoading(false);
-    }
-  }, [proyectoSlug, page, filtroVia, busqueda, programa]);
+    } finally { setLoading(false); }
+  }, [proyectoSlug, page, filtroVia, busqueda, programa, sortCol, sortDir]);
 
   const loadStats = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -188,27 +262,58 @@ export default function LimpiezaAnalisis() {
   }, [proyectoSlug]);
 
   useEffect(() => { loadData(); loadStats(); }, [loadData, loadStats]);
-  useEffect(() => { setPage(1); }, [proyectoSlug, filtroVia, busqueda, programa]);
+  useEffect(() => { setPage(1); }, [proyectoSlug, filtroVia, busqueda, programa, sortCol, sortDir]);
 
   const showMsg = (type, text) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 5000);
   };
 
-  // ── Selección ─────────────────────────────────────────────────────────────
-  const toggleSelect = (pkVal) => {
+  // Selección
+  const toggleSelect = pkVal => {
     setSelected(prev => {
       const next = new Set(prev);
       next.has(pkVal) ? next.delete(pkVal) : next.add(pkVal);
       return next;
     });
   };
-  const toggleAll = (e) => {
+  const toggleAll = e => {
     if (e.target.checked) setSelected(new Set(data.rows.map(r => r[data.pk])));
     else setSelected(new Set());
   };
 
-  // ── Acciones manuales ─────────────────────────────────────────────────────
+  // Ordenamiento
+  const handleSort = col => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+  const getSortIcon = col => {
+    if (sortCol !== col) return <Icon {...ICONS.sort_none} size={10} />;
+    return sortDir === 'asc' ? <Icon {...ICONS.sort_asc} size={10} /> : <Icon {...ICONS.sort_desc} size={10} />;
+  };
+
+  // Edición inline
+  const handleCellDblClick = (pkVal, col) => setEditingCell({ pkVal, col });
+  const handleCellChange = (pkVal, col, value) => {
+    setEditedCells(prev => ({ ...prev, [pkVal]: { ...(prev[pkVal] || {}), [col]: value } }));
+  };
+  const handleCellBlur = () => setEditingCell(null);
+
+  const handleSaveCells = async () => {
+    if (pendingCellCount === 0) return;
+    setSavingCells(true);
+    try {
+      const payload = Object.entries(editedCells).map(([pk_value, campos]) => ({ pk_value, campos }));
+      await api.post(`/analisis/${proyectoSlug}/actualizar-analisis`, payload);
+      showMsg('success', `${pendingCellCount} registro(s) guardados.`);
+      setEditedCells({});
+      loadData(); loadStats();
+    } catch (err) {
+      showMsg('error', err.response?.data?.detail || 'Error al guardar.');
+    } finally { setSavingCells(false); }
+  };
+
+  // Acciones manuales
   const ejecutarAccion = async (accion, valor = null) => {
     if (selected.size === 0) { showMsg('error', 'Selecciona al menos un registro.'); return; }
     setEjecutando(true);
@@ -222,9 +327,10 @@ export default function LimpiezaAnalisis() {
     } finally { setEjecutando(false); }
   };
 
-  // ── Limpieza ──────────────────────────────────────────────────────────────
-  const ejecutarLimpieza = async (tipo) => {
-    if (!window.confirm(`¿Ejecutar "${tipo === 'calles' ? 'Normalizar calles' : 'Limpiar espacios'}" sobre toda la tabla?`)) return;
+  // Limpieza
+  const ejecutarLimpieza = async tipo => {
+    const nombre = tipo === 'calles' ? 'Normalizar calles' : 'Limpiar espacios';
+    if (!window.confirm(`¿Ejecutar "${nombre}" sobre toda la tabla?`)) return;
     setEjecutando(true);
     try {
       const endpoint = tipo === 'calles'
@@ -238,7 +344,7 @@ export default function LimpiezaAnalisis() {
     } finally { setEjecutando(false); }
   };
 
-  // ── CSV masivo ────────────────────────────────────────────────────────────
+  // CSV masivo viabilidad
   const handleCsvUpload = async () => {
     if (!csvFile) return;
     setCsvLoading(true);
@@ -250,21 +356,17 @@ export default function LimpiezaAnalisis() {
       setCsvResult(res.data);
       loadData(); loadStats();
     } catch (err) {
-      setCsvResult({ success: false, message: err.response?.data?.detail || 'Error al cargar CSV.', procesados: 0, errores: [] });
+      setCsvResult({ success: false, message: err.response?.data?.detail || 'Error.', procesados: 0, errores: [] });
     } finally { setCsvLoading(false); }
   };
 
-  const safeStr = (v) => v !== null && v !== undefined ? String(v) : '';
-
-  // ── Columnas de la tabla ──────────────────────────────────────────────────
+  const safeStr = v => v !== null && v !== undefined ? String(v) : '';
   const allCols = data.rows.length > 0 ? Object.keys(data.rows[0]).filter(c => !c.startsWith('_')) : [];
 
   if (!proyectoSlug) {
     return (
       <div className="la-page">
-        <div className="la-header">
-          <h1 className="la-title">Limpieza y Análisis</h1>
-        </div>
+        <div className="la-header"><h1 className="la-title">Limpieza y Análisis</h1></div>
         <div className="la-no-project">
           <p>Selecciona un proyecto para continuar.</p>
           <select className="la-select" value="" onChange={e => setProyectoSlug(e.target.value)}>
@@ -276,17 +378,12 @@ export default function LimpiezaAnalisis() {
     );
   }
 
-  const proyectoActual = proyectos.find(p => p.slug === proyectoSlug);
-
   return (
     <div className="la-page">
 
-      {/* ── TOOLBAR ─────────────────────────────────────────────────────── */}
+      {/* ── TOOLBAR ───────────────────────────────────────────────────────── */}
       <div className="la-toolbar">
-
-        {/* Dropdowns izquierda */}
         <div className="la-dropdowns">
-          {/* Proyecto */}
           <div className="la-select-wrap">
             <span className="la-select-label">Proyecto:</span>
             <div className="la-dropdown">
@@ -297,8 +394,6 @@ export default function LimpiezaAnalisis() {
               <span className="la-chevron"><Icon {...ICONS.chevron} size={14} /></span>
             </div>
           </div>
-
-          {/* Programa */}
           <div className="la-select-wrap">
             <span className="la-select-label">Programa:</span>
             <div className="la-dropdown">
@@ -309,17 +404,10 @@ export default function LimpiezaAnalisis() {
               <span className="la-chevron"><Icon {...ICONS.chevron} size={14} /></span>
             </div>
           </div>
-
-          {/* Barra de búsqueda */}
           <form className="la-search-form" onSubmit={e => { e.preventDefault(); setBusqueda(draftBusq); setPage(1); }}>
             <span className="la-search-icon"><Icon {...ICONS.search} size={14} /></span>
-            <input
-              className="la-search-input"
-              type="text"
-              placeholder="Buscar…"
-              value={draftBusq}
-              onChange={e => setDraftBusq(e.target.value)}
-            />
+            <input className="la-search-input" type="text" placeholder="Buscar…"
+              value={draftBusq} onChange={e => setDraftBusq(e.target.value)} />
             {busqueda && (
               <button type="button" className="la-search-clear"
                 onClick={() => { setBusqueda(''); setDraftBusq(''); }}>✕</button>
@@ -327,78 +415,39 @@ export default function LimpiezaAnalisis() {
           </form>
         </div>
 
-        {/* Iconos herramientas derecha */}
         <div className="la-tools">
           <button className="la-tool-btn" onClick={() => ejecutarLimpieza('espacios')} disabled={ejecutando}
-            title="Limpiar espacios extras">
-            <Icon {...ICONS.spaces} />
-            <span>Espacios</span>
+            title="Elimina espacios duplicados y espacios al inicio/fin en todos los campos de texto">
+            <Icon {...ICONS.spaces} /><span>Espacios</span>
           </button>
           <button className="la-tool-btn" onClick={() => ejecutarLimpieza('calles')} disabled={ejecutando}
-            title="Normalizar calles (regex)">
-            <Icon {...ICONS.streets} />
-            <span>Calles</span>
+            title="Normaliza abreviaturas: Av. → Avenida, Blvd → Boulevard, Gpe → Guadalupe…">
+            <Icon {...ICONS.streets} /><span>Calles</span>
           </button>
-          <button className="la-tool-btn la-tool-btn--accent" onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
-            title="Cargar viabilidad/pagos desde CSV">
-            <Icon {...ICONS.upload} />
-            <span>Cargar CSV</span>
+          <button className="la-tool-btn la-tool-btn--warning"
+            onClick={() => ejecutarAccion('quitar_pagada')}
+            disabled={ejecutando || selected.size === 0}
+            title="Marca los seleccionados como No viable (Pagada). Siguen visibles en la tabla.">
+            💰 <span>Pagadas</span>
           </button>
+          <button className="la-tool-btn la-tool-btn--warning"
+            onClick={() => setShowNdInput(v => !v)}
+            disabled={ejecutando || selected.size === 0}
+            title="Marca los seleccionados como No viable (No Deudor / ND). Siguen visibles.">
+            📋 <span>ND</span>
+          </button>
+          <button className="la-tool-btn la-tool-btn--accent"
+            onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
+            title="Carga viabilidad y datos de pago de forma masiva desde CSV o Excel">
+            <Icon {...ICONS.upload} /><span>Cargar CSV</span>
+          </button>
+          {pendingCellCount > 0 && (
+            <button className="la-tool-btn la-tool-btn--save" onClick={handleSaveCells} disabled={savingCells}
+              title={`Guardar ${pendingCellCount} celda(s) editada(s) en tabla_analisis`}>
+              <Icon {...ICONS.save} /><span>{savingCells ? 'Guardando…' : `Guardar (${pendingCellCount})`}</span>
+            </button>
+          )}
         </div>
-      </div>
-
-      {/* ── STATS ───────────────────────────────────────────────────────── */}
-      {stats && (
-        <div className="la-stats">
-          {[
-            { label: 'Padrón',     val: stats.padron,     cls: '' },
-            { label: 'Análisis',   val: stats.analisis,   cls: '' },
-            { label: 'Viables',    val: stats.viable,     cls: 'green' },
-            { label: 'No viables', val: stats.no_viable,  cls: 'red' },
-            { label: 'Pendientes', val: stats.pendiente,  cls: 'amber' },
-          ].map(s => (
-            <div key={s.label} className={`la-stat la-stat--${s.cls || 'neutral'}`}>
-              <span className="la-stat-num">{(s.val ?? 0).toLocaleString()}</span>
-              <span className="la-stat-lbl">{s.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── ACCIONES / FILTROS ──────────────────────────────────────────── */}
-      <div className="la-actions-row">
-
-        {/* Filtro viabilidad */}
-        <select className="la-filter-select" value={filtroVia} onChange={e => setFiltroVia(e.target.value)}>
-          <option value="">Todos los estados</option>
-          <option value="viable">Viables</option>
-          <option value="no_viable">No viables</option>
-          <option value="pendiente">Pendientes</option>
-        </select>
-
-        {/* Botones de acción masiva */}
-        <div className="la-action-btns">
-          <button onClick={() => ejecutarAccion('viable')}
-            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--viable">
-            ✓ Viable
-          </button>
-          <button onClick={() => ejecutarAccion('no_viable')}
-            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--novia">
-            ✗ No viable
-          </button>
-          <button onClick={() => ejecutarAccion('quitar_pagada')}
-            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--pagada">
-            💰 Pagada
-          </button>
-          <button onClick={() => setShowNdInput(v => !v)}
-            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--nd">
-            📋 ND
-          </button>
-        </div>
-
-        {selected.size > 0 && (
-          <span className="la-selected-count">{selected.size} seleccionados</span>
-        )}
       </div>
 
       {/* Input motivo ND */}
@@ -411,22 +460,55 @@ export default function LimpiezaAnalisis() {
                 ejecutarAccion('quitar_nd', ndMotivo);
                 setNdMotivo(''); setShowNdInput(false);
               }
-            }}
-          />
+            }} />
           <button className="la-btn la-btn--viable"
             onClick={() => { ejecutarAccion('quitar_nd', ndMotivo); setNdMotivo(''); setShowNdInput(false); }}
-            disabled={!ndMotivo.trim() || ejecutando}>
-            Confirmar
-          </button>
-          <button className="la-btn la-btn--ghost" onClick={() => { setShowNdInput(false); setNdMotivo(''); }}>
-            Cancelar
-          </button>
+            disabled={!ndMotivo.trim() || ejecutando}>Confirmar</button>
+          <button className="la-btn la-btn--ghost" onClick={() => { setShowNdInput(false); setNdMotivo(''); }}>Cancelar</button>
         </div>
       )}
 
+      {/* ── STATS ─────────────────────────────────────────────────────────── */}
+      {stats && (
+        <div className="la-stats">
+          {[
+            { label: 'Padrón',     val: stats.padron,    cls: '' },
+            { label: 'Análisis',   val: stats.analisis,  cls: '' },
+            { label: 'Viables',    val: stats.viable,    cls: 'green' },
+            { label: 'No viables', val: stats.no_viable, cls: 'red' },
+            { label: 'Pendientes', val: stats.pendiente, cls: 'amber' },
+          ].map(s => (
+            <div key={s.label} className={`la-stat la-stat--${s.cls || 'neutral'}`}>
+              <span className="la-stat-num">{(s.val ?? 0).toLocaleString()}</span>
+              <span className="la-stat-lbl">{s.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── ACCIONES / FILTROS ────────────────────────────────────────────── */}
+      <div className="la-actions-row">
+        <select className="la-filter-select" value={filtroVia} onChange={e => setFiltroVia(e.target.value)}>
+          <option value="">Todos los estados</option>
+          <option value="viable">Viables</option>
+          <option value="no_viable">No viables</option>
+          <option value="pendiente">Pendientes</option>
+        </select>
+        <div className="la-action-btns">
+          <button onClick={() => ejecutarAccion('viable')}
+            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--viable"
+            title="Marcar seleccionados como Viable">✓ Viable</button>
+          <button onClick={() => ejecutarAccion('no_viable')}
+            disabled={ejecutando || selected.size === 0} className="la-btn la-btn--novia"
+            title="Marcar seleccionados como No viable">✗ No viable</button>
+        </div>
+        {selected.size > 0 && <span className="la-selected-count">{selected.size} seleccionados</span>}
+        {pendingCellCount > 0 && <span className="la-dirty-count">⚠️ {pendingCellCount} sin guardar</span>}
+      </div>
+
       {message && <div className={`la-message la-message--${message.type}`}>{message.text}</div>}
 
-      {/* ── TABLA ───────────────────────────────────────────────────────── */}
+      {/* ── TABLA ─────────────────────────────────────────────────────────── */}
       {loading ? (
         <div className="la-loading">Cargando datos…</div>
       ) : (
@@ -434,23 +516,20 @@ export default function LimpiezaAnalisis() {
           <table className="la-table">
             <thead>
               <tr>
-                {/* Checkbox */}
                 <th className="la-th la-th--check la-th--sticky-check">
                   <input type="checkbox" onChange={toggleAll}
                     checked={data.rows.length > 0 && selected.size === data.rows.length}
-                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < data.rows.length; }}
-                  />
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < data.rows.length; }} />
                 </th>
-
-                {/* Columnas normales (scrollables) */}
                 {allCols.filter(c => c !== 'viabilidad').map(col => (
-                  <th key={col} className="la-th">{col.replace(/_/g, ' ')}</th>
+                  <th key={col} className="la-th la-th--sortable" onClick={() => handleSort(col)}>
+                    <span className="la-th-inner">
+                      <span>{col.replace(/_/g, ' ')}</span>
+                      <span className="la-sort-icon">{getSortIcon(col)}</span>
+                    </span>
+                  </th>
                 ))}
-
-                {/* Columna fija: Viabilidad */}
                 <th className="la-th la-th--sticky la-th--via">Viabilidad</th>
-
-                {/* Columna fija: Pagos */}
                 <th className="la-th la-th--sticky la-th--pago">Pago</th>
               </tr>
             </thead>
@@ -458,67 +537,79 @@ export default function LimpiezaAnalisis() {
               {data.rows.length === 0 ? (
                 <tr>
                   <td colSpan={allCols.length + 3} className="la-empty">
-                    {busqueda ? 'Sin resultados para la búsqueda.' : 'No hay registros en tabla_analisis. Genera el análisis primero.'}
+                    {busqueda ? 'Sin resultados.' : 'No hay registros. Genera el análisis primero.'}
                   </td>
                 </tr>
-              ) : (
-                data.rows.map(row => {
-                  const pkVal = row[data.pk];
-                  const isSelected = selected.has(pkVal);
-                  return (
-                    <tr key={pkVal} className={`la-tr ${isSelected ? 'la-tr--selected' : ''}`}
-                      onClick={() => toggleSelect(pkVal)}>
-                      <td className="la-td la-td--check la-td--sticky-check" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSelected}
-                          onChange={() => toggleSelect(pkVal)} />
-                      </td>
+              ) : data.rows.map(row => {
+                const pkVal = row[data.pk];
+                const isSelected = selected.has(pkVal);
+                return (
+                  <tr key={pkVal}
+                    className={`la-tr ${isSelected ? 'la-tr--selected' : ''}`}
+                    onClick={() => toggleSelect(pkVal)}>
+                    <td className="la-td la-td--check la-td--sticky-check" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(pkVal)} />
+                    </td>
 
-                      {/* Celdas normales con detección de error */}
-                      {allCols.filter(c => c !== 'viabilidad').map(col => {
-                        const val = row[col];
-                        const err = detectErrors(val, col, row);
+                    {allCols.filter(c => c !== 'viabilidad').map(col => {
+                      const rawVal = editedCells[pkVal]?.[col] ?? row[col];
+                      const err = detectErrors(rawVal, col, proyectoSlug);
+                      const isDirty = editedCells[pkVal]?.[col] !== undefined;
+                      const isEditing = editingCell?.pkVal === pkVal && editingCell?.col === col;
+
+                      // Visualización con formato de fecha si aplica
+                      let displayVal = safeStr(rawVal);
+                      if (isDateColForProject(col, proyectoSlug) && rawVal) {
+                        displayVal = formatDateForProject(safeStr(rawVal), proyectoSlug);
+                      }
+
+                      return (
+                        <td key={col}
+                          className={`la-td ${err ? 'la-td--error' : ''} ${isDirty ? 'la-td--dirty' : ''}`}
+                          title={err ? `⚠ ${err}` : 'Doble clic para editar'}
+                          onDoubleClick={e => { e.stopPropagation(); handleCellDblClick(pkVal, col); }}
+                          onClick={e => e.stopPropagation()}>
+                          {isEditing ? (
+                            <input autoFocus className="la-cell-input"
+                              defaultValue={safeStr(editedCells[pkVal]?.[col] ?? row[col])}
+                              onChange={e => handleCellChange(pkVal, col, e.target.value)}
+                              onBlur={handleCellBlur}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') handleCellBlur(); }}
+                              onClick={e => e.stopPropagation()} />
+                          ) : (
+                            <>
+                              {err && <span className="la-err-dot" title={err}>!</span>}
+                              <span className="la-cell-val">{displayVal}</span>
+                            </>
+                          )}
+                        </td>
+                      );
+                    })}
+
+                    <td className="la-td la-td--sticky la-td--via" onClick={e => e.stopPropagation()}>
+                      {(() => {
+                        const v = row['viabilidad'] || 'pendiente';
+                        const cfg = VIABILIDAD_CONFIG[v] || VIABILIDAD_CONFIG.pendiente;
                         return (
-                          <td key={col}
-                            className={`la-td ${err ? 'la-td--error' : ''}`}
-                            title={err ? `⚠ ${err}` : undefined}
-                          >
-                            {err && <span className="la-err-dot" title={err}>!</span>}
-                            <span className="la-cell-val">{safeStr(val)}</span>
-                          </td>
+                          <span className="la-badge" style={{ background: cfg.bg, color: cfg.color }}>
+                            <span className="la-badge-dot" style={{ background: cfg.dot }} />
+                            {cfg.label}
+                          </span>
                         );
-                      })}
-
-                      {/* Viabilidad — columna fija */}
-                      <td className="la-td la-td--sticky la-td--via"
-                        onClick={e => e.stopPropagation()}>
-                        {(() => {
-                          const v = row['viabilidad'] || 'pendiente';
-                          const cfg = VIABILIDAD_CONFIG[v] || VIABILIDAD_CONFIG.pendiente;
-                          return (
-                            <span className="la-badge"
-                              style={{ background: cfg.bg, color: cfg.color }}>
-                              <span className="la-badge-dot" style={{ background: cfg.dot }} />
-                              {cfg.label}
-                            </span>
-                          );
-                        })()}
-                      </td>
-
-                      {/* Pago — columna fija (placeholder, se rellena desde tabla_pagos) */}
-                      <td className="la-td la-td--sticky la-td--pago"
-                        onClick={e => e.stopPropagation()}>
-                        <span className="la-pago-empty">—</span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
+                      })()}
+                    </td>
+                    <td className="la-td la-td--sticky la-td--pago" onClick={e => e.stopPropagation()}>
+                      <span className="la-pago-empty">—</span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* ── PAGINACIÓN ──────────────────────────────────────────────────── */}
+      {/* ── PAGINACIÓN ────────────────────────────────────────────────────── */}
       {!loading && data.total > 0 && (
         <div className="la-pagination">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Anterior</button>
@@ -527,26 +618,22 @@ export default function LimpiezaAnalisis() {
         </div>
       )}
 
-      {/* ── MODAL CSV MASIVO ────────────────────────────────────────────── */}
+      {/* ── MODAL CSV ─────────────────────────────────────────────────────── */}
       {showCsvModal && (
         <div className="la-modal-overlay" onClick={() => setShowCsvModal(false)}>
           <div className="la-modal" onClick={e => e.stopPropagation()}>
             <h2 className="la-modal-title">Cargar viabilidad / pagos masivo</h2>
             <p className="la-modal-desc">
-              Sube un CSV o Excel con las columnas:<br />
-              <code>cuenta</code> (o la PK del proyecto) · <code>viabilidad</code> · <code>estatus_pago</code> · <code>fecha_pago</code> · <code>monto_pago</code> · <code>observaciones</code> · <code>programa</code><br />
-              Todas las columnas son opcionales excepto la PK.
+              Columnas aceptadas: <code>{data.pk || 'cuenta'}</code> (requerida) · <code>viabilidad</code> · <code>estatus_pago</code> · <code>fecha_pago</code> · <code>monto_pago</code> · <code>observaciones</code> · <code>programa</code>
             </p>
-            <div className="la-csv-drop"
-              onClick={() => csvInputRef.current?.click()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setCsvFile(f); }}
+            <div className="la-csv-drop" onClick={() => csvInputRef.current?.click()}
+              onDrop={e => { e.preventDefault(); setCsvFile(e.dataTransfer.files[0] || null); }}
               onDragOver={e => e.preventDefault()}>
               <input type="file" accept=".csv,.xlsx,.xls" ref={csvInputRef} style={{ display: 'none' }}
                 onChange={e => setCsvFile(e.target.files[0] || null)} />
               {csvFile
                 ? <><span className="la-csv-ok">✓</span><p>{csvFile.name}</p></>
-                : <><Icon {...ICONS.upload} size={28} /><p>Arrastra aquí o haz clic</p></>
-              }
+                : <><Icon {...ICONS.upload} size={28} /><p>Arrastra aquí o haz clic</p></>}
             </div>
             {csvResult && (
               <div className={`la-modal-result ${csvResult.success ? 'ok' : 'err'}`}>
@@ -558,9 +645,7 @@ export default function LimpiezaAnalisis() {
             )}
             <div className="la-modal-actions">
               <button className="la-btn la-btn--primary" onClick={handleCsvUpload}
-                disabled={!csvFile || csvLoading}>
-                {csvLoading ? 'Cargando…' : 'Cargar'}
-              </button>
+                disabled={!csvFile || csvLoading}>{csvLoading ? 'Cargando…' : 'Cargar'}</button>
               <button className="la-btn la-btn--ghost" onClick={() => setShowCsvModal(false)}>Cerrar</button>
             </div>
           </div>

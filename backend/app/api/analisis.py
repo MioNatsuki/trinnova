@@ -32,10 +32,7 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------------
 # Schemas
-# ---------------------------------------------------------------------------
-
 class CargaPadronResponse(BaseModel):
     success: bool
     message: str
@@ -64,10 +61,12 @@ class CargaViabilidadCSVResponse(BaseModel):
     procesados: int = 0
     errores: List[str] = []
 
+class ActualizarAnalisisRequest(BaseModel):
+    pk_value: Any
+    campos: Dict[str, Any]
 
-# ---------------------------------------------------------------------------
+
 # Metadata por proyecto
-# ---------------------------------------------------------------------------
 
 _INFO: Dict[str, Dict] = {
     "apa_tlajomulco": {
@@ -208,11 +207,7 @@ _INFO: Dict[str, Dict] = {
     },
 }
 
-# ---------------------------------------------------------------------------
 # Alias de columnas CSV → nombre real en BD
-# ---------------------------------------------------------------------------
-# Clave: nombre normalizado del CSV  →  nombre real en tabla_padron
-# "Normalizado" = sin tildes, lowercase, espacios→guion_bajo
 
 _COL_ALIAS: Dict[str, Dict[str, str]] = {
     "pensiones": {
@@ -225,9 +220,7 @@ _COL_ALIAS: Dict[str, Dict[str, str]] = {
         "aval_cruza2":           "aval_cruza_2",
         "garantia_calles_cruza": "garantia_calles_cruces",
     },
-    # FIX: alias completos para "estado" — el Excel usa nombres en español con
-    # espacios, preposiciones y sin caracteres especiales que el normalizador
-    # no puede resolver solo con coincidencia parcial.
+
     "estado": {
         # Exactos normalizados que difieren del nombre BD
         "nombre_o_razon_social":                   "nombre_razon_social",
@@ -276,10 +269,7 @@ _DATE_FORMATS = [
     "%m/%d/%Y", "%d-%m-%Y",
 ]
 
-
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _info(slug: str) -> Dict:
     if slug not in _INFO:
@@ -297,13 +287,6 @@ def _normalizar_col(nombre: str) -> str:
 
 
 def _mapear_columnas(slug: str, df_cols: List[str]) -> Dict[str, str]:
-    """
-    Mapea columnas CSV → nombres reales en BD.
-    Orden de resolución:
-      1. Coincidencia exacta normalizada con columnas_padron
-      2. Alias explícito del proyecto (_COL_ALIAS)
-      3. Coincidencia parcial (una contiene a la otra)
-    """
     info = _info(slug)
     alias = _COL_ALIAS.get(slug, {})
     bd_idx = {_normalizar_col(c): c for c in info["columnas_padron"]}
@@ -381,7 +364,6 @@ def _get_tabla_cols(db_session, tabla: str) -> List[str]:
 
 
 def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) -> str:
-    """INSERT explícito para evitar error MySQL 1136."""
     cols_analisis = _get_tabla_cols(db_session, "tabla_analisis")
     set_padron    = set(_get_tabla_cols(db_session, "tabla_padron"))
     set_comp      = set(_get_tabla_cols(db_session, "tabla_complementaria"))
@@ -409,11 +391,7 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) 
         f"LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`\n"
     )
 
-
-# ---------------------------------------------------------------------------
 # PROGRAMAS — GET
-# Lee primero de db_global.programas; si falla, lee de tabla_programas local
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/programas")
 def get_programas(
@@ -457,9 +435,7 @@ def get_programas(
         return []
 
 
-# ---------------------------------------------------------------------------
 # CARGAR VIABILIDAD / PAGOS — CSV masivo
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/cargar-viabilidad-csv", response_model=CargaViabilidadCSVResponse)
 async def cargar_viabilidad_csv(
@@ -618,10 +594,7 @@ async def cargar_viabilidad_csv(
         errores=errores[:30],
     )
 
-
-# ---------------------------------------------------------------------------
 # CARGAR PADRÓN
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/cargar-padron", response_model=CargaPadronResponse)
 async def cargar_padron(
@@ -678,7 +651,7 @@ async def cargar_padron(
     for idx, registro in enumerate(registros):
         try:
             limpio: Dict[str, Any] = {
-                k: _safe_value(v, col_name=k, slug=proyecto_slug)
+                k: _safe_value_v2(v, col_name=k, slug=proyecto_slug)
                 for k, v in registro.items()
             }
             pk_val = limpio.get(pk)
@@ -756,10 +729,7 @@ async def cargar_padron(
         version_id=version_id, errores=errores[:30],
     )
 
-
-# ---------------------------------------------------------------------------
 # COMPLEMENTAR — GET
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/complementar")
 def get_complementar(
@@ -812,9 +782,13 @@ def get_complementar(
         params,
     ).fetchall()
 
+    cols_editables = list(info["columnas_complementaria"])
+    if "programa" not in cols_editables:
+        cols_editables.append("programa")
+        
     return {
         "rows":               [dict(r._mapping) for r in rows],
-        "columnas_editables": info["columnas_complementaria"],
+        "columnas_editables": cols_editables,
         "total":              total,
         "page":               page,
         "limit":              limit,
@@ -822,9 +796,7 @@ def get_complementar(
     }
 
 
-# ---------------------------------------------------------------------------
 # GUARDAR COMPLEMENTO
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/guardar-complemento")
 def guardar_complemento(
@@ -873,9 +845,7 @@ def guardar_complemento(
     return {"success": True, "message": f"{guardados} registros guardados en tabla complementaria."}
 
 
-# ---------------------------------------------------------------------------
 # GENERAR ANÁLISIS
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/generar-analisis")
 def generar_analisis(
@@ -904,9 +874,7 @@ def generar_analisis(
     return {"success": True, "message": f"Análisis generado: {total} registros.", "total": total, "previo": previo}
 
 
-# ---------------------------------------------------------------------------
 # ANALISIS — GET
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/analisis")
 def get_analisis(
@@ -983,9 +951,7 @@ def get_analisis(
     return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
 
 
-# ---------------------------------------------------------------------------
 # ACCIONES MANUALES
-# ---------------------------------------------------------------------------
 
 @router.post("/{proyecto_slug}/acciones-manuales")
 def acciones_manuales(
@@ -1028,9 +994,7 @@ def acciones_manuales(
     return {"success": True, "message": msg}
 
 
-# ---------------------------------------------------------------------------
 # LIMPIEZA
-# ---------------------------------------------------------------------------
 
 _REGLAS_CALLES = [
     (r"\bAv\.?\b","Avenida"),(r"\bBlvd\.?\b","Boulevard"),(r"\bBlvrd\.?\b","Boulevard"),
@@ -1124,9 +1088,7 @@ def limpiar_espacios(
     return {"success": True, "message": f"Espacios limpiados: {actualizados} celdas actualizadas."}
 
 
-# ---------------------------------------------------------------------------
 # VERSIONES
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/versiones")
 def get_versiones(
@@ -1149,9 +1111,7 @@ def get_versiones(
     ]
 
 
-# ---------------------------------------------------------------------------
 # ESTADÍSTICAS
-# ---------------------------------------------------------------------------
 
 @router.get("/{proyecto_slug}/estadisticas")
 def get_estadisticas(
@@ -1182,3 +1142,283 @@ def get_estadisticas(
         "viable": count_via("viable"), "no_viable": count_via("no_viable"),
         "pendiente": count_via("pendiente"),
     }
+
+# CARGA COMPLEMENTO CSV
+
+@router.post("/{proyecto_slug}/cargar-complemento-csv")
+async def cargar_complemento_csv(
+    proyecto_slug: str,
+    file: UploadFile = File(...),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Actualiza tabla_complementaria de forma masiva desde un CSV/Excel.
+    El archivo debe tener la PK del proyecto + las columnas complementarias a actualizar.
+    Columna 'programa' también es aceptada.
+    """
+    from sqlalchemy import text
+
+    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Formato no soportado. Usa CSV o Excel.")
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    cols_permitidas = set(info["columnas_complementaria"] + ["programa"])
+    errores: List[str] = []
+
+    contents = await file.read()
+    try:
+        if file.filename.lower().endswith(".csv"):
+            try:
+                df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", sep=None, engine="python")
+            except UnicodeDecodeError:
+                df = pd.read_csv(io.BytesIO(contents), encoding="latin-1", sep=None, engine="python")
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el archivo: {e}")
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+
+    # Normalizar columnas
+    df.columns = [_normalizar_col(c) for c in df.columns]
+
+    pk_norm = _normalizar_col(pk)
+    if pk_norm not in df.columns:
+        # intentar alias comunes
+        for candidate in ["cuenta", "pk", "prestamo", "licencia", "credito", "cuenta_n", "clave_apa"]:
+            if candidate in df.columns:
+                pk_norm = candidate
+                break
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se encontró la columna PK '{pk}' en el archivo. Columnas: {list(df.columns)[:10]}"
+            )
+
+    db_proyecto = next(get_project_db(proyecto_slug))
+    procesados = 0
+
+    for idx, row in df.iterrows():
+        try:
+            pk_val_raw = row[pk_norm]
+            if pd.isna(pk_val_raw):
+                continue
+            pk_val = int(pk_val_raw) if info["pk_type"] == "int" else str(pk_val_raw).strip()
+
+            # Filtrar solo columnas permitidas que existen en el CSV
+            campos: Dict[str, Any] = {}
+            for col in df.columns:
+                if col == pk_norm:
+                    continue
+                # Permitir tanto nombre normalizado como nombre real
+                col_real = col  # ya está normalizado
+                # Buscar coincidencia en cols_permitidas
+                match = None
+                for cp in cols_permitidas:
+                    if _normalizar_col(cp) == col_real or cp == col_real:
+                        match = cp
+                        break
+                if match is None:
+                    continue
+                v = row[col]
+                if pd.isna(v) or v == "":
+                    continue
+                campos[match] = v
+
+            if not campos:
+                continue
+
+            # Verificar si existe registro en complementaria
+            existe = db_proyecto.execute(
+                text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
+                {"pk_val": pk_val},
+            ).first()
+
+            if existe:
+                set_parts = [f"`{k}` = :{k}" for k in campos]
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                    {**campos, "pk_val": pk_val},
+                )
+            else:
+                all_fields = {pk: pk_val, **campos}
+                cols_str = ", ".join(f"`{k}`" for k in all_fields)
+                vals_str = ", ".join(f":{k}" for k in all_fields)
+                db_proyecto.execute(
+                    text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
+                    all_fields,
+                )
+            procesados += 1
+
+            if procesados % 200 == 0:
+                db_proyecto.commit()
+
+        except Exception as e:
+            errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
+            if len(errores) >= 30:
+                errores.append("Límite de 30 errores alcanzado.")
+                break
+
+    db_proyecto.commit()
+    registrar_log(db_global, current_user.id, "cargar_complemento_csv",
+        f"Complemento masivo {proyecto_slug}: {procesados} registros. Archivo: {file.filename}",
+        proyecto.id)
+
+    return {
+        "success": procesados > 0 or len(errores) == 0,
+        "message": f"{procesados} registros complementados desde '{file.filename}'.",
+        "procesados": procesados,
+        "errores": errores[:30],
+    }
+
+# ACTUALIZAR ANALISIS
+
+@router.post("/{proyecto_slug}/actualizar-analisis")
+def actualizar_analisis_celdas(
+    proyecto_slug: str,
+    cambios: List[ActualizarAnalisisRequest],
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Actualiza celdas individuales en tabla_analisis (edición inline desde UI)."""
+    from sqlalchemy import text
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    db_proyecto = next(get_project_db(proyecto_slug))
+
+    # Obtener columnas reales de tabla_analisis para evitar SQL injection
+    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+    actualizados = 0
+
+    for cambio in cambios:
+        pk_val = cambio.pk_value
+        # Filtrar solo columnas existentes y no la PK
+        campos = {
+            k: v for k, v in cambio.campos.items()
+            if k in cols_validas and k != pk
+        }
+        if not campos:
+            continue
+        set_parts = [f"`{k}` = :{k}" for k in campos]
+        db_proyecto.execute(
+            text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+            {**campos, "pk_val": pk_val},
+        )
+        actualizados += 1
+
+    db_proyecto.commit()
+    registrar_log(
+        db_global, current_user.id, "actualizar_analisis_celdas",
+        f"{actualizados} filas editadas en tabla_analisis de {proyecto_slug}",
+        proyecto.id,
+    )
+    return {"success": True, "message": f"{actualizados} registro(s) actualizados."}
+
+# ANALISIS - TABLA ORDENAMIENTOS
+
+@router.get("/{proyecto_slug}/analisis")
+def get_analisis(
+    proyecto_slug: str,
+    viabilidad: Optional[str] = Query(None),
+    busqueda: Optional[str] = None,
+    programa: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    sort_col: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query("asc"),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    from sqlalchemy import text
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    conditions = []
+    params: Dict[str, Any] = {}
+
+    if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+        conditions.append("viabilidad = :viabilidad")
+        params["viabilidad"] = viabilidad
+
+    if programa and programa != "todos":
+        conditions.append("`programa` = :programa")
+        params["programa"] = programa
+
+    if busqueda:
+        search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
+        parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
+        conditions.append("(" + " OR ".join(parts) + ")")
+        params["busqueda"] = f"%{busqueda}%"
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    db_proyecto = next(get_project_db(proyecto_slug))
+
+    # Validar sort_col contra columnas reales para evitar SQL injection
+    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+    order_col = pk  # default
+    if sort_col and sort_col in cols_validas:
+        order_col = sort_col
+    order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+
+    total = db_proyecto.execute(
+        text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"), params
+    ).first().total
+
+    offset = (page - 1) * limit
+    rows = db_proyecto.execute(
+        text(f"SELECT * FROM tabla_analisis WHERE {where} ORDER BY `{order_col}` {order_dir} LIMIT {limit} OFFSET {offset}"),
+        params,
+    ).fetchall()
+
+    result = []
+    for r in rows:
+        row_dict = dict(r._mapping)
+        adeudo_val = 0
+        for col in info["col_adeudo"]:
+            v = row_dict.get(col)
+            if v is not None:
+                try:
+                    adeudo_val = float(v); break
+                except (TypeError, ValueError):
+                    pass
+        row_dict["_adeudo_display"] = adeudo_val
+        nombre_val = ""
+        for col in info["col_nombre"]:
+            v = row_dict.get(col)
+            if v:
+                nombre_val = str(v); break
+        row_dict["_nombre_display"] = nombre_val
+        calle_val = ""
+        for col in info["col_calle"]:
+            v = row_dict.get(col)
+            if v:
+                calle_val = str(v); break
+        row_dict["_calle_display"] = calle_val
+        result.append(row_dict)
+
+    return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
+
+# CONVERSION DE FECHA
+
+def _safe_value_v2(val: Any, col_name: str = "", slug: str = "") -> Any:
+    """Convierte valores a tipos seguros para MySQL.
+    Para columnas de fecha: parsea desde cualquier formato a datetime python.
+    """
+    if val is None:
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, pd.Timestamp):
+        return val.to_pydatetime()
+    if isinstance(val, str) and col_name in _DATE_COLS.get(slug, []):
+        return _parse_fecha(val)
+    return val

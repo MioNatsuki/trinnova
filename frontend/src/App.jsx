@@ -9,6 +9,8 @@ import UsuariosCRUD from './pages/usuarios/UsuariosCRUD';
 import CargarPadron from './pages/analisis/CargarPadron';
 import Complementar from './pages/analisis/Complementar';
 import LimpiezaAnalisis from './pages/analisis/LimpiezaAnalisis';
+import PlantillasDashboard from './pages/plantillas/PlantillasDashboard';
+import PlantillasCrear from './pages/plantillas/PlantillasCrear';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -55,8 +57,8 @@ function AppRoutes() {
         {/* Plantillas — analista y superadmin (próxima fase) */}
         {isAnalista && (
           <>
-            <Route path="plantillas"       element={<div style={{ padding: 24 }}>Dashboard Plantillas — próximamente</div>} />
-            <Route path="plantillas/crear" element={<div style={{ padding: 24 }}>Subir / Crear Plantilla — próximamente</div>} />
+            <Route path="/plantillas" element={<PlantillasDashboard />} />
+            <Route path="/plantillas/crear" element={<PlantillasCrear />} />
           </>
         )}
 

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
-import UnsavedChangesGuard from '../../components/UnsavedChangesGuard';
+import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './Analisis.css';
 
 const LIMIT = 20;
@@ -11,6 +11,7 @@ const COLS_OCULTAS = new Set(['id_comp']);
 
 export default function Complementar() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
+  const { setDirty } = useNavigationGuard();
 
   const [data, setData]               = useState({ rows: [], columnas_editables: [], total: 0, pk: null });
   const [loading, setLoading]         = useState(false);
@@ -23,11 +24,8 @@ export default function Complementar() {
   const [message, setMessage]         = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [columnasPadron, setColumnasPadron] = useState([]);
-
   const [showGenModal, setShowGenModal] = useState(false);
   const [genInfo, setGenInfo]           = useState(null);
-
-  // CSV masivo
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvFile, setCsvFile]           = useState(null);
   const [csvLoading, setCsvLoading]     = useState(false);
@@ -35,7 +33,12 @@ export default function Complementar() {
   const csvInputRef = useRef();
 
   const totalPages = Math.max(1, Math.ceil(data.total / LIMIT));
-  const isDirty = pendingCount > 0;
+
+  // Sincronizar dirty con el guard de navegación
+  useEffect(() => {
+    setDirty(pendingCount > 0, `Tienes ${pendingCount} registro(s) con cambios sin guardar en Complementar.`);
+    return () => setDirty(false);
+  }, [pendingCount, setDirty]);
 
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -49,8 +52,6 @@ export default function Complementar() {
       setPendingCount(0);
 
       if (res.data.rows.length > 0 && res.data.pk) {
-        // columnas_editables viene del backend y ya incluye "programa" (el backend lo añade).
-        // columnasPadron = columnas de la fila que NO son pk, ni editables, ni ocultas.
         const editablesSet = new Set(res.data.columnas_editables);
         const pk = res.data.pk;
         const todasCols = Object.keys(res.data.rows[0]);
@@ -118,7 +119,7 @@ export default function Complementar() {
         await api.post(`/analisis/${proyectoSlug}/guardar-complemento`, payload);
         setEditedRows({}); setPendingCount(0);
       } catch (err) {
-        showMsg('error', 'Error al guardar: ' + (err.response?.data?.detail || ''));
+        showMsg('error', 'Error: ' + (err.response?.data?.detail || ''));
         setSaving(false); return;
       }
     }
@@ -148,8 +149,7 @@ export default function Complementar() {
     } finally { setCsvLoading(false); }
   };
 
-  // columnas_editables ya viene del backend; el backend es responsable de incluir "programa".
-  // NO manipulamos el array aquí para evitar duplicados.
+  // columnas_editables viene del backend (incluye programa si aplica).
   const columnasEditables = data.columnas_editables;
 
   const renderEditableCell = (row, col) => {
@@ -180,34 +180,36 @@ export default function Complementar() {
 
   return (
     <>
-      <UnsavedChangesGuard isDirty={isDirty} />
-
       <div className="analisis-container">
         <div className="analisis-header">
           <h1>Complementar información</h1>
           <div className="analisis-actions">
+            {/* Buscar — mismo estilo que btn-primary/btn-save */}
             <form onSubmit={e => { e.preventDefault(); setSearch(draftSearch); setPage(1); }}
-              style={{ display: 'flex', gap: 8 }}>
+              style={{ display: 'flex', gap: 6 }}>
               <input type="text" placeholder="Buscar…" value={draftSearch}
                 onChange={e => setDraftSearch(e.target.value)} className="search-input" />
-              <button type="submit" className="btn-secondary btn-sm">Buscar</button>
+              <button type="submit" className="btn-primary btn-sm">Buscar</button>
               {search && (
-                <button type="button" className="btn-secondary btn-sm"
-                  onClick={() => { setSearch(''); setDraftSearch(''); }}>Limpiar</button>
+                <button type="button" className="btn-save btn-sm"
+                  onClick={() => { setSearch(''); setDraftSearch(''); }}>✕ Limpiar</button>
               )}
             </form>
 
+            {/* CSV masivo — mismo estilo */}
             <button onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
-              className="btn-secondary">
+              className="btn-save">
               📂 CSV masivo
             </button>
 
-            <button onClick={handleSave} disabled={saving || generating || pendingCount === 0}
+            <button onClick={handleSave}
+              disabled={saving || generating || pendingCount === 0}
               className="btn-save">
               {saving ? 'Guardando…' : `Guardar${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
             </button>
 
-            <button onClick={handleGuardarYGenerar} disabled={saving || generating}
+            <button onClick={handleGuardarYGenerar}
+              disabled={saving || generating}
               className="btn-primary">
               {generating ? 'Generando…' : '⚡ Guardar y generar análisis'}
             </button>
@@ -253,8 +255,7 @@ export default function Complementar() {
                 <tbody>
                   {data.rows.length === 0 ? (
                     <tr>
-                      <td colSpan={1 + columnasPadron.length + columnasEditables.length}
-                        className="analisis-empty">
+                      <td colSpan={1 + columnasPadron.length + columnasEditables.length} className="analisis-empty">
                         {search ? 'Sin resultados.' : 'No hay registros. Carga un padrón primero.'}
                       </td>
                     </tr>
@@ -295,15 +296,16 @@ export default function Complementar() {
       {showGenModal && (
         <div className="comp-overlay" onClick={() => setShowGenModal(false)}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
-            <h3>⚡ Generar análisis</h3>
+            <div className="comp-modal-header">
+              <h3>⚡ Generar análisis</h3>
+              <button className="comp-modal-x" onClick={() => setShowGenModal(false)}>✕</button>
+            </div>
             {genInfo?.previo > 0 && (
-              <p className="comp-modal-warn">
-                ⚠️ Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.
-              </p>
+              <p className="comp-modal-warn">⚠️ Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.</p>
             )}
-            <p className="comp-modal-desc">Se reconstruirá tabla_analisis con padrón + complementaria.</p>
+            <p className="comp-modal-desc">Se reconstruirá tabla_analisis (padrón + complementaria).</p>
             <div className="comp-modal-footer">
-              <button className="btn-secondary" onClick={() => setShowGenModal(false)}>Cancelar</button>
+              <button className="btn-save" onClick={() => setShowGenModal(false)}>Cancelar</button>
               <button className="btn-primary" onClick={handleConfirmGenerar}>Confirmar y generar</button>
             </div>
           </div>
@@ -314,9 +316,12 @@ export default function Complementar() {
       {showCsvModal && (
         <div className="comp-overlay" onClick={() => setShowCsvModal(false)}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
-            <h3>📂 Complementar masivamente</h3>
+            <div className="comp-modal-header">
+              <h3>📂 Complementar masivamente</h3>
+              <button className="comp-modal-x" onClick={() => setShowCsvModal(false)}>✕</button>
+            </div>
             <p className="comp-modal-desc">
-              El archivo debe incluir la PK del proyecto y las columnas a actualizar:<br />
+              El archivo debe incluir la PK y las columnas a actualizar:<br />
               <code>{data.pk || 'cuenta'}, {columnasEditables.join(', ')}</code>
             </p>
             <div className="comp-csv-drop"
@@ -334,10 +339,10 @@ export default function Complementar() {
               </div>
             )}
             <div className="comp-modal-footer">
+              <button className="btn-save" onClick={() => setShowCsvModal(false)}>Cerrar</button>
               <button className="btn-primary" onClick={handleCsvComplementar} disabled={!csvFile || csvLoading}>
                 {csvLoading ? 'Procesando…' : 'Cargar'}
               </button>
-              <button className="btn-secondary" onClick={() => setShowCsvModal(false)}>Cerrar</button>
             </div>
           </div>
         </div>
@@ -365,15 +370,18 @@ export default function Complementar() {
         .comp-pagination button:hover:not(:disabled){background:var(--clr-active-bg);border-color:var(--clr-accent);}
         .comp-pagination button:disabled{opacity:.4;cursor:not-allowed;}
         .comp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
-        .comp-modal{background:var(--clr-white);border-radius:var(--radius);padding:28px 32px;max-width:560px;width:90%;box-shadow:var(--shadow-md);}
-        .comp-modal h3{font-size:17px;font-weight:600;margin-bottom:14px;color:var(--clr-text);}
-        .comp-modal-warn{color:#c05621;background:#fffaf0;padding:10px 14px;border-radius:8px;border:1px solid #fbd38d;font-size:13px;margin-bottom:12px;}
-        .comp-modal-desc{font-size:13px;color:var(--clr-muted);line-height:1.7;margin-bottom:14px;}
+        .comp-modal{background:var(--clr-white);border-radius:var(--radius);max-width:520px;width:90%;box-shadow:var(--shadow-md);overflow:hidden;}
+        .comp-modal-header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid var(--clr-border);}
+        .comp-modal-header h3{font-size:16px;font-weight:600;color:var(--clr-text);margin:0;}
+        .comp-modal-x{background:none;border:none;font-size:16px;color:var(--clr-muted);cursor:pointer;padding:0;line-height:1;}
+        .comp-modal-x:hover{color:var(--clr-text);}
+        .comp-modal-warn{color:#c05621;background:#fffaf0;padding:10px 14px;border-radius:8px;border:1px solid #fbd38d;font-size:13px;margin:14px 24px 0;}
+        .comp-modal-desc{font-size:13px;color:var(--clr-muted);line-height:1.7;padding:14px 24px 0;}
         .comp-modal-desc code{background:#eef3f9;padding:2px 6px;border-radius:4px;font-size:12px;color:var(--clr-accent);}
-        .comp-modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;}
-        .comp-csv-drop{border:2px dashed var(--clr-border);border-radius:var(--radius);padding:24px;text-align:center;cursor:pointer;margin:14px 0;color:var(--clr-muted);font-size:13px;display:flex;flex-direction:column;align-items:center;gap:8px;transition:border-color .2s,background .2s;}
+        .comp-modal-footer{display:flex;gap:10px;justify-content:flex-end;padding:16px 24px;border-top:1px solid var(--clr-border);margin-top:16px;}
+        .comp-csv-drop{border:2px dashed var(--clr-border);border-radius:var(--radius);padding:24px;text-align:center;cursor:pointer;margin:14px 24px;color:var(--clr-muted);font-size:13px;display:flex;flex-direction:column;align-items:center;gap:8px;transition:border-color .2s,background .2s;}
         .comp-csv-drop:hover{border-color:var(--clr-accent);background:var(--clr-accent-lt);}
-        .comp-csv-result{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:8px;}
+        .comp-csv-result{padding:10px 14px;border-radius:8px;font-size:13px;margin:0 24px 14px;}
         .comp-csv-result.ok{background:#c6f6d5;color:#276749;border:1px solid #9ae6b4;}
         .comp-csv-result.err{background:#fed7d7;color:#9b2c2c;border:1px solid #feb2b2;}
       `}</style>

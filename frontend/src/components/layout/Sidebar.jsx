@@ -1,3 +1,4 @@
+// frontend/src/components/layout/Sidebar.jsx
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -25,10 +26,13 @@ const ICONS = {
   logout:   { d:"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", d2:"M16 17l5-5-5-5M21 12H9" },
 };
 
-const SItem = ({ to, iconKey, label, sub = false }) => (
+// end=true → solo activo si la ruta coincide EXACTAMENTE
+// end=false → activo si la ruta empieza con `to`
+// Para /plantillas queremos end=true para que /plantillas/crear no lo active también
+const SItem = ({ to, iconKey, label, sub = false, exact = false }) => (
   <NavLink
     to={to}
-    end={to === '/'}
+    end={exact || to === '/'}
     className={({ isActive }) =>
       `sidebar-item${sub ? ' sidebar-sub-item' : ''}${isActive ? ' active' : ''}`
     }
@@ -70,55 +74,48 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      {/* INICIO */}
-      <SItem to="/" iconKey="home" label="Inicio" />
+      <SItem to="/" iconKey="home" label="Inicio" exact />
 
-      {/* PROYECTOS */}
       <Section label="Proyectos">
-        <SItem to="/proyectos" iconKey="folder" label="Proyectos" />
+        <SItem to="/proyectos" iconKey="folder" label="Proyectos" exact />
       </Section>
 
-      {/* ANÁLISIS */}
       {isAnalista && (
         <Section label="Análisis">
-          <SItem to="/analisis/cargar"       iconKey="upload"   label="Cargar Padrón"       sub />
-          <SItem to="/analisis/complementar" iconKey="edit"     label="Complementar"        sub />
-          <SItem to="/analisis/limpieza"     iconKey="broom"    label="Limpieza y análisis" sub />
+          <SItem to="/analisis/cargar"       iconKey="upload" label="Cargar Padrón"       sub exact />
+          <SItem to="/analisis/complementar" iconKey="edit"   label="Complementar"        sub exact />
+          <SItem to="/analisis/limpieza"     iconKey="broom"  label="Limpieza y análisis" sub exact />
         </Section>
       )}
 
-      {/* PLANTILLAS */}
       {isAnalista && (
         <Section label="Plantillas">
-          <SItem to="/plantillas"       iconKey="template" label="Dashboard Plantillas" sub />
-          <SItem to="/plantillas/crear" iconKey="plus"     label="Subir / Crear"        sub />
+          {/* exact=true: /plantillas solo activo en /plantillas, no en /plantillas/crear */}
+          <SItem to="/plantillas"       iconKey="template" label="Dashboard Plantillas" sub exact />
+          <SItem to="/plantillas/crear" iconKey="plus"     label="Subir / Crear"        sub exact />
         </Section>
       )}
 
-      {/* EMISIÓN */}
       {canEmision && (
         <Section label="Emisión">
-          <SItem to="/emision/preparacion" iconKey="settings" label="Preparación" sub />
-          <SItem to="/emision/emitir"      iconKey="print"    label="Emisión"     sub />
+          <SItem to="/emision/preparacion" iconKey="settings" label="Preparación" sub exact />
+          <SItem to="/emision/emitir"      iconKey="print"    label="Emisión"     sub exact />
         </Section>
       )}
 
-      {/* CATÁLOGOS */}
       {isSuperadmin && (
         <Section label="Catálogos">
-          <SItem to="/catalogo/documentos" iconKey="catalog" label="Catálogo Documentos" sub />
-          <SItem to="/catalogo/zonas"      iconKey="map"     label="Catálogo Zonas"      sub />
+          <SItem to="/catalogo/documentos" iconKey="catalog" label="Catálogo Documentos" sub exact />
+          <SItem to="/catalogo/zonas"      iconKey="map"     label="Catálogo Zonas"      sub exact />
         </Section>
       )}
 
-      {/* ADMINISTRACIÓN */}
       {isSuperadmin && (
         <Section label="Administración">
-          <SItem to="/usuarios" iconKey="users" label="Usuarios" sub />
+          <SItem to="/usuarios" iconKey="users" label="Usuarios" sub exact />
         </Section>
       )}
 
-      {/* FOOTER */}
       <div className="sidebar-footer">
         <button className="sidebar-logout" onClick={handleLogout}>
           <span className="sidebar-item-icon"><Icon {...ICONS.logout} /></span>

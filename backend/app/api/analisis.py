@@ -16,6 +16,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import io
@@ -357,6 +358,22 @@ def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
     return val
 
 
+def _normalizar_viabilidad(raw: str) -> Optional[str]:
+    """Normaliza variantes de texto a los valores aceptados por el ENUM.
+    Acepta: viable, no_viable, no viable, noviable, pendiente.
+    """
+    if not raw:
+        return None
+    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if key in ("no_viable", "no viable", "noviable", "no-viable"):
+        return "no_viable"
+    if key == "viable":
+        return "viable"
+    if key == "pendiente":
+        return "pendiente"
+    return None
+
+
 def _get_tabla_cols(db_session, tabla: str) -> List[str]:
     from sqlalchemy import text
     rows = db_session.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
@@ -515,9 +532,10 @@ async def cargar_viabilidad_csv(
                     errores.append(f"Fila {idx + 2}: PK '{pk_val}' no es entero.")
                     continue
 
-            if via_col:
-                via_val = str(row[via_col]).strip().lower() if not pd.isna(row[via_col]) else None
-                if via_val and via_val in VIABILIDADES_VALIDAS:
+            if via_col and not pd.isna(row.get(via_col, float('nan'))):
+                raw_via = str(row[via_col]).strip()
+                via_val = _normalizar_viabilidad(raw_via)
+                if via_val:
                     db_proyecto.execute(
                         text(f"UPDATE tabla_analisis SET viabilidad = :v WHERE `{pk}` = :pk"),
                         {"v": via_val, "pk": pk_val},
@@ -571,6 +589,23 @@ async def cargar_viabilidad_csv(
                         {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
                          "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
                     )
+                # Actualizar tabla_analisis también con estatus_pago
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_analisis SET estatus_pago = :ep WHERE `{pk}` = :pk"),
+                    {"ep": estatus_pago, "pk": pk_val},
+                )
+
+            if prog_col and not pd.isna(row.get(prog_col, float('nan'))):
+                prog_val = str(row[prog_col]).strip()
+                # Actualizar programa en tabla_analisis y tabla_padron
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_analisis SET programa = :prog WHERE `{pk}` = :pk"),
+                    {"prog": prog_val, "pk": pk_val},
+                )
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk"),
+                    {"prog": prog_val, "pk": pk_val},
+                )
 
             if (procesados + 1) % 200 == 0:
                 db_proyecto.commit()
@@ -801,48 +836,73 @@ def get_complementar(
 @router.post("/{proyecto_slug}/guardar-complemento")
 def guardar_complemento(
     proyecto_slug: str,
-    datos: List[FilaComplementar],
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
+    datos,           # List[FilaComplementar]
+    current_user,
+    db_global,
 ):
+    """
+    Guarda campos complementarios:
+    - Si el campo existe en tabla_padron   → UPDATE tabla_padron
+    - Si el campo existe en tabla_complementaria → UPDATE/INSERT tabla_complementaria
+    "programa" vive en tabla_padron, así que se actualiza ahí.
+    """
+    from app.db.router import get_project_db
+    from app.services.log_service import registrar_log
     from sqlalchemy import text
 
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    info = _info(proyecto_slug)
+    proyecto = None  # check_project_access ya se llama antes del endpoint
+
+    info = _INFO[proyecto_slug]  # referencia al dict _INFO del archivo
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
+
+    # Columnas reales de cada tabla
+    cols_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
+    cols_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
+
     guardados = 0
 
     for fila in datos:
         pk_val = fila.pk_value
-        campos = {k: v for k, v in fila.campos_complementarios.items() if v is not None and v != ""}
+        all_campos = {k: v for k, v in fila.campos_complementarios.items()
+                      if v is not None and v != ""}
 
-        existe = db_proyecto.execute(
-            text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
-            {"pk_val": pk_val},
-        ).first()
+        # Separar campos según tabla destino
+        campos_padron = {k: v for k, v in all_campos.items() if k in cols_padron and k != pk}
+        campos_comp   = {k: v for k, v in all_campos.items() if k in cols_comp   and k != pk and k not in campos_padron}
 
-        if existe:
-            if campos:
-                set_parts = [f"`{k}` = :{k}" for k in campos]
+        # UPDATE tabla_padron (programa y cualquier otro que viva ahí)
+        if campos_padron:
+            set_parts = [f"`{k}` = :{k}" for k in campos_padron]
+            db_proyecto.execute(
+                text(f"UPDATE tabla_padron SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                {**campos_padron, "pk_val": pk_val},
+            )
+
+        # UPDATE/INSERT tabla_complementaria
+        if campos_comp:
+            existe = db_proyecto.execute(
+                text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
+                {"pk_val": pk_val},
+            ).first()
+            if existe:
+                set_parts = [f"`{k}` = :{k}" for k in campos_comp]
                 db_proyecto.execute(
                     text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                    {**campos, "pk_val": pk_val},
+                    {**campos_comp, "pk_val": pk_val},
                 )
-        else:
-            all_fields = {pk: pk_val, **campos}
-            cols_str = ", ".join(f"`{k}`" for k in all_fields)
-            vals_str = ", ".join(f":{k}" for k in all_fields)
-            db_proyecto.execute(
-                text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
-                all_fields,
-            )
+            else:
+                all_fields = {pk: pk_val, **campos_comp}
+                cols_str = ", ".join(f"`{k}`" for k in all_fields)
+                vals_str = ", ".join(f":{k}" for k in all_fields)
+                db_proyecto.execute(
+                    text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
+                    all_fields,
+                )
         guardados += 1
 
     db_proyecto.commit()
-    registrar_log(db_global, current_user.id, "guardar_complemento",
-        f"Complemento guardado: {guardados} registros en {proyecto_slug}", proyecto.id)
-    return {"success": True, "message": f"{guardados} registros guardados en tabla complementaria."}
+    return {"success": True, "message": f"{guardados} registros guardados."}
 
 
 # GENERAR ANÁLISIS
@@ -872,83 +932,6 @@ def generar_analisis(
         f"tabla_analisis reconstruida en {proyecto_slug}: {total} registros", proyecto.id)
 
     return {"success": True, "message": f"Análisis generado: {total} registros.", "total": total, "previo": previo}
-
-
-# ANALISIS — GET
-
-@router.get("/{proyecto_slug}/analisis")
-def get_analisis(
-    proyecto_slug: str,
-    viabilidad: Optional[str] = Query(None),
-    busqueda: Optional[str] = None,
-    programa: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    from sqlalchemy import text
-
-    check_project_access(proyecto_slug, current_user, db_global)
-    info = _info(proyecto_slug)
-    pk = info["pk"]
-    conditions = []
-    params: Dict[str, Any] = {}
-
-    if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
-        conditions.append("viabilidad = :viabilidad")
-        params["viabilidad"] = viabilidad
-
-    if programa and programa != "todos":
-        conditions.append("`programa` = :programa")
-        params["programa"] = programa
-
-    if busqueda:
-        search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
-        parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
-        conditions.append("(" + " OR ".join(parts) + ")")
-        params["busqueda"] = f"%{busqueda}%"
-
-    where = " AND ".join(conditions) if conditions else "1=1"
-    db_proyecto = next(get_project_db(proyecto_slug))
-
-    total = db_proyecto.execute(
-        text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"), params
-    ).first().total
-
-    offset = (page - 1) * limit
-    rows = db_proyecto.execute(
-        text(f"SELECT * FROM tabla_analisis WHERE {where} ORDER BY `{pk}` LIMIT {limit} OFFSET {offset}"),
-        params,
-    ).fetchall()
-
-    result = []
-    for r in rows:
-        row_dict = dict(r._mapping)
-        adeudo_val = 0
-        for col in info["col_adeudo"]:
-            v = row_dict.get(col)
-            if v is not None:
-                try:
-                    adeudo_val = float(v); break
-                except (TypeError, ValueError):
-                    pass
-        row_dict["_adeudo_display"] = adeudo_val
-        nombre_val = ""
-        for col in info["col_nombre"]:
-            v = row_dict.get(col)
-            if v:
-                nombre_val = str(v); break
-        row_dict["_nombre_display"] = nombre_val
-        calle_val = ""
-        for col in info["col_calle"]:
-            v = row_dict.get(col)
-            if v:
-                calle_val = str(v); break
-        row_dict["_calle_display"] = calle_val
-        result.append(row_dict)
-
-    return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
 
 
 # ACCIONES MANUALES
@@ -1422,3 +1405,37 @@ def _safe_value_v2(val: Any, col_name: str = "", slug: str = "") -> Any:
     if isinstance(val, str) and col_name in _DATE_COLS.get(slug, []):
         return _parse_fecha(val)
     return val
+
+def actualizar_analisis_celdas_PATCH(
+    proyecto_slug: str,
+    cambios,   # List[ActualizarAnalisisRequest]
+    current_user,
+    db_global,
+):
+    """
+    POST /{slug}/actualizar-analisis
+    Actualiza celdas individuales en tabla_analisis (edición inline).
+    """
+    from app.db.router import get_project_db
+    from app.services.log_service import registrar_log
+    from sqlalchemy import text
+
+    info = _INFO[proyecto_slug]
+    pk = info["pk"]
+    db_proyecto = next(get_project_db(proyecto_slug))
+    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+    actualizados = 0
+
+    for cambio in cambios:
+        pk_val = cambio.pk_value
+        campos = {k: v for k, v in cambio.campos.items() if k in cols_validas and k != pk}
+        if not campos: continue
+        set_parts = [f"`{k}` = :{k}" for k in campos]
+        db_proyecto.execute(
+            text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+            {**campos, "pk_val": pk_val},
+        )
+        actualizados += 1
+
+    db_proyecto.commit()
+    return {"success": True, "message": f"{actualizados} registro(s) actualizados."}

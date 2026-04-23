@@ -554,3 +554,70 @@
   cursor: cell;
 }
 
+/* Tabla: columnas ajustadas al contenido (no forzar ancho) */
+.la-table { table-layout: auto; }
+.la-td { white-space: nowrap; }
+
+/* Pago badge */
+.la-pago-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #bee3f8;
+  color: #1a365d;
+}
+
+/* Toolbar nuevos botones */
+.la-tool-btn--warning {
+  background: #fffbf0; border-color: #f6c90e; color: #7d5a00;
+}
+.la-tool-btn--warning:hover:not(:disabled) { background: #fff3cd; border-color: #f0a500; }
+.la-tool-btn--save {
+  background: #f0fff4; border-color: #38a169; color: #276749;
+}
+.la-tool-btn--save:hover:not(:disabled) { background: #c6f6d5; }
+
+/* Dirty count */
+.la-dirty-count {
+  font-size: 12px; color: #9c4221; background: #fffaf0;
+  border: 1px solid #fbd38d; padding: 4px 10px;
+  border-radius: 20px; font-weight: 500;
+}
+
+/* Sortable header */
+.la-th--sortable { cursor: pointer; user-select: none; }
+.la-th--sortable:hover { background: #eef0f3; }
+.la-th-inner { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.la-sort-icon { display: inline-flex; align-items: center; opacity: .5; }
+.la-th--sortable:hover .la-sort-icon { opacity: 1; }
+
+/* Sortable en sticky columns */
+.la-th--via.la-th--sortable:hover { background: #d0e8ff; }
+.la-th--pago.la-th--sortable:hover { background: #d0ffe0; }
+
+/* Celda editada */
+.la-td--dirty { background: #fffde7 !important; border-bottom-color: #f6c90e !important; }
+
+/* Input edición inline */
+.la-cell-input {
+  width: 100%; min-width: 80px; border: 1.5px solid var(--clr-accent);
+  border-radius: 4px; padding: 2px 6px; font-size: 12.5px;
+  font-family: 'Outfit', sans-serif; background: #fff; outline: none;
+  box-shadow: 0 0 0 2px rgba(74,127,181,.2);
+}
+
+/* Modal */
+.la-modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 12px; border-bottom: 1px solid var(--clr-border); margin-bottom: 14px;
+}
+.la-modal-x {
+  background: none; border: none; font-size: 16px;
+  color: var(--clr-muted); cursor: pointer; padding: 0;
+}
+.la-modal-x:hover { color: var(--clr-text); }
+
+/* Cursor editable */
+.la-td:not(.la-td--check):not(.la-td--via):not(.la-td--pago) { cursor: cell; }

@@ -3,22 +3,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
+import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './Plantillas.css';
 
-import { registerLicense } from '@syncfusion/ej2-base';
-registerLicense('Ngo9BigBOggjHTQxAR8/V1JHaF5cWWdCf1FpRmJGdld5fUVHYVZUTXxaS00DNHVRdkdlWXtccXVURGdfU0ZxXERWYEo=');
-
-let DocumentEditorContainerComponent = null;
-let Toolbar = null;
-try {
-  // Intenta importar si está instalado
-  const mod = require('@syncfusion/ej2-react-documenteditor');
-  DocumentEditorContainerComponent = mod.DocumentEditorContainerComponent;
-  Toolbar = mod.Toolbar;
-  DocumentEditorContainerComponent.Inject?.(Toolbar);
-} catch {
-  // Si no está instalado, usaremos el placeholder
-}
+import {
+  DocumentEditorContainerComponent,
+  Toolbar,
+} from '@syncfusion/ej2-react-documenteditor';
+DocumentEditorContainerComponent.Inject(Toolbar);
 
 const Icon = ({ d, d2, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -26,59 +18,64 @@ const Icon = ({ d, d2, size = 16 }) => (
     <path d={d} />{d2 && <path d={d2} />}
   </svg>
 );
-
 const ICONS = {
   upload: { d:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", d2:"M17 8l-5-5-5 5M12 3v12" },
   edit:   { d:"M12 20h9", d2:"M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" },
   back:   { d:"M19 12H5M12 19l-7-7 7-7" },
   check:  { d:"M20 6L9 17l-5-5" },
+  barcode:{ d:"M6 4h2v16H6zM3 4h1v16H3zM11 4h1v16h-1zM14 4h2v16h-2zM18 4h1v16h-1zM21 4h1v16h-1z" },
 };
-
-// Tamaño Oficio México en px a 96dpi: 21.59cm × 34.01cm
-const OFICIO_W_PX = Math.round((21.59 / 2.54) * 96);  // ≈ 816px
-const OFICIO_H_PX = Math.round((34.01 / 2.54) * 96);  // ≈ 1284px
 
 export default function PlantillasCrear() {
   const { proyectoSlug, proyectos, setProyectoSlug } = useProyecto();
+  const { setDirty } = useNavigationGuard();
   const navigate = useNavigate();
 
-  const [modo, setModo]           = useState(null);        // null | 'upload' | 'editor'
-  const [selectedSlug, setSelectedSlug] = useState(proyectoSlug || '');
-  const [nombre, setNombre]       = useState('');
-  const [descripcion, setDesc]    = useState('');
-  const [loading, setLoading]     = useState(false);
-  const [message, setMessage]     = useState(null);
-  const [result, setResult]       = useState(null);        // resultado de subir plantilla
-  const [mapEdits, setMapEdits]   = useState({});          // placeholder → campo seleccionado
-  const [camposDisp, setCamposDisp] = useState([]);
+  const [modo,          setModo]         = useState(null);       // null | 'upload' | 'editor'
+  const [selectedSlug,  setSelectedSlug] = useState(proyectoSlug || '');
+  const [nombre,        setNombre]       = useState('');
+  const [descripcion,   setDesc]         = useState('');
+  const [loading,       setLoading]      = useState(false);
+  const [message,       setMessage]      = useState(null);
+  const [result,        setResult]       = useState(null);
+  const [mapEdits,      setMapEdits]     = useState({});
+  const [camposDisp,    setCamposDisp]   = useState([]);
 
-  // Subir docx
-  const [file, setFile]           = useState(null);
+  const [file,          setFile]         = useState(null);
   const fileRef = useRef();
+  const editorRef = useRef(null);
 
   const proyectoActual = proyectos.find(p => p.slug === selectedSlug);
 
+  // Guard: dirty si hay nombre escrito pero sin guardar
+  useEffect(() => {
+    setDirty(!!nombre && !result, 'Tienes una plantilla sin guardar.');
+    return () => setDirty(false);
+  }, [nombre, result, setDirty]);
+
   const showMsg = (type, text) => {
     setMessage({ type, text });
-    setTimeout(() => setMessage(null), 5000);
+    setTimeout(() => setMessage(null), 6000);
   };
 
-  // Cargar campos disponibles cuando se elige un proyecto
+  // Cargar campos de tabla_temporal via analisis (primera fila del padrón)
   useEffect(() => {
     if (!selectedSlug) return;
-    api.get('/plantillas/').then(() => {}).catch(() => {});
-    // Obtenemos los campos de tabla_temporal via endpoint genérico de análisis
-    api.get(`/analisis/${selectedSlug}/analisis`, { params: { limit: 1 } })
-      .then(r => {
-        if (r.data.rows?.length > 0) {
-          const cols = Object.keys(r.data.rows[0]).filter(c => !c.startsWith('_'));
-          setCamposDisp(cols);
-        }
-      })
-      .catch(() => setCamposDisp([]));
+    api.get(`/plantillas/${selectedSlug}/campos-temporales-slug`)
+      .then(r => setCamposDisp(r.data?.campos || []))
+      .catch(() => {
+        // fallback: usar analisis
+        api.get(`/analisis/${selectedSlug}/analisis`, { params: { limit: 1 } })
+          .then(r => {
+            if (r.data.rows?.length > 0) {
+              setCamposDisp(Object.keys(r.data.rows[0]).filter(c => !c.startsWith('_')));
+            }
+          })
+          .catch(() => setCamposDisp([]));
+      });
   }, [selectedSlug]);
 
-  // ─── Subir .docx ──────────────────────────────────────────────────────────
+  // ── Subir .docx ───────────────────────────────────────────────────────────
   const handleUpload = async () => {
     if (!file || !nombre.trim() || !selectedSlug) {
       showMsg('error', 'Selecciona proyecto, escribe el nombre y adjunta el archivo.');
@@ -90,9 +87,6 @@ export default function PlantillasCrear() {
     setLoading(true);
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('proyecto_id', proy.id);
-    formData.append('nombre', nombre);
-    if (descripcion) formData.append('descripcion', descripcion);
 
     try {
       const res = await api.post('/plantillas/subir', formData, {
@@ -100,16 +94,15 @@ export default function PlantillasCrear() {
         params: { proyecto_id: proy.id, nombre, descripcion },
       });
       setResult(res.data);
-      // Pre-llenar mapeo automático
       const edits = {};
       Object.entries(res.data.mapeo_automatico || {}).forEach(([ph, campo]) => {
         edits[`{{${ph}}}`] = campo || '';
       });
       setMapEdits(edits);
-      setCamposDisp(res.data.campos_disponibles || []);
+      if (res.data.campos_disponibles?.length) setCamposDisp(res.data.campos_disponibles);
       showMsg('success', res.data.mensaje);
     } catch (err) {
-      showMsg('error', err.response?.data?.detail || 'Error al subir la plantilla.');
+      showMsg('error', err.response?.data?.detail || 'Error al subir.');
     } finally { setLoading(false); }
   };
 
@@ -120,6 +113,7 @@ export default function PlantillasCrear() {
       .map(([placeholder, campo_bd], orden) => ({ placeholder, campo_bd, orden }));
     try {
       await api.post(`/plantillas/${result.id}/mapear`, { campos });
+      setDirty(false);
       showMsg('success', `${campos.length} campos mapeados. ¡Plantilla lista!`);
       setTimeout(() => navigate('/plantillas'), 1500);
     } catch (err) {
@@ -127,8 +121,41 @@ export default function PlantillasCrear() {
     }
   };
 
-  // ─── Editor Syncfusion ────────────────────────────────────────────────────
-  const editorRef = useRef(null);
+  // ── Editor Syncfusion ─────────────────────────────────────────────────────
+  const configureEditorPage = () => {
+    const editor = editorRef.current?.documentEditor;
+    if (!editor) return;
+    // Esperar a que el editor esté listo
+    setTimeout(() => {
+      try {
+        const sectionFormat = editor.selection?.sectionFormat;
+        if (!sectionFormat) return;
+        // Oficio México: 21.59cm × 34.01cm → puntos (1cm = 28.3465pt)
+        sectionFormat.pageWidth  = 612;   // 21.59cm ≈ 612pt
+        sectionFormat.pageHeight = 963;   // 34.01cm ≈ 963pt
+        sectionFormat.leftMargin   = 56.7;
+        sectionFormat.rightMargin  = 56.7;
+        sectionFormat.topMargin    = 56.7;
+        sectionFormat.bottomMargin = 56.7;
+        // Fuente por defecto
+        const charFormat = editor.selection?.characterFormat;
+        if (charFormat) {
+          charFormat.fontFamily = 'Calibri';
+          charFormat.fontSize   = 11;
+        }
+      } catch (e) { /* ignora si el editor aún no inicializó */ }
+    }, 500);
+  };
+
+  const insertText = (text) => {
+    const editor = editorRef.current?.documentEditor;
+    if (editor) editor.editor?.insertText(text);
+  };
+
+  // Insertar barcode dinámico como placeholder de texto
+  const insertBarcode = () => {
+    insertText('{{codebar}}');
+  };
 
   const handleGuardarEditor = async () => {
     if (!nombre.trim() || !selectedSlug) {
@@ -138,23 +165,47 @@ export default function PlantillasCrear() {
     const proy = proyectos.find(p => p.slug === selectedSlug);
     if (!proy) return;
 
+    // Extraer placeholders del editor
+    let placeholders = [];
+    try {
+      const editor = editorRef.current?.documentEditor;
+      if (editor) {
+        const sfdt = editor.serialize();
+        const text = JSON.stringify(sfdt);
+        const matches = [...text.matchAll(/\{\{(\w+)\}\}/g)];
+        placeholders = [...new Set(matches.map(m => m[1]))];
+      }
+    } catch {}
+
     setLoading(true);
     try {
-      // 1. Crear plantilla
       const res = await api.post('/plantillas/', {
         id_proyecto: proy.id,
         nombre,
         descripcion,
         origen: 'editor',
       });
-      showMsg('success', 'Plantilla creada. Puedes mapear los campos desde el Dashboard.');
+      const plantillaId = res.data.id;
+
+      // Guardar mapeo automático de placeholders
+      if (placeholders.length > 0) {
+        const campos = placeholders
+          .filter(ph => camposDisp.includes(ph))
+          .map((ph, orden) => ({ placeholder: `{{${ph}}}`, campo_bd: ph, orden }));
+        if (campos.length > 0) {
+          await api.post(`/plantillas/${plantillaId}/mapear`, { campos });
+        }
+      }
+
+      setDirty(false);
+      showMsg('success', `Plantilla "${nombre}" creada con ${placeholders.length} placeholders.`);
       setTimeout(() => navigate('/plantillas'), 1500);
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al guardar.');
     } finally { setLoading(false); }
   };
 
-  // ─── Pantalla de selección inicial ────────────────────────────────────────
+  // ── Pantalla inicial ──────────────────────────────────────────────────────
   if (!modo) {
     return (
       <div className="pl-page">
@@ -170,7 +221,6 @@ export default function PlantillasCrear() {
 
         {message && <div className={`pl-message pl-message--${message.type}`}>{message.text}</div>}
 
-        {/* Selector de proyecto */}
         <div className="pl-project-select-wrap">
           <label className="pl-label">Proyecto *</label>
           <select className="pl-select pl-select--lg" value={selectedSlug}
@@ -183,21 +233,16 @@ export default function PlantillasCrear() {
         {selectedSlug && (
           <div className="pl-modo-cards">
             <div className="pl-modo-card" onClick={() => setModo('upload')}>
-              <div className="pl-modo-icon">
-                <Icon {...ICONS.upload} size={32} />
-              </div>
+              <div className="pl-modo-icon"><Icon {...ICONS.upload} size={32} /></div>
               <h3>Subir .docx</h3>
-              <p>Sube un documento Word con placeholders <code>{'{{campo}}'}</code>. El sistema detecta automáticamente los campos y sugiere el mapeo.</p>
-              <div className="pl-modo-hint">Recomendado si ya tienes el diseño listo</div>
+              <p>Sube un documento Word existente. El sistema detecta automáticamente los placeholders <code>{'{{campo}}'}</code> y sugiere el mapeo.</p>
+              <div className="pl-modo-hint">Recomendado si ya tienes el diseño en Word</div>
             </div>
-
             <div className="pl-modo-card" onClick={() => setModo('editor')}>
-              <div className="pl-modo-icon">
-                <Icon {...ICONS.edit} size={32} />
-              </div>
+              <div className="pl-modo-icon"><Icon {...ICONS.edit} size={32} /></div>
               <h3>Crear desde cero</h3>
-              <p>Editor de texto con tamaño Oficio México (21.59×34.01 cm). Tipografía Calibri 11 por defecto. Inserta imágenes y campos dinámicos.</p>
-              <div className="pl-modo-hint">Editor Syncfusion · combinar correspondencia</div>
+              <p>Editor integrado con tamaño Oficio México (21.59×34.01 cm), fuente Calibri 11, inserción de imágenes y código de barras dinámico.</p>
+              <div className="pl-modo-hint">Editor Syncfusion · Word-like</div>
             </div>
           </div>
         )}
@@ -205,16 +250,14 @@ export default function PlantillasCrear() {
     );
   }
 
-  // ─── Modo SUBIR ───────────────────────────────────────────────────────────
+  // ── Modo SUBIR ────────────────────────────────────────────────────────────
   if (modo === 'upload') {
     return (
       <div className="pl-page">
         <div className="pl-header">
           <div>
             <h1 className="pl-title">Subir Plantilla .docx</h1>
-            <p className="pl-subtitle">
-              Proyecto: <strong>{proyectos.find(p => p.slug === selectedSlug)?.nombre}</strong>
-            </p>
+            <p className="pl-subtitle">Proyecto: <strong>{proyectoActual?.nombre}</strong></p>
           </div>
           <button className="pl-btn" onClick={() => { setModo(null); setResult(null); setFile(null); }}>
             <Icon {...ICONS.back} size={14} /> Volver
@@ -227,49 +270,43 @@ export default function PlantillasCrear() {
           <div className="pl-upload-form">
             <div className="pl-form-row">
               <div className="pl-field">
-                <label className="pl-label">Nombre de la plantilla *</label>
-                <input className="pl-input" value={nombre} onChange={e => setNombre(e.target.value)}
-                  placeholder="Ej: Requerimiento de pago 2025" />
+                <label className="pl-label">Nombre *</label>
+                <input className="pl-input" value={nombre}
+                  onChange={e => setNombre(e.target.value)} placeholder="Ej: Requerimiento 2025" />
               </div>
               <div className="pl-field">
                 <label className="pl-label">Descripción</label>
-                <input className="pl-input" value={descripcion} onChange={e => setDesc(e.target.value)}
-                  placeholder="Descripción opcional" />
+                <input className="pl-input" value={descripcion}
+                  onChange={e => setDesc(e.target.value)} placeholder="Opcional" />
               </div>
             </div>
 
             <label className="pl-label">Archivo .docx *</label>
-            <div
-              className={`pl-drop-zone ${file ? 'pl-drop-zone--has-file' : ''}`}
+            <div className={`pl-drop-zone ${file ? 'pl-drop-zone--has-file' : ''}`}
               onClick={() => fileRef.current?.click()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
-              onDragOver={e => e.preventDefault()}
-            >
+              onDrop={e => { e.preventDefault(); setFile(e.dataTransfer.files[0] || null); }}
+              onDragOver={e => e.preventDefault()}>
               <input type="file" accept=".docx" ref={fileRef} style={{ display: 'none' }}
                 onChange={e => setFile(e.target.files[0] || null)} />
               {file ? (
-                <>
-                  <div className="pl-drop-icon pl-drop-icon--ok">✓</div>
+                <><div className="pl-drop-icon pl-drop-icon--ok">✓</div>
                   <p className="pl-drop-filename">{file.name}</p>
-                  <p className="pl-drop-hint">Haz clic para cambiar el archivo</p>
-                </>
+                  <p className="pl-drop-hint">Haz clic para cambiar</p></>
               ) : (
-                <>
-                  <div className="pl-drop-icon">📄</div>
-                  <p className="pl-drop-text">Arrastra aquí o haz clic para seleccionar</p>
+                <><div className="pl-drop-icon">📄</div>
+                  <p className="pl-drop-text">Arrastra aquí o haz clic</p>
                   <p className="pl-drop-hint">Solo archivos .docx · Tamaño Oficio México recomendado</p>
-                  <p className="pl-drop-hint">Usa <code>{'{{campo}}'}</code> en tu documento para campos dinámicos</p>
-                </>
+                  <p className="pl-drop-hint">Usa <code>{'{{campo}}'}</code> en el documento</p></>
               )}
             </div>
 
             <div className="pl-upload-info">
-              <h4>Campos disponibles en este proyecto:</h4>
+              <h4>Campos disponibles ({camposDisp.length}):</h4>
               <div className="pl-campos-preview">
-                {camposDisp.slice(0, 30).map(c => (
+                {camposDisp.slice(0, 40).map(c => (
                   <span key={c} className="pl-campo-chip"><code>{`{{${c}}}`}</code></span>
                 ))}
-                {camposDisp.length > 30 && <span className="pl-campo-chip pl-campo-chip--more">+{camposDisp.length - 30} más</span>}
+                {camposDisp.length > 40 && <span className="pl-campo-chip pl-campo-chip--more">+{camposDisp.length - 40} más</span>}
               </div>
             </div>
 
@@ -279,23 +316,21 @@ export default function PlantillasCrear() {
             </button>
           </div>
         ) : (
-          /* Resultado + mapeo */
           <div className="pl-mapeo-section">
             <div className="pl-mapeo-success">
-              <Icon {...ICONS.check} size={20} />
+              <Icon {...ICONS.check} size={18} />
               <span>{result.mensaje}</span>
             </div>
 
             <h3 className="pl-mapeo-title">Mapeo de campos</h3>
             <p className="pl-mapeo-desc">
-              Se detectaron <strong>{result.placeholders?.length || 0}</strong> placeholders.
-              Asocia cada uno con el campo correspondiente en <code>tabla_temporal</code>.
+              {result.placeholders?.length || 0} placeholders detectados.
+              Asocia cada uno con el campo de <code>tabla_temporal</code>.
             </p>
 
-            {result.placeholders?.length === 0 ? (
+            {!result.placeholders?.length ? (
               <div className="pl-mapeo-empty">
-                No se encontraron placeholders <code>{'{{campo}}'}</code> en el documento.
-                Verifica que el archivo use ese formato.
+                No se encontraron placeholders <code>{'{{campo}}'}</code>. Verifica el formato del .docx.
               </div>
             ) : (
               <div className="pl-map-grid">
@@ -326,7 +361,7 @@ export default function PlantillasCrear() {
             )}
 
             <div className="pl-mapeo-actions">
-              <button className="pl-btn" onClick={() => navigate('/plantillas')}>
+              <button className="pl-btn" onClick={() => { setDirty(false); navigate('/plantillas'); }}>
                 Omitir mapeo
               </button>
               <button className="pl-btn pl-btn--primary" onClick={handleGuardarMapeo}>
@@ -339,7 +374,7 @@ export default function PlantillasCrear() {
     );
   }
 
-  // ─── Modo EDITOR (Syncfusion) ─────────────────────────────────────────────
+  // ── Modo EDITOR (Syncfusion) ──────────────────────────────────────────────
   if (modo === 'editor') {
     return (
       <div className="pl-page pl-page--editor">
@@ -363,85 +398,45 @@ export default function PlantillasCrear() {
         {message && <div className={`pl-message pl-message--${message.type}`}>{message.text}</div>}
 
         <div className="pl-editor-info">
-          <span>📐 Tamaño: Oficio México (21.59 × 34.01 cm)</span>
-          <span>🔤 Fuente por defecto: Calibri 11</span>
-          <span>💡 Usa <code>{'{{campo}}'}</code> para insertar campos dinámicos</span>
+          <span>📐 Oficio México · 21.59 × 34.01 cm</span>
+          <span>🔤 Calibri 11 por defecto</span>
+          <span>💡 Usa <code>{'{{campo}}'}</code> para campos dinámicos</span>
         </div>
 
-        {/* Campos disponibles para arrastrar/insertar */}
+        {/* Barra de campos disponibles para insertar */}
         <div className="pl-editor-campos">
-          <span className="pl-editor-campos-label">Campos disponibles:</span>
+          <span className="pl-editor-campos-label">Insertar campo:</span>
           <div className="pl-editor-campos-list">
-            {camposDisp.slice(0, 20).map(c => (
-              <button
-                key={c}
-                className="pl-campo-chip pl-campo-chip--btn"
-                title={`Insertar {{${c}}}`}
-                onClick={() => {
-                  if (editorRef.current?.documentEditor) {
-                    editorRef.current.documentEditor.editor.insertText(`{{${c}}}`);
-                  }
-                }}
-              >
+            <button className="pl-campo-chip pl-campo-chip--btn pl-campo-chip--barcode"
+              onClick={insertBarcode} title="Insertar código de barras dinámico">
+              📊 {'{{codebar}}'}
+            </button>
+            {camposDisp.slice(0, 25).map(c => (
+              <button key={c} className="pl-campo-chip pl-campo-chip--btn"
+                onClick={() => insertText(`{{${c}}}`)}>
                 {`{{${c}}}`}
               </button>
             ))}
+            {camposDisp.length > 25 && (
+              <span className="pl-campo-chip pl-campo-chip--more">+{camposDisp.length - 25} más</span>
+            )}
           </div>
         </div>
 
-        {/* Editor Syncfusion o fallback */}
+        {/* Editor Syncfusion */}
         <div className="pl-editor-container">
-          {DocumentEditorContainerComponent ? (
-            <DocumentEditorContainerComponent
-              ref={editorRef}
-              height="100%"
-              width="100%"
-              enableToolbar={true}
-              serviceUrl="https://ej2services.syncfusion.com/production/web-services/api/documenteditor/"
-              documentEditorSettings={{
-                fontFamilies: ['Calibri', 'Arial', 'Times New Roman', 'Courier New'],
-              }}
-              created={() => {
-                const editor = editorRef.current?.documentEditor;
-                if (!editor) return;
-                // Configurar página en Oficio México
-                editor.selection.selectAll();
-                const sectionFormat = editor.selection.sectionFormat;
-                sectionFormat.pageWidth = 612;  // puntos: 21.59cm ≈ 612pt
-                sectionFormat.pageHeight = 963; // puntos: 34.01cm ≈ 963pt
-                sectionFormat.leftMargin  = 56.7;
-                sectionFormat.rightMargin = 56.7;
-                sectionFormat.topMargin   = 56.7;
-                sectionFormat.bottomMargin = 56.7;
-                // Fuente por defecto Calibri 11
-                const charFormat = editor.selection.characterFormat;
-                charFormat.fontFamily = 'Calibri';
-                charFormat.fontSize   = 11;
-              }}
-            />
-          ) : (
-            // ── Fallback si Syncfusion no está instalado ──────────────────
-            <div className="pl-editor-fallback">
-              <div className="pl-editor-fallback-inner">
-                <h3>Editor Syncfusion no instalado</h3>
-                <p>Para usar el editor integrado instala el paquete:</p>
-                <pre>npm install @syncfusion/ej2-react-documenteditor</pre>
-                <p>Y registra tu clave de licencia en <code>main.jsx</code>:</p>
-                <pre>{`import { registerLicense } from '@syncfusion/ej2-base';
-registerLicense('TU_CLAVE_SYNCFUSION');`}</pre>
-                <p style={{ marginTop: 16 }}>
-                  Mientras tanto, puedes usar el modo <strong>Subir .docx</strong> para crear plantillas
-                  con Microsoft Word o LibreOffice respetando el tamaño Oficio México (21.59×34.01 cm).
-                </p>
-                <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-                  <button className="pl-btn pl-btn--primary" onClick={() => setModo('upload')}>
-                    Usar modo Subir .docx
-                  </button>
-                  <button className="pl-btn" onClick={() => setModo(null)}>Volver</button>
-                </div>
-              </div>
-            </div>
-          )}
+          <DocumentEditorContainerComponent
+            ref={editorRef}
+            height="100%"
+            width="100%"
+            enableToolbar={true}
+            showPropertiesPane={true}
+            serviceUrl="https://ej2services.syncfusion.com/production/web-services/api/documenteditor/"
+            created={configureEditorPage}
+            documentEditorSettings={{
+              fontFamilies: ['Calibri', 'Arial', 'Times New Roman', 'Courier New', 'Verdana'],
+            }}
+          />
         </div>
       </div>
     );

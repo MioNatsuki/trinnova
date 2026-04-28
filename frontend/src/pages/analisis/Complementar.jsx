@@ -1,18 +1,24 @@
 // frontend/src/pages/analisis/Complementar.jsx
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './Analisis.css';
 
-const LIMIT = 20;
 const COLS_OCULTAS = new Set(['id_comp']);
+
+// ── Icono mini sort ──────────────────────────────────────────────────────────
+const SortIcon = ({ col, sortCol, sortDir }) => {
+  if (sortCol !== col) return <span style={{opacity:.35,fontSize:9}}>⇅</span>;
+  return <span style={{fontSize:9}}>{sortDir === 'asc' ? '▲' : '▼'}</span>;
+};
 
 export default function Complementar() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
   const { setDirty } = useNavigationGuard();
 
+  const [limit, setLimit]             = useState(20);
   const [data, setData]               = useState({ rows: [], columnas_editables: [], total: 0, pk: null });
   const [loading, setLoading]         = useState(false);
   const [saving, setSaving]           = useState(false);
@@ -30,9 +36,13 @@ export default function Complementar() {
   const [csvFile, setCsvFile]           = useState(null);
   const [csvLoading, setCsvLoading]     = useState(false);
   const [csvResult, setCsvResult]       = useState(null);
+  // Sort
+  const [sortCol, setSortCol]           = useState(null);
+  const [sortDir, setSortDir]           = useState('asc');
+
   const csvInputRef = useRef();
 
-  const totalPages = Math.max(1, Math.ceil(data.total / LIMIT));
+  const totalPages = Math.max(1, Math.ceil(data.total / limit));
 
   // Sincronizar dirty con el guard de navegación
   useEffect(() => {
@@ -44,13 +54,12 @@ export default function Complementar() {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
-      const res = await api.get(`/analisis/${proyectoSlug}/complementar`, {
-        params: { page, limit: LIMIT, search: search || undefined },
-      });
+      const params = { page, limit, search: search || undefined };
+      if (sortCol) { params.sort_col = sortCol; params.sort_dir = sortDir; }
+      const res = await api.get(`/analisis/${proyectoSlug}/complementar`, { params });
       setData(res.data);
-      setEditedRows({});
-      setPendingCount(0);
-
+      // NO reseteamos editedRows aquí para preservar cambios al paginar
+      // Solo limpiamos si cambia proyecto
       if (res.data.rows.length > 0 && res.data.pk) {
         const editablesSet = new Set(res.data.columnas_editables);
         const pk = res.data.pk;
@@ -65,14 +74,29 @@ export default function Complementar() {
     } finally {
       setLoading(false);
     }
-  }, [proyectoSlug, page, search]);
+  }, [proyectoSlug, page, limit, search, sortCol, sortDir]);
 
   useEffect(() => { loadData(); }, [loadData]);
-  useEffect(() => { setPage(1); }, [proyectoSlug, search]);
+
+  // Al cambiar proyecto o búsqueda, volver a pág 1 y limpiar ediciones
+  useEffect(() => {
+    setPage(1);
+    setEditedRows({});
+    setPendingCount(0);
+  }, [proyectoSlug, search]);
+
+  // Al cambiar sort, volver a pág 1 sin limpiar ediciones
+  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
 
   const showMsg = (type, text) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 5000);
+  };
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+    // NO hay loadData aquí; useEffect lo dispara al cambiar sortCol/sortDir
   };
 
   const handleCellEdit = (pkValue, field, value) => {
@@ -149,8 +173,14 @@ export default function Complementar() {
     } finally { setCsvLoading(false); }
   };
 
-  // columnas_editables viene del backend (incluye programa si aplica).
   const columnasEditables = data.columnas_editables;
+
+  // Columnas de padron que tienen contenido visible (excluyendo las que ya son editables)
+  const columnasPadronVisible = useMemo(() => columnasPadron, [columnasPadron]);
+  const todasColumnas = useMemo(() => {
+    if (!data.pk) return [];
+    return [data.pk, ...columnasPadronVisible, ...columnasEditables];
+  }, [data.pk, columnasPadronVisible, columnasEditables]);
 
   const renderEditableCell = (row, col) => {
     const pkValue = row[data.pk];
@@ -184,7 +214,17 @@ export default function Complementar() {
         <div className="analisis-header">
           <h1>Complementar información</h1>
           <div className="analisis-actions">
-            {/* Buscar — mismo estilo que btn-primary/btn-save */}
+            {/* Registros por página */}
+            <select
+              value={limit}
+              onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}
+              style={{ padding:'6px 10px', border:'1px solid var(--clr-border)', borderRadius:7, fontSize:13, fontFamily:'Outfit,sans-serif' }}>
+              <option value={10}>10 / pág</option>
+              <option value={20}>20 / pág</option>
+              <option value={50}>50 / pág</option>
+              <option value={100}>100 / pág</option>
+            </select>
+
             <form onSubmit={e => { e.preventDefault(); setSearch(draftSearch); setPage(1); }}
               style={{ display: 'flex', gap: 6 }}>
               <input type="text" placeholder="Buscar…" value={draftSearch}
@@ -196,7 +236,6 @@ export default function Complementar() {
               )}
             </form>
 
-            {/* CSV masivo — mismo estilo */}
             <button onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
               className="btn-save">
               📂 CSV masivo
@@ -228,12 +267,21 @@ export default function Complementar() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th className="comp-th comp-th--pk">
-                      {data.pk ? data.pk.replace(/_/g, ' ') : 'ID'}
+                    {/* PK */}
+                    <th className="comp-th comp-th--pk" style={{cursor:'pointer'}}
+                      onClick={() => handleSort(data.pk)}>
+                      {data.pk ? data.pk.replace(/_/g, ' ') : 'ID'}&nbsp;
+                      <SortIcon col={data.pk} sortCol={sortCol} sortDir={sortDir} />
                     </th>
-                    {columnasPadron.map(col => (
-                      <th key={col} className="comp-th">{col.replace(/_/g, ' ')}</th>
+                    {/* Columnas padrón */}
+                    {columnasPadronVisible.map(col => (
+                      <th key={col} className="comp-th" style={{cursor:'pointer'}}
+                        onClick={() => handleSort(col)}>
+                        {col.replace(/_/g, ' ')}&nbsp;
+                        <SortIcon col={col} sortCol={sortCol} sortDir={sortDir} />
+                      </th>
                     ))}
+                    {/* Header grupo editable */}
                     {columnasEditables.length > 0 && (
                       <th colSpan={columnasEditables.length} className="comp-th--group">
                         ✏️ COMPLEMENTARIA (editable)
@@ -243,10 +291,12 @@ export default function Complementar() {
                   {columnasEditables.length > 0 && (
                     <tr>
                       <th className="comp-th2 comp-th2--pk" />
-                      {columnasPadron.map(col => <th key={col} className="comp-th2" />)}
+                      {columnasPadronVisible.map(col => <th key={col} className="comp-th2" />)}
                       {columnasEditables.map((col, i) => (
-                        <th key={col} className={`comp-th2 comp-th2--editable${i === 0 ? ' comp-th2--first' : ''}`}>
-                          {col.replace(/_/g, ' ')}
+                        <th key={col} className={`comp-th2 comp-th2--editable${i === 0 ? ' comp-th2--first' : ''}`}
+                          style={{cursor:'pointer'}} onClick={() => handleSort(col)}>
+                          {col.replace(/_/g, ' ')}&nbsp;
+                          <SortIcon col={col} sortCol={sortCol} sortDir={sortDir} />
                         </th>
                       ))}
                     </tr>
@@ -255,7 +305,7 @@ export default function Complementar() {
                 <tbody>
                   {data.rows.length === 0 ? (
                     <tr>
-                      <td colSpan={1 + columnasPadron.length + columnasEditables.length} className="analisis-empty">
+                      <td colSpan={1 + columnasPadronVisible.length + columnasEditables.length} className="analisis-empty">
                         {search ? 'Sin resultados.' : 'No hay registros. Carga un padrón primero.'}
                       </td>
                     </tr>
@@ -264,7 +314,7 @@ export default function Complementar() {
                     return (
                       <tr key={pkValue}>
                         <td className="comp-td comp-td--pk">{safeStr(pkValue)}</td>
-                        {columnasPadron.map(col => (
+                        {columnasPadronVisible.map(col => (
                           <td key={col} className="comp-td" title={safeStr(row[col])}>
                             {safeStr(row[col])}
                           </td>
@@ -281,7 +331,7 @@ export default function Complementar() {
               </table>
             </div>
 
-            {data.total > LIMIT && (
+            {data.total > 0 && (
               <div className="comp-pagination">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Anterior</button>
                 <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
@@ -328,20 +378,25 @@ export default function Complementar() {
               onClick={() => csvInputRef.current?.click()}
               onDrop={e => { e.preventDefault(); setCsvFile(e.dataTransfer.files[0] || null); }}
               onDragOver={e => e.preventDefault()}>
-              <input type="file" accept=".csv,.xlsx,.xls" ref={csvInputRef}
-                style={{ display: 'none' }} onChange={e => setCsvFile(e.target.files[0] || null)} />
-              {csvFile ? <><span>✓</span><p>{csvFile.name}</p></> : <><span>📄</span><p>Arrastra o haz clic</p></>}
+              <input type="file" accept=".csv,.xlsx,.xls" ref={csvInputRef} style={{ display: 'none' }}
+                onChange={e => setCsvFile(e.target.files[0] || null)} />
+              {csvFile
+                ? <><span style={{fontSize:24}}>✓</span><p>{csvFile.name}</p></>
+                : <><span style={{fontSize:24}}>📂</span><p>Arrastra aquí o haz clic para seleccionar</p></>}
             </div>
             {csvResult && (
               <div className={`comp-csv-result ${csvResult.success ? 'ok' : 'err'}`}>
                 <p>{csvResult.message}</p>
-                {csvResult.errores?.slice(0, 5).map((e, i) => <p key={i} style={{ fontSize: 12 }}>• {e}</p>)}
+                {csvResult.errores?.length > 0 && (
+                  <ul>{csvResult.errores.slice(0,5).map((e,i)=><li key={i}>{e}</li>)}</ul>
+                )}
               </div>
             )}
             <div className="comp-modal-footer">
-              <button className="btn-save" onClick={() => setShowCsvModal(false)}>Cerrar</button>
-              <button className="btn-primary" onClick={handleCsvComplementar} disabled={!csvFile || csvLoading}>
-                {csvLoading ? 'Procesando…' : 'Cargar'}
+              <button className="btn-save" onClick={() => setShowCsvModal(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={handleCsvComplementar}
+                disabled={!csvFile || csvLoading}>
+                {csvLoading ? 'Procesando…' : 'Subir y complementar'}
               </button>
             </div>
           </div>
@@ -349,11 +404,9 @@ export default function Complementar() {
       )}
 
       <style>{`
-        .table-container{flex:1;overflow:auto;min-height:0;background:var(--clr-white);border:1px solid var(--clr-border);border-radius:var(--radius);}
-        .analisis-loading,.analisis-empty{padding:60px;text-align:center;color:var(--clr-muted);font-size:14px;}
-        .comp-th{padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;color:var(--clr-muted);border-bottom:1px solid var(--clr-border);white-space:nowrap;background:#f8f9fa;position:sticky;top:0;z-index:3;}
-        .comp-th--pk{min-width:90px;position:sticky;left:0;top:0;z-index:5;background:#f8f9fa;}
-        .comp-th--group{background:#e8f0f9;color:#2b5fa8;text-align:center;font-size:10px;letter-spacing:1px;border-left:2px solid #4a7fb5;padding:6px;position:sticky;top:0;z-index:3;}
+        .comp-th{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid var(--clr-border);position:sticky;top:0;z-index:3;font-size:11px;font-weight:600;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;}
+        .comp-th--pk{position:sticky;left:0;top:0;z-index:5;background:#f8f9fa;}
+        .comp-th--group{padding:4px 12px;background:#eef3f9;border-bottom:1px solid #c3d9f0;text-align:center;font-size:11px;font-weight:700;color:#2b5fa8;position:sticky;top:0;z-index:3;}
         .comp-th2{padding:4px 12px;background:#f8f9fa;border-bottom:1px solid var(--clr-border);position:sticky;top:38px;z-index:3;}
         .comp-th2--pk{position:sticky;left:0;top:38px;z-index:5;background:#f8f9fa;}
         .comp-th2--editable{min-width:130px;background:#eef3f9;color:#2b5fa8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;}

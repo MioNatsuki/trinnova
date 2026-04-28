@@ -1,86 +1,50 @@
 // frontend/src/context/NavigationGuardContext.jsx
-// Contexto global para bloquear navegación cuando hay cambios pendientes.
-// Úsalo en cualquier página: const { setDirty } = useNavigationGuard();
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate, useLocation, UNSAFE_NavigationContext } from 'react-router-dom';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { useBlocker } from 'react-router-dom';
 
-const NavigationGuardContext = createContext({
-  isDirty: false,
-  setDirty: () => {},
-  dirtyReason: '',
-  setDirtyReason: () => {},
-});
+const NavigationGuardContext = createContext({ isDirty: false, setDirty: () => {} });
 
 export function NavigationGuardProvider({ children }) {
-  const [isDirty, setIsDirtyState] = useState(false);
+  const [isDirty, setIsDirtyState]   = useState(false);
   const [dirtyReason, setDirtyReason] = useState('');
-  const [blockedPath, setBlockedPath] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { navigator } = useContext(UNSAFE_NavigationContext);
 
   const setDirty = useCallback((dirty, reason = '') => {
     setIsDirtyState(dirty);
     setDirtyReason(reason);
   }, []);
 
-  // Interceptar push/replace del history
+  // useBlocker de React Router v6.4+ — bloquea navegación interna Y links del sidebar
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // Bloquear cierre de pestaña / recarga
   useEffect(() => {
     if (!isDirty) return;
-
-    const originalPush = navigator.push.bind(navigator);
-    const originalReplace = navigator.replace.bind(navigator);
-
-    navigator.push = (to, state) => {
-      const target = typeof to === 'string' ? to : to.pathname;
-      if (target !== location.pathname) {
-        setBlockedPath({ to, state, method: 'push' });
-        setShowModal(true);
-      } else {
-        originalPush(to, state);
-      }
-    };
-
-    navigator.replace = (to, state) => {
-      originalReplace(to, state);
-    };
-
-    // Bloquear cierre de pestaña
     const handleBeforeUnload = (e) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      navigator.push = originalPush;
-      navigator.replace = originalReplace;
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isDirty, navigator, location.pathname]);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   const handleConfirm = () => {
     setIsDirtyState(false);
     setDirtyReason('');
-    setShowModal(false);
-    if (blockedPath) {
-      const { to, state, method } = blockedPath;
-      setBlockedPath(null);
-      if (method === 'push') navigate(to, { state });
-    }
+    blocker.proceed?.();
   };
 
   const handleCancel = () => {
-    setShowModal(false);
-    setBlockedPath(null);
+    blocker.reset?.();
   };
 
   return (
     <NavigationGuardContext.Provider value={{ isDirty, setDirty, dirtyReason, setDirtyReason }}>
       {children}
 
-      {showModal && (
+      {blocker.state === 'blocked' && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
@@ -105,8 +69,7 @@ export function NavigationGuardProvider({ children }) {
                   padding: '9px 18px', border: '1px solid #e2e8f0', borderRadius: 7,
                   background: '#fff', color: '#4a5568', fontSize: 13, cursor: 'pointer',
                   fontFamily: "'Outfit', sans-serif",
-                }}
-              >
+                }}>
                 Quedarme aquí
               </button>
               <button
@@ -115,8 +78,7 @@ export function NavigationGuardProvider({ children }) {
                   padding: '9px 18px', border: 'none', borderRadius: 7,
                   background: '#e53e3e', color: '#fff', fontSize: 13,
                   fontWeight: 600, cursor: 'pointer', fontFamily: "'Outfit', sans-serif",
-                }}
-              >
+                }}>
                 Salir sin guardar
               </button>
             </div>

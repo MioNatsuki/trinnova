@@ -773,6 +773,8 @@ def get_complementar(
     limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = None,
     programa: Optional[str] = Query(None),
+    sort_col: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query("asc"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -805,13 +807,24 @@ def get_complementar(
     cols_c = [col for col in info["columnas_complementaria"] if col != pk and col != "id_comp"]
     cols_c_str = (", " + ", ".join(f"c.`{col}`" for col in cols_c)) if cols_c else ""
 
+    cols_validas_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
+    cols_validas_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
+    cols_validas_all    = cols_validas_padron | cols_validas_comp
+
+    order_table = "p"
+    order_col   = pk
+    if sort_col and sort_col in cols_validas_all:
+        order_col   = sort_col
+        order_table = "c" if sort_col in cols_validas_comp and sort_col not in cols_validas_padron else "p"
+    order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+
     rows = db_proyecto.execute(
         text(f"""
             SELECT p.*{cols_c_str}
             FROM tabla_padron p
             LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
             WHERE {where}
-            ORDER BY p.`{pk}`
+            ORDER BY {order_table}.`{order_col}` {order_dir}
             LIMIT {limit} OFFSET {offset}
         """),
         params,
@@ -828,6 +841,8 @@ def get_complementar(
         "page":               page,
         "limit":              limit,
         "pk":                 pk,
+        "sort_col":           sort_col,
+        "sort_dir":           sort_dir,
     }
 
 
@@ -836,9 +851,9 @@ def get_complementar(
 @router.post("/{proyecto_slug}/guardar-complemento")
 def guardar_complemento(
     proyecto_slug: str,
-    datos,           # List[FilaComplementar]
-    current_user,
-    db_global,
+    datos: List[FilaComplementar],
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
 ):
     """
     Guarda campos complementarios:
@@ -850,9 +865,9 @@ def guardar_complemento(
     from app.services.log_service import registrar_log
     from sqlalchemy import text
 
-    proyecto = None  # check_project_access ya se llama antes del endpoint
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
 
-    info = _INFO[proyecto_slug]  # referencia al dict _INFO del archivo
+    info = _info(proyecto_slug)
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
 

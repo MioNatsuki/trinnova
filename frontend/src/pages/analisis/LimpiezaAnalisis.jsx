@@ -140,6 +140,7 @@ export default function LimpiezaAnalisis() {
   // Ordenamiento
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
+  const [pageSize, setPageSize] = useState(50);
 
   // CSV
   const [showCsvModal, setShowCsvModal] = useState(false);
@@ -148,7 +149,7 @@ export default function LimpiezaAnalisis() {
   const [csvResult,    setCsvResult]    = useState(null);
   const csvInputRef = useRef();
 
-  const totalPages = Math.max(1, Math.ceil(data.total / LIMIT));
+  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
   const pendingCellCount = Object.keys(editedCells).length;
 
   // Guard navegación
@@ -165,11 +166,17 @@ export default function LimpiezaAnalisis() {
       .catch(() => setProgramas([]));
   }, [proyectoSlug]);
 
+  // Limpiar ediciones y selección cuando cambia de proyecto
+  useEffect(() => {
+    setEditedCells({});
+    setSelected(new Set());
+  }, [proyectoSlug]);
+
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
-      const params = { page, limit: LIMIT };
+      const params = { page, limit: pageSize };
       if (filtroVia)            params.viabilidad = filtroVia;
       if (busqueda)             params.busqueda   = busqueda;
       if (programa !== 'todos') params.programa   = programa;
@@ -177,11 +184,11 @@ export default function LimpiezaAnalisis() {
       const res = await api.get(`/analisis/${proyectoSlug}/analisis`, { params });
       setData(res.data);
       setSelected(new Set());
-      setEditedCells({});
+      //setEditedCells({});
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error cargando análisis.');
     } finally { setLoading(false); }
-  }, [proyectoSlug, page, filtroVia, busqueda, programa, sortCol, sortDir]);
+  }, [proyectoSlug, page, pageSize, filtroVia, busqueda, programa, sortCol, sortDir]);
 
   const loadStats = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -192,7 +199,7 @@ export default function LimpiezaAnalisis() {
   }, [proyectoSlug]);
 
   useEffect(() => { loadData(); loadStats(); }, [loadData, loadStats]);
-  useEffect(() => { setPage(1); }, [proyectoSlug, filtroVia, busqueda, programa, sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [proyectoSlug, filtroVia, busqueda, programa, sortCol, sortDir, pageSize]);
 
   const showMsg = (type, text) => { setMessage({type,text}); setTimeout(()=>setMessage(null),5000); };
 
@@ -211,7 +218,9 @@ export default function LimpiezaAnalisis() {
   };
 
   // Edición inline
-  const handleCellDblClick = (pkVal, col) => setEditingCell({pkVal, col});
+  const handleCellDblClick = useCallback((pkVal, col) => {
+    setEditingCell({pkVal, col});
+  }, []);
   const handleCellChange = (pkVal, col, value) =>
     setEditedCells(prev => ({...prev, [pkVal]: {...(prev[pkVal]||{}), [col]: value}}));
   const handleCellBlur = () => setEditingCell(null);
@@ -268,7 +277,8 @@ export default function LimpiezaAnalisis() {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-viabilidad-csv`, formData,
         {headers:{'Content-Type':'multipart/form-data'}});
       setCsvResult(res.data);
-      loadData(); loadStats();
+      await loadData();
+      await loadStats();
     } catch (err) {
       setCsvResult({success:false, message:err.response?.data?.detail||'Error.', procesados:0, errores:[]});
     } finally { setCsvLoading(false); }
@@ -538,6 +548,14 @@ export default function LimpiezaAnalisis() {
       {/* PAGINACIÓN */}
       {!loading&&data.total>0&&(
         <div className="la-pagination">
+          <select value={pageSize}
+            onChange={e=>{setPageSize(Number(e.target.value));setPage(1);}}
+            style={{padding:'5px 8px',border:'1px solid var(--clr-border)',borderRadius:6,fontSize:12,fontFamily:'Outfit,sans-serif'}}>
+            <option value={10}>10 / pág</option>
+            <option value={20}>20 / pág</option>
+            <option value={50}>50 / pág</option>
+            <option value={100}>100 / pág</option>
+          </select>
           <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>← Anterior</button>
           <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
           <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page>=totalPages}>Siguiente →</button>

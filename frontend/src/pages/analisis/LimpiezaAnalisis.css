@@ -621,3 +621,11 @@
 
 /* Cursor editable */
 .la-td:not(.la-td--check):not(.la-td--via):not(.la-td--pago) { cursor: cell; }
+
+.la-table {
+  table-layout: auto !important;
+}
+.la-th, .la-td {
+  width: 1%;
+  white-space: nowrap;
+}

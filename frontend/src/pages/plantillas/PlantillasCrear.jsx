@@ -5,12 +5,41 @@ import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './Plantillas.css';
+import { L10n, setCulture } from '@syncfusion/ej2-base';
 
 import {
   DocumentEditorContainerComponent,
   Toolbar,
 } from '@syncfusion/ej2-react-documenteditor';
 DocumentEditorContainerComponent.Inject(Toolbar);
+
+setCulture('es');
+L10n.load({
+  'es': {
+    'documenteditor': {
+      'Table': 'Tabla', 'Row': 'Fila', 'Cell': 'Celda', 'Ok': 'Aceptar',
+      'Cancel': 'Cancelar', 'Size': 'Tamaño', 'Preferred Width': 'Ancho preferido',
+      'Points': 'Puntos', 'Percent': 'Porcentaje', 'Merge cells': 'Combinar celdas',
+      'Insert above': 'Insertar arriba', 'Insert below': 'Insertar abajo',
+      'Insert left': 'Insertar a la izquierda', 'Insert right': 'Insertar a la derecha',
+      'Delete row': 'Eliminar fila', 'Delete column': 'Eliminar columna',
+      'Cell Count': 'Número de celdas', 'Row Count': 'Número de filas',
+      'New comment': 'Nuevo comentario', 'Edit': 'Editar', 'Comment': 'Comentario',
+      'No color': 'Sin color', 'More colors': 'Más colores', 'Add a comment': 'Agregar comentario',
+      'Comments': 'Comentarios', 'Undo': 'Deshacer', 'Redo': 'Rehacer',
+      'Image': 'Imagen', 'Caption': 'Título', 'Insert Caption': 'Insertar título',
+      'Above': 'Arriba', 'Below': 'Abajo', 'Wrap Text': 'Ajustar texto',
+      'In line with text': 'En línea con el texto', 'Square': 'Cuadrado',
+      'Tight': 'Estrecho', 'Through': 'A través', 'Top and Bottom': 'Arriba y abajo',
+      'Behind Text': 'Detrás del texto', 'In front of Text': 'Delante del texto',
+      'Inline': 'En línea', 'With Text Wrapping': 'Con ajuste de texto',
+    },
+    'toolbar': {
+      'New': 'Nuevo', 'Open': 'Abrir', 'Undo': 'Deshacer', 'Redo': 'Rehacer',
+      'Image': 'Imagen', 'Table': 'Tabla', 'Find': 'Buscar',
+    }
+  }
+});
 
 const Icon = ({ d, d2, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -377,66 +406,82 @@ export default function PlantillasCrear() {
   // ── Modo EDITOR (Syncfusion) ──────────────────────────────────────────────
   if (modo === 'editor') {
     return (
-      <div className="pl-page pl-page--editor">
-        <div className="pl-editor-header">
-          <div className="pl-editor-meta">
-            <input className="pl-input pl-input--inline" value={nombre}
-              onChange={e => setNombre(e.target.value)} placeholder="Nombre de la plantilla *" />
-            <input className="pl-input pl-input--inline" value={descripcion}
-              onChange={e => setDesc(e.target.value)} placeholder="Descripción (opcional)" />
-          </div>
-          <div className="pl-editor-actions">
-            <button className="pl-btn" onClick={() => setModo(null)}>
+      <div className="pl-page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - var(--header-h) - 48px)', overflow: 'hidden' }}>
+        {/* Header compacto */}
+        <div className="pl-header" style={{ flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="pl-btn" onClick={() => { setModo(null); }}>
               <Icon {...ICONS.back} size={14} /> Volver
             </button>
-            <button className="pl-btn pl-btn--primary" onClick={handleGuardarEditor} disabled={loading}>
+            <input className="pl-input" style={{ width: 220 }} value={nombre}
+              onChange={e => setNombre(e.target.value)} placeholder="Nombre de plantilla *" />
+            <input className="pl-input" style={{ width: 220 }} value={descripcion}
+              onChange={e => setDesc(e.target.value)} placeholder="Descripción (opcional)" />
+            <button className="pl-btn pl-btn--primary" onClick={handleGuardarEditor}
+              disabled={loading || !nombre.trim()}>
               {loading ? 'Guardando…' : '💾 Guardar plantilla'}
             </button>
-          </div>
-        </div>
-
-        {message && <div className={`pl-message pl-message--${message.type}`}>{message.text}</div>}
-
-        <div className="pl-editor-info">
-          <span>📐 Oficio México · 21.59 × 34.01 cm</span>
-          <span>🔤 Calibri 11 por defecto</span>
-          <span>💡 Usa <code>{'{{campo}}'}</code> para campos dinámicos</span>
-        </div>
-
-        {/* Barra de campos disponibles para insertar */}
-        <div className="pl-editor-campos">
-          <span className="pl-editor-campos-label">Insertar campo:</span>
-          <div className="pl-editor-campos-list">
-            <button className="pl-campo-chip pl-campo-chip--btn pl-campo-chip--barcode"
-              onClick={insertBarcode} title="Insertar código de barras dinámico">
-              📊 {'{{codebar}}'}
+            <button className="pl-btn" onClick={insertBarcode} title="Insertar código de barras dinámico">
+              <Icon {...ICONS.barcode} size={14} /> Barcode
             </button>
-            {camposDisp.slice(0, 25).map(c => (
-              <button key={c} className="pl-campo-chip pl-campo-chip--btn"
-                onClick={() => insertText(`{{${c}}}`)}>
-                {`{{${c}}}`}
-              </button>
-            ))}
-            {camposDisp.length > 25 && (
-              <span className="pl-campo-chip pl-campo-chip--more">+{camposDisp.length - 25} más</span>
-            )}
           </div>
+          {message && <div className={`pl-message pl-message--${message.type}`} style={{ marginTop: 8 }}>{message.text}</div>}
         </div>
 
-        {/* Editor Syncfusion */}
-        <div className="pl-editor-container">
-          <DocumentEditorContainerComponent
-            ref={editorRef}
-            height="100%"
-            width="100%"
-            enableToolbar={true}
-            showPropertiesPane={true}
-            serviceUrl="https://ej2services.syncfusion.com/production/web-services/api/documenteditor/"
-            created={configureEditorPage}
-            documentEditorSettings={{
-              fontFamilies: ['Calibri', 'Arial', 'Times New Roman', 'Courier New', 'Verdana'],
-            }}
-          />
+        {/* Layout: editor grande + panel de campos lateral */}
+        <div style={{ flex: 1, display: 'flex', gap: 12, minHeight: 0, overflow: 'hidden' }}>
+
+          {/* Editor — ocupa todo el espacio restante */}
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', border: '1px solid var(--clr-border)', borderRadius: 8 }}>
+            <DocumentEditorContainerComponent
+              ref={editorRef}
+              enableToolbar={true}
+              locale="es"
+              height="100%"
+              serviceUrl=""
+              created={configureEditorPage}
+              style={{ height: '100%' }}
+            />
+          </div>
+
+          {/* Panel lateral: campos disponibles */}
+          <div style={{
+            width: 220, flexShrink: 0, background: 'var(--clr-white)',
+            border: '1px solid var(--clr-border)', borderRadius: 8,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--clr-border)', fontSize: 12, fontWeight: 600, color: 'var(--clr-muted)', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+              Campos disponibles
+              <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, textTransform: 'none', color: 'var(--clr-muted)' }}>
+                Clic para insertar
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+              {camposDisp.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--clr-muted)', padding: '8px 4px' }}>
+                  Sin campos. Selecciona un proyecto con datos cargados.
+                </p>
+              ) : (
+                camposDisp.map(c => (
+                  <button key={c}
+                    onClick={() => insertText(`{{${c}}}`)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '5px 8px', marginBottom: 3,
+                      border: '1px solid var(--clr-border)', borderRadius: 5,
+                      background: '#f8f9fa', fontSize: 11.5,
+                      fontFamily: 'monospace', cursor: 'pointer',
+                      transition: 'background .1s',
+                    }}
+                    onMouseEnter={e => e.target.style.background = '#eef3f9'}
+                    onMouseLeave={e => e.target.style.background = '#f8f9fa'}
+                    title={`Insertar {{${c}}}`}>
+                    {`{{${c}}}`}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );

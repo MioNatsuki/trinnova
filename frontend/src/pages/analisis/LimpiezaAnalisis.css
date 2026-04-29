@@ -199,7 +199,7 @@
 }
 
 .la-table {
-  width: max-content;
+  width: 100%;
   min-width: 100%;
   border-collapse: separate; /* separate permite que sticky funcione con borders */
   border-spacing: 0;
@@ -626,6 +626,8 @@
   table-layout: auto !important;
 }
 .la-th, .la-td {
-  width: 1%;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 7px 12px;
 }

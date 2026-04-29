@@ -1,11 +1,11 @@
 // frontend/src/pages/plantillas/PlantillasCrear.jsx
+import { L10n, setCulture } from '@syncfusion/ej2-base';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './Plantillas.css';
-import { L10n, setCulture } from '@syncfusion/ej2-base';
 
 import {
   DocumentEditorContainerComponent,
@@ -13,33 +13,106 @@ import {
 } from '@syncfusion/ej2-react-documenteditor';
 DocumentEditorContainerComponent.Inject(Toolbar);
 
-setCulture('es');
 L10n.load({
   'es': {
     'documenteditor': {
-      'Table': 'Tabla', 'Row': 'Fila', 'Cell': 'Celda', 'Ok': 'Aceptar',
-      'Cancel': 'Cancelar', 'Size': 'Tamaño', 'Preferred Width': 'Ancho preferido',
-      'Points': 'Puntos', 'Percent': 'Porcentaje', 'Merge cells': 'Combinar celdas',
-      'Insert above': 'Insertar arriba', 'Insert below': 'Insertar abajo',
-      'Insert left': 'Insertar a la izquierda', 'Insert right': 'Insertar a la derecha',
-      'Delete row': 'Eliminar fila', 'Delete column': 'Eliminar columna',
-      'Cell Count': 'Número de celdas', 'Row Count': 'Número de filas',
-      'New comment': 'Nuevo comentario', 'Edit': 'Editar', 'Comment': 'Comentario',
-      'No color': 'Sin color', 'More colors': 'Más colores', 'Add a comment': 'Agregar comentario',
-      'Comments': 'Comentarios', 'Undo': 'Deshacer', 'Redo': 'Rehacer',
-      'Image': 'Imagen', 'Caption': 'Título', 'Insert Caption': 'Insertar título',
-      'Above': 'Arriba', 'Below': 'Abajo', 'Wrap Text': 'Ajustar texto',
-      'In line with text': 'En línea con el texto', 'Square': 'Cuadrado',
-      'Tight': 'Estrecho', 'Through': 'A través', 'Top and Bottom': 'Arriba y abajo',
-      'Behind Text': 'Detrás del texto', 'In front of Text': 'Delante del texto',
-      'Inline': 'En línea', 'With Text Wrapping': 'Con ajuste de texto',
+      'Table': 'Tabla',
+      'Row': 'Fila',
+      'Cell': 'Celda',
+      'Ok': 'Aceptar',
+      'Cancel': 'Cancelar',
+      'Size': 'Tamaño',
+      'Preferred Width': 'Ancho preferido',
+      'Points': 'Puntos',
+      'Percent': 'Porcentaje',
+      'Merge cells': 'Combinar celdas',
+      'Insert above': 'Insertar arriba',
+      'Insert below': 'Insertar abajo',
+      'Insert left': 'Insertar a la izquierda',
+      'Insert right': 'Insertar a la derecha',
+      'Delete row': 'Eliminar fila',
+      'Delete column': 'Eliminar columna',
+      'Cell Count': 'Número de celdas',
+      'Row Count': 'Número de filas',
+      'New comment': 'Nuevo comentario',
+      'Edit': 'Editar',
+      'Comment': 'Comentario',
+      'No color': 'Sin color',
+      'More colors': 'Más colores',
+      'Add a comment': 'Agregar un comentario',
+      'Comments': 'Comentarios',
+      'Undo': 'Deshacer',
+      'Redo': 'Rehacer',
+      'Image': 'Imagen',
+      'Caption': 'Título',
+      'Above': 'Arriba',
+      'Below': 'Abajo',
+      'Wrap Text': 'Ajustar texto',
+      'In line with text': 'En línea con el texto',
+      'Square': 'Cuadrado',
+      'Tight': 'Estrecho',
+      'Through': 'A través',
+      'Top and Bottom': 'Arriba y abajo',
+      'Behind Text': 'Detrás del texto',
+      'In front of text': 'Delante del texto',
+      'Inline': 'En línea',
+      'With Text Wrapping': 'Con ajuste de texto',
+      'Find': 'Buscar',
+      'Replace': 'Reemplazar',
+      'Go to': 'Ir a',
+      'Page number': 'Número de página',
+      'Align left': 'Alinear izquierda',
+      'Align center': 'Centrar',
+      'Align right': 'Alinear derecha',
+      'Justify': 'Justificar',
+      'Bold': 'Negrita',
+      'Italic': 'Cursiva',
+      'Underline': 'Subrayado',
+      'Strikethrough': 'Tachado',
+      'Superscript': 'Superíndice',
+      'Subscript': 'Subíndice',
+      'Font': 'Fuente',
+      'Font Size': 'Tamaño de fuente',
+      'Paragraph': 'Párrafo',
+      'Bullets': 'Viñetas',
+      'Numbering': 'Numeración',
+      'Decrease Indent': 'Disminuir sangría',
+      'Increase Indent': 'Aumentar sangría',
+      'Insert': 'Insertar',
+      'Page Setup': 'Configurar página',
+      'Print': 'Imprimir',
+      'Save': 'Guardar',
+      'Open': 'Abrir',
+      'New': 'Nuevo',
+      'Close': 'Cerrar',
+      'Download': 'Descargar',
+      'Page Break': 'Salto de página',
+      'Section Break': 'Salto de sección',
+      'Header': 'Encabezado',
+      'Footer': 'Pie de página',
+      'Bookmark': 'Marcador',
+      'Hyperlink': 'Hipervínculo',
+      'Clear Formatting': 'Borrar formato',
+      'Paste': 'Pegar',
+      'Cut': 'Cortar',
+      'Copy': 'Copiar',
+      'Zoom': 'Zoom',
+      'Fit Page': 'Ajustar página',
+      'Fit Width': 'Ajustar ancho',
     },
     'toolbar': {
-      'New': 'Nuevo', 'Open': 'Abrir', 'Undo': 'Deshacer', 'Redo': 'Rehacer',
-      'Image': 'Imagen', 'Table': 'Tabla', 'Find': 'Buscar',
+      'New': 'Nuevo',
+      'Open': 'Abrir',
+      'Undo': 'Deshacer',
+      'Redo': 'Rehacer',
+      'Image': 'Imagen',
+      'Table': 'Tabla',
+      'Find': 'Buscar',
     }
   }
 });
+
+setCulture('es');
 
 const Icon = ({ d, d2, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -122,6 +195,7 @@ export default function PlantillasCrear() {
         headers: { 'Content-Type': 'multipart/form-data' },
         params: { proyecto_id: proy.id, nombre, descripcion },
       });
+      setDirty(false);
       setResult(res.data);
       const edits = {};
       Object.entries(res.data.mapeo_automatico || {}).forEach(([ph, campo]) => {
@@ -340,8 +414,8 @@ export default function PlantillasCrear() {
             </div>
 
             <button className="pl-btn pl-btn--primary pl-btn--full" onClick={handleUpload}
-              disabled={loading || !file || !nombre.trim()}>
-              {loading ? 'Procesando…' : '⬆️ Subir y extraer campos'}
+              disabled={loading || !file || !nombre.trim() || !selectedSlug}>
+              {loading ? 'Procesando…' : 'Subir y extraer campos'}
             </button>
           </div>
         ) : (
@@ -413,8 +487,9 @@ export default function PlantillasCrear() {
             <button className="pl-btn" onClick={() => { setModo(null); }}>
               <Icon {...ICONS.back} size={14} /> Volver
             </button>
-            <input className="pl-input" style={{ width: 220 }} value={nombre}
-              onChange={e => setNombre(e.target.value)} placeholder="Nombre de plantilla *" />
+              <input className="pl-input" style={{ width: 220 }} value={nombre}
+                onChange={e => { setNombre(e.target.value); if (e.target.value.trim()) { setDirty(true, 'Plantilla del editor sin guardar.');} }}
+                placeholder="Nombre de plantilla *"/>
             <input className="pl-input" style={{ width: 220 }} value={descripcion}
               onChange={e => setDesc(e.target.value)} placeholder="Descripción (opcional)" />
             <button className="pl-btn pl-btn--primary" onClick={handleGuardarEditor}

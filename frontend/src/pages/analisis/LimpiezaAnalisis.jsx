@@ -277,6 +277,13 @@ export default function LimpiezaAnalisis() {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-viabilidad-csv`, formData,
         {headers:{'Content-Type':'multipart/form-data'}});
       setCsvResult(res.data);
+      {
+        setTimeout(() => {
+          setShowCsvModal(false);
+          setCsvResult(null);
+          setCsvFile(null);
+        }, 1500);
+      }
       await loadData();
       await loadStats();
     } catch (err) {
@@ -548,23 +555,23 @@ export default function LimpiezaAnalisis() {
       {/* PAGINACIÓN */}
       {!loading&&data.total>0&&(
         <div className="la-pagination">
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>← Anterior</button>
+          <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
           <select value={pageSize}
             onChange={e=>{setPageSize(Number(e.target.value));setPage(1);}}
             style={{padding:'5px 8px',border:'1px solid var(--clr-border)',borderRadius:6,fontSize:12,fontFamily:'Outfit,sans-serif'}}>
-            <option value={10}>10 / pág</option>
-            <option value={20}>20 / pág</option>
-            <option value={50}>50 / pág</option>
-            <option value={100}>100 / pág</option>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
           </select>
-          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>← Anterior</button>
-          <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
           <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page>=totalPages}>Siguiente →</button>
         </div>
       )}
 
       {/* MODAL CSV */}
       {showCsvModal&&(
-        <div className="la-modal-overlay" onClick={()=>setShowCsvModal(false)}>
+        <div className="la-modal-overlay" onClick={() => { if (csvLoading) return; setShowCsvModal(false);}}>
           <div className="la-modal" onClick={e=>e.stopPropagation()}>
             <div className="la-modal-head">
               <h2 className="la-modal-title">Cargar viabilidad / pagos masivo</h2>

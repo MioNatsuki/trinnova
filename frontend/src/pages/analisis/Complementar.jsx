@@ -58,8 +58,6 @@ export default function Complementar() {
       if (sortCol) { params.sort_col = sortCol; params.sort_dir = sortDir; }
       const res = await api.get(`/analisis/${proyectoSlug}/complementar`, { params });
       setData(res.data);
-      // NO reseteamos editedRows aquí para preservar cambios al paginar
-      // Solo limpiamos si cambia proyecto
       if (res.data.rows.length > 0 && res.data.pk) {
         const editablesSet = new Set(res.data.columnas_editables);
         const pk = res.data.pk;
@@ -80,10 +78,13 @@ export default function Complementar() {
 
   // Al cambiar proyecto o búsqueda, volver a pág 1 y limpiar ediciones
   useEffect(() => {
-    setPage(1);
+  if (proyectoSlug) {
     setEditedRows({});
     setPendingCount(0);
-  }, [proyectoSlug, search]);
+    setDirty(false); 
+    loadData();
+  }
+}, [proyectoSlug]);
 
   // Al cambiar sort, volver a pág 1 sin limpiar ediciones
   useEffect(() => { setPage(1); }, [sortCol, sortDir]);
@@ -96,16 +97,19 @@ export default function Complementar() {
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
-    // NO hay loadData aquí; useEffect lo dispara al cambiar sortCol/sortDir
   };
 
   const handleCellEdit = (pkValue, field, value) => {
-    setEditedRows(prev => {
-      const updated = { ...prev, [pkValue]: { ...(prev[pkValue] || {}), [field]: value } };
-      setPendingCount(Object.keys(updated).length);
-      return updated;
-    });
-  };
+  setEditedRows(prev => {
+    const updated = { ...prev, [pkValue]: { ...(prev[pkValue] || {}), [field]: value } };
+    const count = Object.keys(updated).length;
+    setPendingCount(count);
+    if (count > 0) {
+      setDirty(true, `Tienes ${count} registro(s) con cambios sin guardar en Complementar.`);
+    }
+    return updated;
+  });
+};
 
   const handleSave = async () => {
     if (Object.keys(editedRows).length === 0) return;
@@ -115,9 +119,10 @@ export default function Complementar() {
     }));
     try {
       const res = await api.post(`/analisis/${proyectoSlug}/guardar-complemento`, payload);
-      showMsg('success', res.data.message);
+      showMsg('success', res.data.message || 'Guardado correctamente.');
       setEditedRows({});
       setPendingCount(0);
+      setDirty(false);  
       loadData();
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al guardar.');
@@ -167,6 +172,12 @@ export default function Complementar() {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-complemento-csv`, formData,
         { headers: { 'Content-Type': 'multipart/form-data' } });
       setCsvResult(res.data);
+      { setTimeout(() => {
+        setShowCsvModal(false);
+        setCsvResult(null);
+        setCsvFile(null);
+      }, 1500);
+      }
       loadData();
     } catch (err) {
       setCsvResult({ success: false, message: err.response?.data?.detail || 'Error.', procesados: 0, errores: [] });
@@ -175,7 +186,6 @@ export default function Complementar() {
 
   const columnasEditables = data.columnas_editables;
 
-  // Columnas de padron que tienen contenido visible (excluyendo las que ya son editables)
   const columnasPadronVisible = useMemo(() => columnasPadron, [columnasPadron]);
   const todasColumnas = useMemo(() => {
     if (!data.pk) return [];
@@ -214,17 +224,6 @@ export default function Complementar() {
         <div className="analisis-header">
           <h1>Complementar información</h1>
           <div className="analisis-actions">
-            {/* Registros por página */}
-            <select
-              value={limit}
-              onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}
-              style={{ padding:'6px 10px', border:'1px solid var(--clr-border)', borderRadius:7, fontSize:13, fontFamily:'Outfit,sans-serif' }}>
-              <option value={10}>10 / pág</option>
-              <option value={20}>20 / pág</option>
-              <option value={50}>50 / pág</option>
-              <option value={100}>100 / pág</option>
-            </select>
-
             <form onSubmit={e => { e.preventDefault(); setSearch(draftSearch); setPage(1); }}
               style={{ display: 'flex', gap: 6 }}>
               <input type="text" placeholder="Buscar…" value={draftSearch}
@@ -334,7 +333,26 @@ export default function Complementar() {
             {data.total > 0 && (
               <div className="comp-pagination">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Anterior</button>
-                <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
+                <span>Página {page} de {totalPages}</span>
+                <select
+                  value={limit}
+                  onChange={e => {
+                    setLimit(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid var(--clr-border)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontFamily: 'Outfit, sans-serif',
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
                 <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Siguiente →</button>
               </div>
             )}
@@ -364,7 +382,7 @@ export default function Complementar() {
 
       {/* Modal CSV masivo */}
       {showCsvModal && (
-        <div className="comp-overlay" onClick={() => setShowCsvModal(false)}>
+        <div className="comp-overlay" onClick={() => { if (csvLoading) return; setShowCsvModal(false);}}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
             <div className="comp-modal-header">
               <h3>📂 Complementar masivamente</h3>

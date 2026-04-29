@@ -5,7 +5,7 @@ import './index.css'
 import App from './App.jsx'
 
 registerLicense(
-  'ORg4AjUWIQQuCC4ARkVUWXxLdEBkWH5LfEp1TXxaf1p0dVZMYVVBJAtUQH5SMwEhMDwA'
+  'Ngo9BigBOggjHTQxAR8/V1JHaF5cWWdCf1FpRmJGdld5fUVHYVZUTXxaS00DNHVRdkdlWXtceHVQRGVYVkJ1WUtWYEo='
 )
 
 createRoot(document.getElementById('root')).render(

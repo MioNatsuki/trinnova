@@ -1211,9 +1211,7 @@ async def cargar_complemento_csv(
             for col in df.columns:
                 if col == pk_norm:
                     continue
-                # Permitir tanto nombre normalizado como nombre real
-                col_real = col  # ya está normalizado
-                # Buscar coincidencia en cols_permitidas
+                col_real = col  
                 match = None
                 for cp in cols_permitidas:
                     if _normalizar_col(cp) == col_real or cp == col_real:
@@ -1229,7 +1227,17 @@ async def cargar_complemento_csv(
             if not campos:
                 continue
 
-            # Verificar si existe registro en complementaria
+            if 'programa' in campos:
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk_val"),
+                    {"prog": campos.pop('programa'), "pk_val": pk_val},
+                )
+                if not campos:
+                    procesados += 1
+                    if procesados % 200 == 0:
+                        db_proyecto.commit()
+                    continue
+
             existe = db_proyecto.execute(
                 text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
                 {"pk_val": pk_val},

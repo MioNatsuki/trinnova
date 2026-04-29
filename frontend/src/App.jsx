@@ -1,6 +1,7 @@
 // frontend/src/App.jsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { NavigationGuardProvider } from './context/NavigationGuardContext'; 
 import Login from './components/auth/Login';
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/Dashboard';
@@ -27,56 +28,52 @@ function AppRoutes() {
   const canAnalisis  = isAnalista;
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
+    <NavigationGuardProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
 
-      <Route path="/" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      }>
-        <Route index element={<Dashboard />} />
+        <Route path="/" element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }>
+          <Route index element={<Dashboard />} />
 
-        {/* Proyectos — visible para todos los roles */}
-        <Route path="proyectos" element={<Proyectos />} />
+          <Route path="proyectos" element={<Proyectos />} />
 
-        {/* Administración — solo superadmin */}
-        {isSuperadmin && (
-          <Route path="usuarios" element={<UsuariosCRUD />} />
-        )}
+          {isSuperadmin && (
+            <Route path="usuarios" element={<UsuariosCRUD />} />
+          )}
 
-        {/* Análisis — analista y superadmin */}
-        {canAnalisis && (
-          <>
-            <Route path="analisis/cargar"       element={<CargarPadron />} />
-            <Route path="analisis/complementar" element={<Complementar />} />
-            <Route path="analisis/limpieza"     element={<LimpiezaAnalisis />} />
-          </>
-        )}
+          {canAnalisis && (
+            <>
+              <Route path="analisis/cargar"       element={<CargarPadron />} />
+              <Route path="analisis/complementar" element={<Complementar />} />
+              <Route path="analisis/limpieza"     element={<LimpiezaAnalisis />} />
+            </>
+          )}
 
-        {/* Plantillas — analista y superadmin (próxima fase) */}
-        {isAnalista && (
-          <>
-            <Route path="/plantillas" element={<PlantillasDashboard />} />
-            <Route path="/plantillas/crear" element={<PlantillasCrear />} />
-          </>
-        )}
+          {isAnalista && (
+            <>
+              <Route path="/plantillas" element={<PlantillasDashboard />} />
+              <Route path="/plantillas/crear" element={<PlantillasCrear />} />
+            </>
+          )}
 
-        {/* Emisión — todos los roles (próxima fase) */}
-        <Route path="emision/preparacion" element={<div style={{ padding: 24 }}>Preparación de Emisión — próximamente</div>} />
-        <Route path="emision/emitir"      element={<div style={{ padding: 24 }}>Emisión de documentos — próximamente</div>} />
+          <Route path="emision/preparacion" element={<div style={{ padding: 24 }}>Preparación de Emisión — próximamente</div>} />
+          <Route path="emision/emitir"      element={<div style={{ padding: 24 }}>Emisión de documentos — próximamente</div>} />
 
-        {/* Catálogos — superadmin (próxima fase) */}
-        {isSuperadmin && (
-          <>
-            <Route path="catalogo/documentos" element={<div style={{ padding: 24 }}>Catálogo Documentos — próximamente</div>} />
-            <Route path="catalogo/zonas"      element={<div style={{ padding: 24 }}>Catálogo Zonas — próximamente</div>} />
-          </>
-        )}
+          {isSuperadmin && (
+            <>
+              <Route path="catalogo/documentos" element={<div style={{ padding: 24 }}>Catálogo Documentos — próximamente</div>} />
+              <Route path="catalogo/zonas"      element={<div style={{ padding: 24 }}>Catálogo Zonas — próximamente</div>} />
+            </>
+          )}
 
-        <Route path="*" element={<Navigate to="/" />} />
-      </Route>
-    </Routes>
+          <Route path="*" element={<Navigate to="/" />} />
+        </Route>
+      </Routes>
+    </NavigationGuardProvider>
   );
 }
 

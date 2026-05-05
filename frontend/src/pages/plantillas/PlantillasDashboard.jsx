@@ -35,7 +35,7 @@ export default function PlantillasDashboard() {
   const [plantillas,   setPlantillas]   = useState([]);
   const [loading,      setLoading]      = useState(false);
   const [filtroSlug,   setFiltroSlug]   = useState(proyectoSlug || '');
-  const [filtroActiva, setFiltroActiva] = useState('');
+  const [filtroActiva, setFiltroActiva] = useState('true');
   const [busqueda,     setBusqueda]     = useState('');
   const [message,      setMessage]      = useState(null);
   const [editModal,    setEditModal]    = useState(null);
@@ -154,7 +154,7 @@ export default function PlantillasDashboard() {
           </select>
         </div>
         <select className="pl-select" value={filtroActiva} onChange={e => setFiltroActiva(e.target.value)}>
-          <option value="">Todas</option>
+          <option value="">Todas (activas e inactivas)</option>
           <option value="true">Activas</option>
           <option value="false">Inactivas</option>
         </select>
@@ -238,7 +238,7 @@ export default function PlantillasDashboard() {
 
       {/* MODAL EDITAR */}
       {editModal && (
-        <div className="pl-overlay" onClick={() => setEditModal(null)}>
+        <div className="pl-overlay" onClick={() => { if (editSaving) return; if (window.confirm('¿Descartar cambios?')) setEditModal(null);}}>
           <div className="pl-modal" onClick={e => e.stopPropagation()}>
             <div className="pl-modal-header">
               <h3>Editar plantilla</h3>
@@ -270,7 +270,7 @@ export default function PlantillasDashboard() {
 
       {/* MODAL MAPEO */}
       {mapModal && (
-        <div className="pl-overlay" onClick={() => setMapModal(null)}>
+        <div className="pl-overlay" onClick={() => { if (mapSaving) return; setMapModal(null);}}>
           <div className="pl-modal pl-modal--wide" onClick={e => e.stopPropagation()}>
             <div className="pl-modal-header">
               <h3>Mapeo de campos — {mapModal.nombre}</h3>

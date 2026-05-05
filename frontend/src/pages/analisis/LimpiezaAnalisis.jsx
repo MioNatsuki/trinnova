@@ -200,10 +200,15 @@ export default function LimpiezaAnalisis() {
   }, [setDirty]);
 
   const closeCsvModal = useCallback(() => {
-    if (csvLoading) return;
+    if (csvLoadingRef.current) return;
+    if (csvFile && !csvResult) {
+      if (!window.confirm('¿Cerrar sin cargar el archivo?')) return;
+    }
     setShowCsvModal(false);
+    setCsvFile(null);
+    setCsvResult(null);
     setDirty(false);
-  }, [csvLoading, setDirty]);
+  }, [csvFile, csvResult, setDirty]);
 
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
   const pendingCellCount = Object.keys(editedCells).length;

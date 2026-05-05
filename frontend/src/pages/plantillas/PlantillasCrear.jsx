@@ -257,19 +257,24 @@ export default function PlantillasCrear() {
   const aplicarVistaPrevia = useCallback(() => {
     const editor = editorRef.current?.documentEditor;
     if (!editor) { showMsg('error', 'Editor no disponible.'); return; }
-
     const datos = DATOS_EJEMPLO[selectedSlug];
     if (!datos) { showMsg('error', 'No hay datos de ejemplo para este proyecto.'); return; }
 
     try {
-      const sfdt = editor.serialize();
-      let sfdtStr = JSON.stringify(sfdt);
+      // Usar find & replace nativo del editor para cada placeholder
+      let reemplazos = 0;
       for (const [placeholder, valor] of Object.entries(datos)) {
-        const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        sfdtStr = sfdtStr.replace(new RegExp(escaped, 'g'), valor);
+        editor.search.findAll(placeholder);
+        if (editor.search.searchResults?.length > 0) {
+          reemplazos += editor.search.searchResults.length;
+          editor.search.replace(placeholder, valor, true); // replaceAll
+        }
       }
-      editor.open(JSON.parse(sfdtStr));
-      showMsg('success', 'Vista previa aplicada.');
+      if (reemplazos > 0) {
+        showMsg('success', `Vista previa: ${reemplazos} campos reemplazados.`);
+      } else {
+        showMsg('error', 'No se encontraron placeholders en el documento.');
+      }
     } catch (err) {
       console.error('[VistaPrevia] Error:', err);
       showMsg('error', 'Error: ' + err.message);
@@ -573,14 +578,8 @@ export default function PlantillasCrear() {
             <button className="pl-btn" onClick={insertBarcode} title="Insertar código de barras">
               <Icon {...ICONS.barcode} size={14} /> Barcode
             </button>
-            <button className="pl-btn" onClick={insertarImagen} title="Insertar imagen">
-              🖼️ Imagen
-            </button>
             <button className="pl-btn" onClick={aplicarVistaPrevia} title="Vista previa con datos de ejemplo">
-              👁️ Vista previa
-            </button>
-            <button className="pl-btn" onClick={ejecutarMailMerge} title="Combinar correspondencia con datos reales">
-              📧 Mail Merge
+              Vista previa
             </button>
           </div>
           {message && <div className={`pl-message pl-message--${message.type}`} style={{ marginTop: 8 }}>{message.text}</div>}
@@ -596,7 +595,6 @@ export default function PlantillasCrear() {
             serviceUrl=""
             toolbarItems={[
               'New',
-              'Open',
               'Separator',
               'Undo',
               'Redo',

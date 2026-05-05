@@ -80,9 +80,9 @@ export default function PlantillasDashboard() {
   };
 
   const openEdit = (p) => {
-    setEditModal(p);
-    setEditForm({ nombre: p.nombre, descripcion: p.descripcion || '', activa: p.activa });
-  };
+    setProyectoSlug(p.proyecto_slug);
+    navigate(`/plantillas/crear?edit=${p.id}`);
+};
 
   const handleEditSave = async () => {
     setEditSaving(true);

@@ -50,6 +50,7 @@ function AppRoutes() {
               <Route path="analisis/cargar"       element={<CargarPadron />} />
               <Route path="analisis/complementar" element={<Complementar />} />
               <Route path="analisis/limpieza"     element={<LimpiezaAnalisis />} />
+              <Route path="analisis/calculos"     element={<div style={{ padding: 24 }}><h2>Cálculos</h2><p>Módulo en desarrollo — Fase 5</p></div>} />
             </>
           )}
 

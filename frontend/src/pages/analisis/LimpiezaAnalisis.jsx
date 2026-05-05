@@ -1,5 +1,5 @@
 // frontend/src/pages/analisis/LimpiezaAnalisis.jsx
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
@@ -90,6 +90,7 @@ const Icon = ({ d, d2, size=16 }) => (
     <path d={d}/>{d2 && <path d={d2}/>}
   </svg>
 );
+
 const ICONS = {
   spaces:    {d:"M4 6h16M4 12h16M4 18h7",d2:"M15 18l4-4m0 0l4 4m-4-4v8"},
   streets:   {d:"M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3"},
@@ -101,6 +102,48 @@ const ICONS = {
   sortDown:  {d:"M12 19l7-7H5z"},
   sortNone:  {d:"M12 5l-4 4h8zM12 19l4-4H8z"},
 };
+
+const MemoizedCell = memo(({ 
+  pkVal, col, rawVal, proyectoSlug, editedCells, editingCell, 
+  onDoubleClick, onChange, onBlur 
+}) => {
+  const err = detectErrors(rawVal, col, proyectoSlug);
+  const isDirty = editedCells[pkVal]?.[col] !== undefined;
+  const isEditing = editingCell?.pkVal === pkVal && editingCell?.col === col;
+  let displayVal = String(rawVal ?? '');
+  
+  if (FECHA_COLS_POR_PROYECTO[proyectoSlug]?.has(col) && rawVal) {
+    displayVal = formatDateForProject(String(rawVal), proyectoSlug);
+  }
+
+  return (
+    <td
+      className={`la-td ${err ? 'la-td--error' : ''} ${isDirty ? 'la-td--dirty' : ''}`}
+      title={err ? `⚠ ${err}` : 'Doble clic para editar'}
+      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(pkVal, col); }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {isEditing ? (
+        <input
+          autoFocus
+          className="la-cell-input"
+          defaultValue={String(editedCells[pkVal]?.[col] ?? rawVal ?? '')}
+          onChange={(e) => onChange(pkVal, col, e.target.value)}
+          onBlur={onBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') onBlur();
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <>
+          {err && <span className="la-err-dot" title={err}>!</span>}
+          <span className="la-cell-val">{displayVal}</span>
+        </>
+      )}
+    </td>
+  );
+});
 
 const VIABILIDAD_CONFIG = {
   viable:    {label:'Viable',   bg:'#c6f6d5',color:'#276749',dot:'#38a169'},
@@ -149,15 +192,28 @@ export default function LimpiezaAnalisis() {
   const [csvResult,    setCsvResult]    = useState(null);
   const csvInputRef = useRef();
 
+  const openCsvModal = useCallback(() => {
+    setCsvFile(null);
+    setCsvResult(null);
+    setShowCsvModal(true);
+    setDirty(true, 'Tienes un modal de carga CSV abierto.');
+  }, [setDirty]);
+
+  const closeCsvModal = useCallback(() => {
+    if (csvLoading) return;
+    setShowCsvModal(false);
+    setDirty(false);
+  }, [csvLoading, setDirty]);
+
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
   const pendingCellCount = Object.keys(editedCells).length;
 
   // Guard navegación
   useEffect(() => {
-    const dirty = pendingCellCount > 0 || ejecutando;
+    const dirty = pendingCellCount > 0 || ejecutando || showCsvModal;
     setDirty(dirty, dirty ? 'Tienes cambios o una operación en progreso en Limpieza y Análisis.' : '');
     return () => setDirty(false);
-  }, [pendingCellCount, ejecutando, setDirty]);
+  }, [pendingCellCount, ejecutando, showCsvModal, setDirty]);
 
   useEffect(() => {
     if (!proyectoSlug) { setProgramas([]); setPrograma('todos'); return; }
@@ -172,6 +228,11 @@ export default function LimpiezaAnalisis() {
     setSelected(new Set());
   }, [proyectoSlug]);
 
+  const showMsg = useCallback((type, text) => {
+    setMessage({type,text});
+    setTimeout(()=>setMessage(null),5000);
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
     setLoading(true);
@@ -184,11 +245,12 @@ export default function LimpiezaAnalisis() {
       const res = await api.get(`/analisis/${proyectoSlug}/analisis`, { params });
       setData(res.data);
       setSelected(new Set());
-      //setEditedCells({});
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error cargando análisis.');
-    } finally { setLoading(false); }
-  }, [proyectoSlug, page, pageSize, filtroVia, busqueda, programa, sortCol, sortDir]);
+    } finally {
+      setLoading(false);
+    }
+  }, [proyectoSlug, page, pageSize, filtroVia, busqueda, programa, sortCol, sortDir, showMsg]);
 
   const loadStats = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -200,8 +262,6 @@ export default function LimpiezaAnalisis() {
 
   useEffect(() => { loadData(); loadStats(); }, [loadData, loadStats]);
   useEffect(() => { setPage(1); }, [proyectoSlug, filtroVia, busqueda, programa, sortCol, sortDir, pageSize]);
-
-  const showMsg = (type, text) => { setMessage({type,text}); setTimeout(()=>setMessage(null),5000); };
 
   // Selección
   const toggleSelect = pkVal => setSelected(prev => {
@@ -221,8 +281,15 @@ export default function LimpiezaAnalisis() {
   const handleCellDblClick = useCallback((pkVal, col) => {
     setEditingCell({pkVal, col});
   }, []);
-  const handleCellChange = (pkVal, col, value) =>
-    setEditedCells(prev => ({...prev, [pkVal]: {...(prev[pkVal]||{}), [col]: value}}));
+  
+  const handleCellChange = useCallback((pkVal, col, value) => {
+    setEditedCells(prev => {
+      const currentValue = prev[pkVal]?.[col];
+      if (currentValue === value) return prev;
+      return {...prev, [pkVal]: {...(prev[pkVal]||{}), [col]: value}};
+    });
+  }, []);
+
   const handleCellBlur = () => setEditingCell(null);
 
   const handleSaveCells = async () => {
@@ -236,7 +303,9 @@ export default function LimpiezaAnalisis() {
       loadData(); loadStats();
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al guardar.');
-    } finally { setSavingCells(false); }
+    } finally {
+      setSavingCells(false);
+    }
   };
 
   // Acciones
@@ -250,7 +319,9 @@ export default function LimpiezaAnalisis() {
       loadData(); loadStats();
     } catch (err) {
       showMsg('error', err.response?.data?.detail||'Error.');
-    } finally { setEjecutando(false); }
+    } finally {
+      setEjecutando(false);
+    }
   };
 
   const ejecutarLimpieza = async tipo => {
@@ -265,7 +336,9 @@ export default function LimpiezaAnalisis() {
       loadData();
     } catch (err) {
       showMsg('error', err.response?.data?.detail||'Error en limpieza.');
-    } finally { setEjecutando(false); }
+    } finally {
+      setEjecutando(false);
+    }
   };
 
   const handleCsvUpload = async () => {
@@ -277,21 +350,22 @@ export default function LimpiezaAnalisis() {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-viabilidad-csv`, formData,
         {headers:{'Content-Type':'multipart/form-data'}});
       setCsvResult(res.data);
-      {
-        setTimeout(() => {
-          setShowCsvModal(false);
-          setCsvResult(null);
-          setCsvFile(null);
-        }, 1500);
-      }
+
+      setTimeout(() => {
+        setShowCsvModal(false);
+        setCsvResult(null);
+        setCsvFile(null);
+      }, 1500);
+
       await loadData();
       await loadStats();
     } catch (err) {
       setCsvResult({success:false, message:err.response?.data?.detail||'Error.', procesados:0, errores:[]});
-    } finally { setCsvLoading(false); }
+    } finally {
+      setCsvLoading(false);
+    }
   };
 
-  const safeStr = v => v!==null && v!==undefined ? String(v) : '';
   const allCols = useMemo(() =>
     data.rows.length > 0 ? Object.keys(data.rows[0]).filter(c=>!c.startsWith('_')) : [],
     [data.rows]
@@ -370,7 +444,7 @@ export default function LimpiezaAnalisis() {
             📋<span>ND</span>
           </button>
           <button className="la-tool-btn la-tool-btn--accent"
-            onClick={()=>{setCsvFile(null);setCsvResult(null);setShowCsvModal(true);}}
+            onClick={openCsvModal}
             title="Carga viabilidad/pagos masivo desde CSV o Excel">
             <Icon {...ICONS.upload}/><span>Cargar CSV</span>
           </button>
@@ -443,7 +517,6 @@ export default function LimpiezaAnalisis() {
                     ref={el=>{if(el)el.indeterminate=selected.size>0&&selected.size<data.rows.length;}}/>
                 </th>
 
-                {/* Columnas normales con sort */}
                 {normalCols.map(col=>(
                   <th key={col} className="la-th la-th--sortable" onClick={()=>handleSort(col)}>
                     <span className="la-th-inner">
@@ -453,7 +526,6 @@ export default function LimpiezaAnalisis() {
                   </th>
                 ))}
 
-                {/* Viabilidad — sticky derecha, con sort */}
                 <th className="la-th la-th--sticky la-th--via la-th--sortable"
                   onClick={()=>handleSort('viabilidad')}>
                   <span className="la-th-inner">
@@ -462,7 +534,6 @@ export default function LimpiezaAnalisis() {
                   </span>
                 </th>
 
-                {/* Pago — sticky derecha, con sort por estatus_pago */}
                 <th className="la-th la-th--sticky la-th--pago la-th--sortable"
                   onClick={()=>handleSort('estatus_pago')}>
                   <span className="la-th-inner">
@@ -480,7 +551,6 @@ export default function LimpiezaAnalisis() {
               ) : data.rows.map(row=>{
                 const pkVal = row[data.pk];
                 const isSelected = selected.has(pkVal);
-                // Buscar datos de pago del row (si viene en la query)
                 const pagoBadge = row['estatus_pago'];
 
                 return (
@@ -492,38 +562,21 @@ export default function LimpiezaAnalisis() {
                       <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(pkVal)}/>
                     </td>
 
-                    {normalCols.map(col=>{
-                      const rawVal = editedCells[pkVal]?.[col] ?? row[col];
-                      const err = detectErrors(rawVal, col, proyectoSlug);
-                      const isDirty = editedCells[pkVal]?.[col] !== undefined;
-                      const isEditing = editingCell?.pkVal===pkVal && editingCell?.col===col;
-                      let displayVal = safeStr(rawVal);
-                      if (FECHA_COLS_POR_PROYECTO[proyectoSlug]?.has(col) && rawVal)
-                        displayVal = formatDateForProject(safeStr(rawVal), proyectoSlug);
-                      return (
-                        <td key={col}
-                          className={`la-td ${err?'la-td--error':''} ${isDirty?'la-td--dirty':''}`}
-                          title={err?`⚠ ${err}`:'Doble clic para editar'}
-                          onDoubleClick={e=>{e.stopPropagation();handleCellDblClick(pkVal,col);}}
-                          onClick={e=>e.stopPropagation()}>
-                          {isEditing ? (
-                            <input autoFocus className="la-cell-input"
-                              defaultValue={safeStr(editedCells[pkVal]?.[col]??row[col])}
-                              onChange={e=>handleCellChange(pkVal,col,e.target.value)}
-                              onBlur={handleCellBlur}
-                              onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')handleCellBlur();}}
-                              onClick={e=>e.stopPropagation()}/>
-                          ) : (
-                            <>
-                              {err&&<span className="la-err-dot" title={err}>!</span>}
-                              <span className="la-cell-val">{displayVal}</span>
-                            </>
-                          )}
-                        </td>
-                      );
-                    })}
+                    {normalCols.map(col => (
+                      <MemoizedCell
+                        key={col}
+                        pkVal={pkVal}
+                        col={col}
+                        rawVal={editedCells[pkVal]?.[col] !== undefined ? editedCells[pkVal][col] : row[col]}
+                        proyectoSlug={proyectoSlug}
+                        editedCells={editedCells}
+                        editingCell={editingCell}
+                        onDoubleClick={handleCellDblClick}
+                        onChange={handleCellChange}
+                        onBlur={handleCellBlur}
+                      />
+                    ))}
 
-                    {/* Viabilidad sticky */}
                     <td className="la-td la-td--sticky la-td--via" onClick={e=>e.stopPropagation()}>
                       {(()=>{
                         const v = row['viabilidad']||'pendiente';
@@ -537,7 +590,6 @@ export default function LimpiezaAnalisis() {
                       })()}
                     </td>
 
-                    {/* Pago sticky — muestra estatus_pago si existe */}
                     <td className="la-td la-td--sticky la-td--pago" onClick={e=>e.stopPropagation()}>
                       {pagoBadge
                         ? <span className="la-pago-badge">{pagoBadge}</span>
@@ -571,11 +623,11 @@ export default function LimpiezaAnalisis() {
 
       {/* MODAL CSV */}
       {showCsvModal&&(
-        <div className="la-modal-overlay" onClick={() => { if (csvLoading) return; setShowCsvModal(false);}}>
+        <div className="la-modal-overlay" onClick={closeCsvModal}>
           <div className="la-modal" onClick={e=>e.stopPropagation()}>
             <div className="la-modal-head">
               <h2 className="la-modal-title">Cargar viabilidad / pagos masivo</h2>
-              <button className="la-modal-x" onClick={()=>setShowCsvModal(false)}>✕</button>
+              <button className="la-modal-x" onClick={closeCsvModal}>✕</button>
             </div>
             <p className="la-modal-desc">
               Columnas aceptadas: <code>{data.pk||'cuenta'}</code> (requerida) · <code>viabilidad</code> (viable / no_viable / pendiente) · <code>estatus_pago</code> · <code>fecha_pago</code> · <code>monto_pago</code> · <code>observaciones</code> · <code>programa</code>
@@ -598,7 +650,7 @@ export default function LimpiezaAnalisis() {
               </div>
             )}
             <div className="la-modal-actions">
-              <button className="la-btn la-btn--ghost" onClick={()=>setShowCsvModal(false)}>Cerrar</button>
+              <button className="la-btn la-btn--ghost" onClick={closeCsvModal}>Cerrar</button>
               <button className="la-btn la-btn--primary" onClick={handleCsvUpload}
                 disabled={!csvFile||csvLoading}>{csvLoading?'Cargando…':'Cargar'}</button>
             </div>

@@ -1,7 +1,7 @@
 // frontend/src/pages/plantillas/PlantillasCrear.jsx
 import { L10n, setCulture } from '@syncfusion/ej2-base';
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
@@ -13,106 +13,27 @@ import {
 } from '@syncfusion/ej2-react-documenteditor';
 DocumentEditorContainerComponent.Inject(Toolbar);
 
+// Traducción ES-MX
 L10n.load({
-  'es': {
+  'es-MX': {
     'documenteditor': {
-      'Table': 'Tabla',
-      'Row': 'Fila',
-      'Cell': 'Celda',
-      'Ok': 'Aceptar',
-      'Cancel': 'Cancelar',
-      'Size': 'Tamaño',
-      'Preferred Width': 'Ancho preferido',
-      'Points': 'Puntos',
-      'Percent': 'Porcentaje',
-      'Merge cells': 'Combinar celdas',
-      'Insert above': 'Insertar arriba',
-      'Insert below': 'Insertar abajo',
-      'Insert left': 'Insertar a la izquierda',
-      'Insert right': 'Insertar a la derecha',
-      'Delete row': 'Eliminar fila',
-      'Delete column': 'Eliminar columna',
-      'Cell Count': 'Número de celdas',
-      'Row Count': 'Número de filas',
-      'New comment': 'Nuevo comentario',
-      'Edit': 'Editar',
-      'Comment': 'Comentario',
-      'No color': 'Sin color',
-      'More colors': 'Más colores',
-      'Add a comment': 'Agregar un comentario',
-      'Comments': 'Comentarios',
-      'Undo': 'Deshacer',
-      'Redo': 'Rehacer',
-      'Image': 'Imagen',
-      'Caption': 'Título',
-      'Above': 'Arriba',
-      'Below': 'Abajo',
-      'Wrap Text': 'Ajustar texto',
-      'In line with text': 'En línea con el texto',
-      'Square': 'Cuadrado',
-      'Tight': 'Estrecho',
-      'Through': 'A través',
-      'Top and Bottom': 'Arriba y abajo',
-      'Behind Text': 'Detrás del texto',
-      'In front of text': 'Delante del texto',
-      'Inline': 'En línea',
-      'With Text Wrapping': 'Con ajuste de texto',
-      'Find': 'Buscar',
-      'Replace': 'Reemplazar',
-      'Go to': 'Ir a',
-      'Page number': 'Número de página',
-      'Align left': 'Alinear izquierda',
-      'Align center': 'Centrar',
-      'Align right': 'Alinear derecha',
-      'Justify': 'Justificar',
-      'Bold': 'Negrita',
-      'Italic': 'Cursiva',
-      'Underline': 'Subrayado',
-      'Strikethrough': 'Tachado',
-      'Superscript': 'Superíndice',
-      'Subscript': 'Subíndice',
-      'Font': 'Fuente',
-      'Font Size': 'Tamaño de fuente',
-      'Paragraph': 'Párrafo',
-      'Bullets': 'Viñetas',
-      'Numbering': 'Numeración',
-      'Decrease Indent': 'Disminuir sangría',
-      'Increase Indent': 'Aumentar sangría',
-      'Insert': 'Insertar',
-      'Page Setup': 'Configurar página',
-      'Print': 'Imprimir',
-      'Save': 'Guardar',
-      'Open': 'Abrir',
-      'New': 'Nuevo',
-      'Close': 'Cerrar',
-      'Download': 'Descargar',
-      'Page Break': 'Salto de página',
-      'Section Break': 'Salto de sección',
-      'Header': 'Encabezado',
-      'Footer': 'Pie de página',
-      'Bookmark': 'Marcador',
-      'Hyperlink': 'Hipervínculo',
-      'Clear Formatting': 'Borrar formato',
-      'Paste': 'Pegar',
-      'Cut': 'Cortar',
-      'Copy': 'Copiar',
-      'Zoom': 'Zoom',
-      'Fit Page': 'Ajustar página',
-      'Fit Width': 'Ajustar ancho',
-    },
-    'toolbar': {
-      'New': 'Nuevo',
-      'Open': 'Abrir',
-      'Undo': 'Deshacer',
-      'Redo': 'Rehacer',
-      'Image': 'Imagen',
-      'Table': 'Tabla',
-      'Find': 'Buscar',
+      'File': 'Archivo', 'Home': 'Inicio', 'Insert': 'Insertar',
+      'Layout': 'Diseño', 'References': 'Referencias', 'Review': 'Revisar',
+      'View': 'Vista', 'New': 'Nuevo', 'Open': 'Abrir', 'Save': 'Guardar',
+      'Print': 'Imprimir', 'Undo': 'Deshacer', 'Redo': 'Rehacer',
+      'Cut': 'Cortar', 'Copy': 'Copiar', 'Paste': 'Pegar',
+      'Bold': 'Negrita', 'Italic': 'Cursiva', 'Underline': 'Subrayado',
+      'Strikethrough': 'Tachado', 'Font': 'Fuente', 'FontSize': 'Tamaño',
+      'FontColor': 'Color', 'AlignLeft': 'Izquierda', 'AlignCenter': 'Centro',
+      'AlignRight': 'Derecha', 'Justify': 'Justificar', 'Bullets': 'Viñetas',
+      'Numbering': 'Numeración', 'Table': 'Tabla', 'Image': 'Imagen',
+      'Find': 'Buscar', 'Replace': 'Reemplazar', 'PageSetup': 'Configurar página',
+      'Header': 'Encabezado', 'Footer': 'Pie de página', 'Zoom': 'Zoom',
+      'Close': 'Cerrar', 'Download': 'Descargar', 'Ok': 'Aceptar', 'Cancel': 'Cancelar',
     }
   }
 });
-
-setCulture('es');
+setCulture('es-MX');
 
 const Icon = ({ d, d2, size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -128,45 +49,90 @@ const ICONS = {
   barcode:{ d:"M6 4h2v16H6zM3 4h1v16H3zM11 4h1v16h-1zM14 4h2v16h-2zM18 4h1v16h-1zM21 4h1v16h-1z" },
 };
 
+// Datos de ejemplo para vista previa
+const DATOS_EJEMPLO = {
+  pensiones: {
+    '{{nombre}}': 'JUAN PÉREZ GONZÁLEZ',
+    '{{prestamo}}': '12345',
+    '{{adeudo}}': '$45,678.90',
+    '{{afiliado_calle}}': 'Av. Revolución 123',
+    '{{afiliado_colonia}}': 'Centro',
+    '{{ultimo_abono}}': '15/enero/2025',
+    '{{estatus}}': 'Activo',
+  },
+  apa_tlajomulco: {
+    '{{propietario}}': 'MARÍA GARCÍA LÓPEZ',
+    '{{clave_APA}}': 'A-56789',
+    '{{saldo}}': '$12,345.67',
+    '{{calle}}': 'Calle Hidalgo 456',
+  },
+  predial_tlajomulco: {
+    '{{domicilio}}': 'CALLE INDEPENDENCIA 789, COL. CENTRO',
+    '{{cuenta}}': 'PRED-00123',
+    '{{saldo}}': '$8,900.00',
+  },
+  licencias_gdl: {
+    '{{propietario}}': 'RESTAURANTE EL SOL S.A. DE C.V.',
+    '{{licencia}}': 'LIC-2024-001',
+    '{{total}}': '$23,456.00',
+    '{{ubicacion}}': 'Av. Juárez 1500',
+  },
+  predial_gdl: {
+    '{{propietariotitular_n}}': 'ANA LAURA HERNÁNDEZ',
+    '{{cuenta_n}}': 'GDL-98765',
+    '{{saldo2025}}': '$15,200.00',
+    '{{calle}}': 'Calle Morelos 234',
+  },
+  estado: {
+    '{{nombre_razon_social}}': 'EMPRESA EJEMPLO S.A.',
+    '{{credito}}': 'CRED-2024-056',
+    '{{importe_historico_determinado}}': '$156,789.00',
+    '{{calle_numero}}': 'Blvd. Principal 500',
+  },
+};
+
 export default function PlantillasCrear() {
   const { proyectoSlug, proyectos, setProyectoSlug } = useProyecto();
   const { setDirty } = useNavigationGuard();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('edit');
 
-  const [modo,          setModo]         = useState(null);       // null | 'upload' | 'editor'
-  const [selectedSlug,  setSelectedSlug] = useState(proyectoSlug || '');
-  const [nombre,        setNombre]       = useState('');
-  const [descripcion,   setDesc]         = useState('');
-  const [loading,       setLoading]      = useState(false);
-  const [message,       setMessage]      = useState(null);
-  const [result,        setResult]       = useState(null);
-  const [mapEdits,      setMapEdits]     = useState({});
-  const [camposDisp,    setCamposDisp]   = useState([]);
+  const [modo, setModo] = useState(null);
+  const [selectedSlug, setSelectedSlug] = useState(proyectoSlug || '');
+  const [nombre, setNombre] = useState('');
+  const [descripcion, setDesc] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [result, setResult] = useState(null);
+  const [mapEdits, setMapEdits] = useState({});
+  const [camposDisp, setCamposDisp] = useState([]);
+  const [file, setFile] = useState(null);
+  const [editandoPlantilla, setEditandoPlantilla] = useState(null);
+  const [cargandoPlantilla, setCargandoPlantilla] = useState(false);
 
-  const [file,          setFile]         = useState(null);
   const fileRef = useRef();
   const editorRef = useRef(null);
 
   const proyectoActual = proyectos.find(p => p.slug === selectedSlug);
 
-  // Guard: dirty si hay nombre escrito pero sin guardar
+  const showMsg = useCallback((type, text) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 6000);
+  }, []);
+
+  // NavigationGuard
   useEffect(() => {
     setDirty(!!nombre && !result, 'Tienes una plantilla sin guardar.');
     return () => setDirty(false);
   }, [nombre, result, setDirty]);
 
-  const showMsg = (type, text) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 6000);
-  };
-
-  // Cargar campos de tabla_temporal via analisis (primera fila del padrón)
+  // Cargar campos disponibles
   useEffect(() => {
     if (!selectedSlug) return;
     api.get(`/plantillas/${selectedSlug}/campos-temporales-slug`)
       .then(r => setCamposDisp(r.data?.campos || []))
       .catch(() => {
-        // fallback: usar analisis
         api.get(`/analisis/${selectedSlug}/analisis`, { params: { limit: 1 } })
           .then(r => {
             if (r.data.rows?.length > 0) {
@@ -177,7 +143,176 @@ export default function PlantillasCrear() {
       });
   }, [selectedSlug]);
 
-  // ── Subir .docx ───────────────────────────────────────────────────────────
+  // Cargar plantilla para edición
+  useEffect(() => {
+    if (!editId) return;
+    let cancelled = false;
+
+    const cargarPlantilla = async () => {
+      setCargandoPlantilla(true);
+      try {
+        const res = await api.get(`/plantillas/${editId}`);
+        const p = res.data;
+        if (cancelled) return;
+
+        setEditandoPlantilla(p);
+        setModo('editor');
+        setSelectedSlug(p.proyecto_slug);
+        setProyectoSlug(p.proyecto_slug);
+        setNombre(p.nombre);
+        setDesc(p.descripcion || '');
+
+        if (p.ruta_archivo) {
+          try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch(`http://localhost:8000/api/v1/plantillas/${p.id}/descargar`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const blob = await response.blob();
+            if (cancelled) return;
+
+            const intentarAbrir = (intentos = 0) => {
+              const editor = editorRef.current?.documentEditor;
+              if (editor) {
+                console.log('[PlantillasCrear] Abriendo blob, tamaño:', blob.size);
+                editor.open(blob);
+              } else if (intentos < 10) {
+                setTimeout(() => intentarAbrir(intentos + 1), 300);
+              } else {
+                showMsg('error', 'Editor no disponible.');
+              }
+            };
+            setTimeout(() => intentarAbrir(), 500);
+          } catch (err) {
+            console.error('[PlantillasCrear] Error descargando:', err);
+            if (!cancelled) showMsg('error', 'No se pudo cargar el documento.');
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[PlantillasCrear] Error:', err);
+          showMsg('error', 'Error al cargar la plantilla.');
+        }
+      } finally {
+        if (!cancelled) setCargandoPlantilla(false);
+      }
+    };
+
+    cargarPlantilla();
+    return () => { cancelled = true; };
+  }, [editId]);
+
+  // Configurar editor
+  const configureEditorPage = useCallback(() => {
+    const editor = editorRef.current?.documentEditor;
+    if (!editor) return;
+    setTimeout(() => {
+      try {
+        const sectionFormat = editor.selection?.sectionFormat;
+        if (!sectionFormat) return;
+        sectionFormat.pageWidth = 612;
+        sectionFormat.pageHeight = 963;
+        sectionFormat.leftMargin = 56.7;
+        sectionFormat.rightMargin = 56.7;
+        sectionFormat.topMargin = 56.7;
+        sectionFormat.bottomMargin = 56.7;
+        const charFormat = editor.selection?.characterFormat;
+        if (charFormat) {
+          charFormat.fontFamily = 'Calibri';
+          charFormat.fontSize = 11;
+        }
+      } catch (e) { /* ignore */ }
+    }, 500);
+  }, []);
+
+  const insertText = useCallback((text) => {
+    const editor = editorRef.current?.documentEditor;
+    if (editor) editor.editor?.insertText(text);
+  }, []);
+
+  const insertBarcode = useCallback(() => {
+    insertText('{{codebar}}');
+  }, [insertText]);
+
+  // Insertar imagen
+  const insertarImagen = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const editor = editorRef.current?.documentEditor;
+        if (editor) editor.editor.insertImage(ev.target.result);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }, []);
+
+  // Vista previa
+  const aplicarVistaPrevia = useCallback(() => {
+    const editor = editorRef.current?.documentEditor;
+    if (!editor) { showMsg('error', 'Editor no disponible.'); return; }
+
+    const datos = DATOS_EJEMPLO[selectedSlug];
+    if (!datos) { showMsg('error', 'No hay datos de ejemplo para este proyecto.'); return; }
+
+    try {
+      const sfdt = editor.serialize();
+      let sfdtStr = JSON.stringify(sfdt);
+      for (const [placeholder, valor] of Object.entries(datos)) {
+        const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        sfdtStr = sfdtStr.replace(new RegExp(escaped, 'g'), valor);
+      }
+      editor.open(JSON.parse(sfdtStr));
+      showMsg('success', 'Vista previa aplicada.');
+    } catch (err) {
+      console.error('[VistaPrevia] Error:', err);
+      showMsg('error', 'Error: ' + err.message);
+    }
+  }, [selectedSlug, showMsg]);
+
+  // Mail Merge
+  const ejecutarMailMerge = useCallback(async () => {
+    const editor = editorRef.current?.documentEditor;
+    if (!editor || !selectedSlug) { showMsg('error', 'Editor o proyecto no disponible.'); return; }
+
+    try {
+      const res = await api.get(`/analisis/${selectedSlug}/analisis`, { params: { limit: 1 } });
+      if (!res.data?.rows?.length) { showMsg('error', 'No hay datos. Carga un padrón primero.'); return; }
+
+      const datosReales = res.data.rows[0];
+      const sfdt = editor.serialize();
+      let sfdtStr = JSON.stringify(sfdt);
+      let reemplazos = 0;
+
+      for (const [key, value] of Object.entries(datosReales)) {
+        const placeholder = `{{${key}}}`;
+        if (sfdtStr.includes(placeholder)) {
+          const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped, 'g');
+          reemplazos += (sfdtStr.match(regex) || []).length;
+          sfdtStr = sfdtStr.replace(regex, String(value ?? ''));
+        }
+      }
+
+      if (reemplazos > 0) {
+        editor.open(JSON.parse(sfdtStr));
+        showMsg('success', `${reemplazos} campos reemplazados.`);
+      } else {
+        showMsg('error', 'No se encontraron placeholders {{campo}} en el documento.');
+      }
+    } catch (err) {
+      console.error('[MailMerge] Error:', err);
+      showMsg('error', 'Error en combinación.');
+    }
+  }, [selectedSlug, showMsg]);
+
+  // Subir .docx
   const handleUpload = async () => {
     if (!file || !nombre.trim() || !selectedSlug) {
       showMsg('error', 'Selecciona proyecto, escribe el nombre y adjunta el archivo.');
@@ -189,7 +324,6 @@ export default function PlantillasCrear() {
     setLoading(true);
     const formData = new FormData();
     formData.append('file', file);
-
     try {
       const res = await api.post('/plantillas/subir', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -217,47 +351,11 @@ export default function PlantillasCrear() {
     try {
       await api.post(`/plantillas/${result.id}/mapear`, { campos });
       setDirty(false);
-      showMsg('success', `${campos.length} campos mapeados. ¡Plantilla lista!`);
+      showMsg('success', `${campos.length} campos mapeados.`);
       setTimeout(() => navigate('/plantillas'), 1500);
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error guardando mapeo.');
     }
-  };
-
-  // ── Editor Syncfusion ─────────────────────────────────────────────────────
-  const configureEditorPage = () => {
-    const editor = editorRef.current?.documentEditor;
-    if (!editor) return;
-    // Esperar a que el editor esté listo
-    setTimeout(() => {
-      try {
-        const sectionFormat = editor.selection?.sectionFormat;
-        if (!sectionFormat) return;
-        // Oficio México: 21.59cm × 34.01cm → puntos (1cm = 28.3465pt)
-        sectionFormat.pageWidth  = 612;   // 21.59cm ≈ 612pt
-        sectionFormat.pageHeight = 963;   // 34.01cm ≈ 963pt
-        sectionFormat.leftMargin   = 56.7;
-        sectionFormat.rightMargin  = 56.7;
-        sectionFormat.topMargin    = 56.7;
-        sectionFormat.bottomMargin = 56.7;
-        // Fuente por defecto
-        const charFormat = editor.selection?.characterFormat;
-        if (charFormat) {
-          charFormat.fontFamily = 'Calibri';
-          charFormat.fontSize   = 11;
-        }
-      } catch (e) { /* ignora si el editor aún no inicializó */ }
-    }, 500);
-  };
-
-  const insertText = (text) => {
-    const editor = editorRef.current?.documentEditor;
-    if (editor) editor.editor?.insertText(text);
-  };
-
-  // Insertar barcode dinámico como placeholder de texto
-  const insertBarcode = () => {
-    insertText('{{codebar}}');
   };
 
   const handleGuardarEditor = async () => {
@@ -268,7 +366,6 @@ export default function PlantillasCrear() {
     const proy = proyectos.find(p => p.slug === selectedSlug);
     if (!proy) return;
 
-    // Extraer placeholders del editor
     let placeholders = [];
     try {
       const editor = editorRef.current?.documentEditor;
@@ -283,14 +380,9 @@ export default function PlantillasCrear() {
     setLoading(true);
     try {
       const res = await api.post('/plantillas/', {
-        id_proyecto: proy.id,
-        nombre,
-        descripcion,
-        origen: 'editor',
+        id_proyecto: proy.id, nombre, descripcion, origen: 'editor',
       });
       const plantillaId = res.data.id;
-
-      // Guardar mapeo automático de placeholders
       if (placeholders.length > 0) {
         const campos = placeholders
           .filter(ph => camposDisp.includes(ph))
@@ -299,17 +391,16 @@ export default function PlantillasCrear() {
           await api.post(`/plantillas/${plantillaId}/mapear`, { campos });
         }
       }
-
       setDirty(false);
-      showMsg('success', `Plantilla "${nombre}" creada con ${placeholders.length} placeholders.`);
+      showMsg('success', `Plantilla "${nombre}" creada.`);
       setTimeout(() => navigate('/plantillas'), 1500);
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al guardar.');
     } finally { setLoading(false); }
   };
 
-  // ── Pantalla inicial ──────────────────────────────────────────────────────
-  if (!modo) {
+  // ── PANTALLA INICIAL ──
+  if (!modo && !cargandoPlantilla) {
     return (
       <div className="pl-page">
         <div className="pl-header">
@@ -344,7 +435,7 @@ export default function PlantillasCrear() {
             <div className="pl-modo-card" onClick={() => setModo('editor')}>
               <div className="pl-modo-icon"><Icon {...ICONS.edit} size={32} /></div>
               <h3>Crear desde cero</h3>
-              <p>Editor integrado con tamaño Oficio México (21.59×34.01 cm), fuente Calibri 11, inserción de imágenes y código de barras dinámico.</p>
+              <p>Editor integrado con tamaño Oficio México, fuente Calibri 11, inserción de imágenes y código de barras dinámico.</p>
               <div className="pl-modo-hint">Editor Syncfusion · Word-like</div>
             </div>
           </div>
@@ -353,7 +444,11 @@ export default function PlantillasCrear() {
     );
   }
 
-  // ── Modo SUBIR ────────────────────────────────────────────────────────────
+  if (cargandoPlantilla) {
+    return <div className="pl-loading">Cargando plantilla para edición...</div>;
+  }
+
+  // ── MODO SUBIR ──
   if (modo === 'upload') {
     return (
       <div className="pl-page">
@@ -374,13 +469,11 @@ export default function PlantillasCrear() {
             <div className="pl-form-row">
               <div className="pl-field">
                 <label className="pl-label">Nombre *</label>
-                <input className="pl-input" value={nombre}
-                  onChange={e => setNombre(e.target.value)} placeholder="Ej: Requerimiento 2025" />
+                <input className="pl-input" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Requerimiento 2025" />
               </div>
               <div className="pl-field">
                 <label className="pl-label">Descripción</label>
-                <input className="pl-input" value={descripcion}
-                  onChange={e => setDesc(e.target.value)} placeholder="Opcional" />
+                <input className="pl-input" value={descripcion} onChange={e => setDesc(e.target.value)} placeholder="Opcional" />
               </div>
             </div>
 
@@ -398,8 +491,7 @@ export default function PlantillasCrear() {
               ) : (
                 <><div className="pl-drop-icon">📄</div>
                   <p className="pl-drop-text">Arrastra aquí o haz clic</p>
-                  <p className="pl-drop-hint">Solo archivos .docx · Tamaño Oficio México recomendado</p>
-                  <p className="pl-drop-hint">Usa <code>{'{{campo}}'}</code> en el documento</p></>
+                  <p className="pl-drop-hint">Solo archivos .docx</p></>
               )}
             </div>
 
@@ -424,24 +516,13 @@ export default function PlantillasCrear() {
               <Icon {...ICONS.check} size={18} />
               <span>{result.mensaje}</span>
             </div>
-
             <h3 className="pl-mapeo-title">Mapeo de campos</h3>
-            <p className="pl-mapeo-desc">
-              {result.placeholders?.length || 0} placeholders detectados.
-              Asocia cada uno con el campo de <code>tabla_temporal</code>.
-            </p>
-
+            <p className="pl-mapeo-desc">{result.placeholders?.length || 0} placeholders detectados.</p>
             {!result.placeholders?.length ? (
-              <div className="pl-mapeo-empty">
-                No se encontraron placeholders <code>{'{{campo}}'}</code>. Verifica el formato del .docx.
-              </div>
+              <div className="pl-mapeo-empty">No se encontraron placeholders <code>{'{{campo}}'}</code>.</div>
             ) : (
               <div className="pl-map-grid">
-                <div className="pl-map-grid-header">
-                  <span>Placeholder en .docx</span>
-                  <span>Campo en tabla_temporal</span>
-                  <span>Estado</span>
-                </div>
+                <div className="pl-map-grid-header"><span>Placeholder</span><span>Campo BD</span><span>Estado</span></div>
                 {result.placeholders.map(ph => {
                   const key = `{{${ph}}}`;
                   const val = mapEdits[key] || '';
@@ -462,14 +543,9 @@ export default function PlantillasCrear() {
                 })}
               </div>
             )}
-
             <div className="pl-mapeo-actions">
-              <button className="pl-btn" onClick={() => { setDirty(false); navigate('/plantillas'); }}>
-                Omitir mapeo
-              </button>
-              <button className="pl-btn pl-btn--primary" onClick={handleGuardarMapeo}>
-                Guardar mapeo y finalizar
-              </button>
+              <button className="pl-btn" onClick={() => { setDirty(false); navigate('/plantillas'); }}>Omitir mapeo</button>
+              <button className="pl-btn pl-btn--primary" onClick={handleGuardarMapeo}>Guardar mapeo y finalizar</button>
             </div>
           </div>
         )}
@@ -477,49 +553,78 @@ export default function PlantillasCrear() {
     );
   }
 
-  // ── Modo EDITOR (Syncfusion) ──────────────────────────────────────────────
+  // ── MODO EDITOR ──
   if (modo === 'editor') {
     return (
       <div className="pl-page" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - var(--header-h) - 48px)', overflow: 'hidden' }}>
-        {/* Header compacto */}
         <div className="pl-header" style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="pl-btn" onClick={() => { setModo(null); }}>
               <Icon {...ICONS.back} size={14} /> Volver
             </button>
-              <input className="pl-input" style={{ width: 220 }} value={nombre}
-                onChange={e => { setNombre(e.target.value); if (e.target.value.trim()) { setDirty(true, 'Plantilla del editor sin guardar.');} }}
-                placeholder="Nombre de plantilla *"/>
+            <input className="pl-input" style={{ width: 220 }} value={nombre}
+              onChange={e => { setNombre(e.target.value); if (e.target.value.trim()) setDirty(true, 'Plantilla sin guardar.'); }}
+              placeholder="Nombre de plantilla *" />
             <input className="pl-input" style={{ width: 220 }} value={descripcion}
               onChange={e => setDesc(e.target.value)} placeholder="Descripción (opcional)" />
-            <button className="pl-btn pl-btn--primary" onClick={handleGuardarEditor}
-              disabled={loading || !nombre.trim()}>
+            <button className="pl-btn pl-btn--primary" onClick={handleGuardarEditor} disabled={loading || !nombre.trim()}>
               {loading ? 'Guardando…' : '💾 Guardar plantilla'}
             </button>
-            <button className="pl-btn" onClick={insertBarcode} title="Insertar código de barras dinámico">
+            <button className="pl-btn" onClick={insertBarcode} title="Insertar código de barras">
               <Icon {...ICONS.barcode} size={14} /> Barcode
+            </button>
+            <button className="pl-btn" onClick={insertarImagen} title="Insertar imagen">
+              🖼️ Imagen
+            </button>
+            <button className="pl-btn" onClick={aplicarVistaPrevia} title="Vista previa con datos de ejemplo">
+              👁️ Vista previa
+            </button>
+            <button className="pl-btn" onClick={ejecutarMailMerge} title="Combinar correspondencia con datos reales">
+              📧 Mail Merge
             </button>
           </div>
           {message && <div className={`pl-message pl-message--${message.type}`} style={{ marginTop: 8 }}>{message.text}</div>}
         </div>
 
-        {/* Layout: editor grande + panel de campos lateral */}
         <div style={{ flex: 1, display: 'flex', gap: 12, minHeight: 0, overflow: 'hidden' }}>
-
-          {/* Editor — ocupa todo el espacio restante */}
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', border: '1px solid var(--clr-border)', borderRadius: 8 }}>
             <DocumentEditorContainerComponent
-              ref={editorRef}
-              enableToolbar={true}
-              locale="es"
-              height="100%"
-              serviceUrl=""
-              created={configureEditorPage}
-              style={{ height: '100%' }}
-            />
+            ref={editorRef}
+            enableToolbar={true}
+            locale="es-MX"
+            height="100%"
+            serviceUrl=""
+            toolbarItems={[
+              'New',
+              'Open',
+              'Separator',
+              'Undo',
+              'Redo',
+              'Separator',
+              'Image',
+              'Table',
+              'Hyperlink',
+              'Bookmark',
+              'TableOfContents',
+              'Separator',
+              'Header',
+              'Footer',
+              'PageSetup',
+              'PageNumber',
+              'Break',
+              'Separator',
+              'Find',
+              'Separator',
+              'Comments',
+              'TrackChanges',
+              'LocalClipboard',
+              'RestrictEditing'
+            ]}
+            created={configureEditorPage}
+            style={{ height: '100%' }}
+          />
           </div>
 
-          {/* Panel lateral: campos disponibles */}
           <div style={{
             width: 220, flexShrink: 0, background: 'var(--clr-white)',
             border: '1px solid var(--clr-border)', borderRadius: 8,

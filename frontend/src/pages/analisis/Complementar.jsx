@@ -1,5 +1,5 @@
 // frontend/src/pages/analisis/Complementar.jsx
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
@@ -8,11 +8,21 @@ import './Analisis.css';
 
 const COLS_OCULTAS = new Set(['id_comp']);
 
-// ── Icono mini sort ──────────────────────────────────────────────────────────
 const SortIcon = ({ col, sortCol, sortDir }) => {
   if (sortCol !== col) return <span style={{opacity:.35,fontSize:9}}>⇅</span>;
   return <span style={{fontSize:9}}>{sortDir === 'asc' ? '▲' : '▼'}</span>;
 };
+
+// Componente memoizado para celdas editables
+const EditableCell = memo(({ value, isDirty, col, onChange }) => (
+  <input
+    type="text"
+    value={value}
+    onChange={e => onChange(e.target.value)}
+    className={`comp-cell-input ${isDirty ? 'comp-cell-input--dirty' : ''}`}
+    title={col}
+  />
+));
 
 export default function Complementar() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
@@ -36,7 +46,6 @@ export default function Complementar() {
   const [csvFile, setCsvFile]           = useState(null);
   const [csvLoading, setCsvLoading]     = useState(false);
   const [csvResult, setCsvResult]       = useState(null);
-  // Sort
   const [sortCol, setSortCol]           = useState(null);
   const [sortDir, setSortDir]           = useState('asc');
 
@@ -44,11 +53,41 @@ export default function Complementar() {
 
   const totalPages = Math.max(1, Math.ceil(data.total / limit));
 
-  // Sincronizar dirty con el guard de navegación
+  // NavigationGuard para modales
+  const openCsvModal = useCallback(() => {
+    setCsvFile(null);
+    setCsvResult(null);
+    setShowCsvModal(true);
+    setDirty(true, 'Tienes un modal de carga CSV abierto.');
+  }, [setDirty]);
+
+  const closeCsvModal = useCallback(() => {
+    if (csvLoading) return;
+    setShowCsvModal(false);
+    setDirty(false);
+  }, [csvLoading, setDirty]);
+
+  const openGenModal = useCallback(async () => {
+    try {
+      const stats = await api.get(`/analisis/${proyectoSlug}/estadisticas`);
+      setGenInfo({ previo: stats.data.analisis || 0 });
+    } catch { setGenInfo({ previo: 0 }); }
+    setShowGenModal(true);
+    setDirty(true, 'Tienes el modal de generar análisis abierto.');
+  }, [proyectoSlug, setDirty]);
+
+  const closeGenModal = useCallback(() => {
+    setShowGenModal(false);
+    setDirty(false);
+  }, [setDirty]);
+
   useEffect(() => {
-    setDirty(pendingCount > 0, `Tienes ${pendingCount} registro(s) con cambios sin guardar en Complementar.`);
+    setDirty(pendingCount > 0 || showCsvModal || showGenModal,
+      pendingCount > 0
+        ? `Tienes ${pendingCount} registro(s) con cambios sin guardar en Complementar.`
+        : 'Tienes un modal abierto en Complementar.');
     return () => setDirty(false);
-  }, [pendingCount, setDirty]);
+  }, [pendingCount, showCsvModal, showGenModal, setDirty]);
 
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -76,42 +115,46 @@ export default function Complementar() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Al cambiar proyecto o búsqueda, volver a pág 1 y limpiar ediciones
   useEffect(() => {
-  if (proyectoSlug) {
-    setEditedRows({});
-    setPendingCount(0);
-    setDirty(false); 
-    loadData();
-  }
-}, [proyectoSlug]);
+    if (proyectoSlug) {
+      setEditedRows({});
+      setPendingCount(0);
+      setDirty(false);
+      loadData();
+    }
+  }, [proyectoSlug]);
 
-  // Al cambiar sort, volver a pág 1 sin limpiar ediciones
-  useEffect(() => { setPage(1); }, [sortCol, sortDir]);
-
-  const showMsg = (type, text) => {
+  const showMsg = useCallback((type, text) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 5000);
-  };
+  }, []);
 
-  const handleSort = (col) => {
+  const handleSort = useCallback((col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
-  };
+  }, [sortCol]);
 
-  const handleCellEdit = (pkValue, field, value) => {
-  setEditedRows(prev => {
-    const updated = { ...prev, [pkValue]: { ...(prev[pkValue] || {}), [field]: value } };
-    const count = Object.keys(updated).length;
+  const handleCellEdit = useCallback((pkValue, field, value) => {
+    setEditedRows(prev => {
+      const currentValue = prev[pkValue]?.[field];
+      if (currentValue === value) return prev;
+      const updated = { ...prev, [pkValue]: { ...(prev[pkValue] || {}), [field]: value } };
+      return updated;
+    });
+  }, []);
+
+  // Actualizar pendingCount cuando cambia editedRows
+  useEffect(() => {
+    const count = Object.keys(editedRows).length;
     setPendingCount(count);
     if (count > 0) {
       setDirty(true, `Tienes ${count} registro(s) con cambios sin guardar en Complementar.`);
+    } else if (!showCsvModal && !showGenModal) {
+      setDirty(false);
     }
-    return updated;
-  });
-};
+  }, [editedRows, setDirty, showCsvModal, showGenModal]);
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (Object.keys(editedRows).length === 0) return;
     setSaving(true);
     const payload = Object.entries(editedRows).map(([pk_value, campos]) => ({
@@ -122,23 +165,15 @@ export default function Complementar() {
       showMsg('success', res.data.message || 'Guardado correctamente.');
       setEditedRows({});
       setPendingCount(0);
-      setDirty(false);  
+      setDirty(false);
       loadData();
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al guardar.');
     } finally { setSaving(false); }
-  };
+  }, [editedRows, proyectoSlug, showMsg, setDirty, loadData]);
 
-  const handleGuardarYGenerar = async () => {
-    try {
-      const stats = await api.get(`/analisis/${proyectoSlug}/estadisticas`);
-      setGenInfo({ previo: stats.data.analisis || 0 });
-    } catch { setGenInfo({ previo: 0 }); }
-    setShowGenModal(true);
-  };
-
-  const handleConfirmGenerar = async () => {
-    setShowGenModal(false);
+  const handleConfirmGenerar = useCallback(async () => {
+    closeGenModal();
     setSaving(true);
     if (Object.keys(editedRows).length > 0) {
       const payload = Object.entries(editedRows).map(([pk_value, campos]) => ({
@@ -161,9 +196,9 @@ export default function Complementar() {
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al generar análisis.');
     } finally { setGenerating(false); }
-  };
+  }, [editedRows, proyectoSlug, showMsg, loadData, closeGenModal]);
 
-  const handleCsvComplementar = async () => {
+  const handleCsvComplementar = useCallback(async () => {
     if (!csvFile) return;
     setCsvLoading(true);
     const formData = new FormData();
@@ -172,40 +207,19 @@ export default function Complementar() {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-complemento-csv`, formData,
         { headers: { 'Content-Type': 'multipart/form-data' } });
       setCsvResult(res.data);
-      { setTimeout(() => {
-        setShowCsvModal(false);
+      setTimeout(() => {
+        closeCsvModal();
         setCsvResult(null);
         setCsvFile(null);
       }, 1500);
-      }
       loadData();
     } catch (err) {
       setCsvResult({ success: false, message: err.response?.data?.detail || 'Error.', procesados: 0, errores: [] });
     } finally { setCsvLoading(false); }
-  };
+  }, [csvFile, proyectoSlug, loadData, closeCsvModal]);
 
   const columnasEditables = data.columnas_editables;
-
   const columnasPadronVisible = useMemo(() => columnasPadron, [columnasPadron]);
-  const todasColumnas = useMemo(() => {
-    if (!data.pk) return [];
-    return [data.pk, ...columnasPadronVisible, ...columnasEditables];
-  }, [data.pk, columnasPadronVisible, columnasEditables]);
-
-  const renderEditableCell = (row, col) => {
-    const pkValue = row[data.pk];
-    const isDirtyCell = editedRows[pkValue]?.[col] !== undefined;
-    const value = isDirtyCell ? String(editedRows[pkValue][col]) : String(row[col] ?? '');
-    return (
-      <input
-        type="text"
-        value={value}
-        onChange={e => handleCellEdit(pkValue, col, e.target.value)}
-        className={`comp-cell-input ${isDirtyCell ? 'comp-cell-input--dirty' : ''}`}
-        title={col}
-      />
-    );
-  };
 
   const safeStr = v => v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 
@@ -235,10 +249,7 @@ export default function Complementar() {
               )}
             </form>
 
-            <button onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
-              className="btn-save">
-              📂 CSV masivo
-            </button>
+            <button onClick={openCsvModal} className="btn-save">📂 CSV masivo</button>
 
             <button onClick={handleSave}
               disabled={saving || generating || pendingCount === 0}
@@ -246,7 +257,7 @@ export default function Complementar() {
               {saving ? 'Guardando…' : `Guardar${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
             </button>
 
-            <button onClick={handleGuardarYGenerar}
+            <button onClick={openGenModal}
               disabled={saving || generating}
               className="btn-primary">
               {generating ? 'Generando…' : '⚡ Guardar y generar análisis'}
@@ -266,13 +277,11 @@ export default function Complementar() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    {/* PK */}
                     <th className="comp-th comp-th--pk" style={{cursor:'pointer'}}
                       onClick={() => handleSort(data.pk)}>
                       {data.pk ? data.pk.replace(/_/g, ' ') : 'ID'}&nbsp;
                       <SortIcon col={data.pk} sortCol={sortCol} sortDir={sortDir} />
                     </th>
-                    {/* Columnas padrón */}
                     {columnasPadronVisible.map(col => (
                       <th key={col} className="comp-th" style={{cursor:'pointer'}}
                         onClick={() => handleSort(col)}>
@@ -280,7 +289,6 @@ export default function Complementar() {
                         <SortIcon col={col} sortCol={sortCol} sortDir={sortDir} />
                       </th>
                     ))}
-                    {/* Header grupo editable */}
                     {columnasEditables.length > 0 && (
                       <th colSpan={columnasEditables.length} className="comp-th--group">
                         ✏️ COMPLEMENTARIA (editable)
@@ -318,11 +326,20 @@ export default function Complementar() {
                             {safeStr(row[col])}
                           </td>
                         ))}
-                        {columnasEditables.map((col, i) => (
-                          <td key={col} className={`comp-td comp-td--editable${i === 0 ? ' comp-td--first' : ''}`}>
-                            {renderEditableCell(row, col)}
-                          </td>
-                        ))}
+                        {columnasEditables.map((col, i) => {
+                          const isDirtyCell = editedRows[pkValue]?.[col] !== undefined;
+                          const value = isDirtyCell ? String(editedRows[pkValue][col]) : String(row[col] ?? '');
+                          return (
+                            <td key={col} className={`comp-td comp-td--editable${i === 0 ? ' comp-td--first' : ''}`}>
+                              <EditableCell
+                                value={value}
+                                isDirty={isDirtyCell}
+                                col={col}
+                                onChange={(newVal) => handleCellEdit(pkValue, col, newVal)}
+                              />
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
@@ -336,18 +353,8 @@ export default function Complementar() {
                 <span>Página {page} de {totalPages}</span>
                 <select
                   value={limit}
-                  onChange={e => {
-                    setLimit(Number(e.target.value));
-                    setPage(1);
-                  }}
-                  style={{
-                    padding: '6px 8px',
-                    border: '1px solid var(--clr-border)',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontFamily: 'Outfit, sans-serif',
-                  }}
-                >
+                  onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}
+                  style={{ padding: '6px 8px', border: '1px solid var(--clr-border)', borderRadius: 6, fontSize: 12, fontFamily: 'Outfit, sans-serif' }}>
                   <option value={10}>10</option>
                   <option value={20}>20</option>
                   <option value={50}>50</option>
@@ -362,18 +369,18 @@ export default function Complementar() {
 
       {/* Modal generar análisis */}
       {showGenModal && (
-        <div className="comp-overlay" onClick={() => setShowGenModal(false)}>
+        <div className="comp-overlay" onClick={closeGenModal}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
             <div className="comp-modal-header">
               <h3>⚡ Generar análisis</h3>
-              <button className="comp-modal-x" onClick={() => setShowGenModal(false)}>✕</button>
+              <button className="comp-modal-x" onClick={closeGenModal}>✕</button>
             </div>
             {genInfo?.previo > 0 && (
               <p className="comp-modal-warn">⚠️ Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.</p>
             )}
             <p className="comp-modal-desc">Se reconstruirá tabla_analisis (padrón + complementaria).</p>
             <div className="comp-modal-footer">
-              <button className="btn-save" onClick={() => setShowGenModal(false)}>Cancelar</button>
+              <button className="btn-save" onClick={closeGenModal}>Cancelar</button>
               <button className="btn-primary" onClick={handleConfirmGenerar}>Confirmar y generar</button>
             </div>
           </div>
@@ -382,11 +389,11 @@ export default function Complementar() {
 
       {/* Modal CSV masivo */}
       {showCsvModal && (
-        <div className="comp-overlay" onClick={() => { if (csvLoading) return; setShowCsvModal(false);}}>
+        <div className="comp-overlay" onClick={closeCsvModal}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
             <div className="comp-modal-header">
               <h3>📂 Complementar masivamente</h3>
-              <button className="comp-modal-x" onClick={() => setShowCsvModal(false)}>✕</button>
+              <button className="comp-modal-x" onClick={closeCsvModal}>✕</button>
             </div>
             <p className="comp-modal-desc">
               El archivo debe incluir la PK y las columnas a actualizar:<br />
@@ -411,7 +418,7 @@ export default function Complementar() {
               </div>
             )}
             <div className="comp-modal-footer">
-              <button className="btn-save" onClick={() => setShowCsvModal(false)}>Cancelar</button>
+              <button className="btn-save" onClick={closeCsvModal}>Cancelar</button>
               <button className="btn-primary" onClick={handleCsvComplementar}
                 disabled={!csvFile || csvLoading}>
                 {csvLoading ? 'Procesando…' : 'Subir y complementar'}
@@ -427,13 +434,13 @@ export default function Complementar() {
         .comp-th--group{padding:4px 12px;background:#eef3f9;border-bottom:1px solid #c3d9f0;text-align:center;font-size:11px;font-weight:700;color:#2b5fa8;position:sticky;top:0;z-index:3;}
         .comp-th2{padding:4px 12px;background:#f8f9fa;border-bottom:1px solid var(--clr-border);position:sticky;top:38px;z-index:3;}
         .comp-th2--pk{position:sticky;left:0;top:38px;z-index:5;background:#f8f9fa;}
-        .comp-th2--editable{min-width:130px;background:#eef3f9;color:#2b5fa8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;}
+        .comp-th2--editable{min-width:150px;background:#eef3f9;color:#2b5fa8;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;}
         .comp-th2--first{border-left:2px solid #4a7fb5;}
-        .comp-td{padding:7px 12px;font-size:12.5px;color:var(--clr-text);white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--clr-border);background:#fff;}
+        .comp-td{padding:7px 12px;font-size:12.5px;color:var(--clr-text);white-space:normal;word-wrap:break-word;overflow-wrap:break-word;max-width:350px;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--clr-border);background:#fff;vertical-align:top;}
         .comp-td--pk{position:sticky;left:0;z-index:1;font-weight:600;border-right:1px solid #e2e8f0;background:#fff;}
         .comp-td--editable{padding:3px 6px;}
         .comp-td--first{border-left:2px solid #4a7fb5;}
-        .comp-cell-input{width:100%;border:1px solid transparent;border-radius:4px;padding:4px 8px;font-size:12.5px;font-family:'Outfit',sans-serif;background:transparent;outline:none;transition:border-color .15s,background .15s;}
+        .comp-cell-input{width:100%;min-width:140px;border:1px solid transparent;border-radius:4px;padding:4px 8px;font-size:12.5px;font-family:'Outfit',sans-serif;background:transparent;outline:none;transition:border-color .15s,background .15s;}
         .comp-cell-input:focus{border-color:var(--clr-accent);background:#fff;box-shadow:0 0 0 2px rgba(74,127,181,.15);}
         .comp-cell-input--dirty{background:#fffde7!important;border-color:#f6c90e!important;}
         .comp-pagination{flex-shrink:0;display:flex;justify-content:center;align-items:center;gap:16px;padding:12px 0 0;font-size:13px;color:var(--clr-muted);}

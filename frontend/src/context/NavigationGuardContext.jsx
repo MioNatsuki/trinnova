@@ -1,6 +1,7 @@
 // frontend/src/context/NavigationGuardContext.jsx
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, UNSAFE_NavigationContext } from 'react-router-dom';
+import { useBlocker } from './useBlocker';
 
 const NavigationGuardContext = createContext({
   isDirty: false,
@@ -11,26 +12,13 @@ const NavigationGuardContext = createContext({
 export function NavigationGuardProvider({ children }) {
   const [isDirty, setIsDirtyState] = useState(false);
   const [dirtyReason, setDirtyReasonState] = useState('');
-  const [pendingNavigation, setPendingNavigation] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  
-  const navigate = useNavigate();
-  const location = useLocation();
+  const [pendingAction, setPendingAction] = useState(null);
 
   const setDirty = useCallback((dirty, reason = '') => {
     setIsDirtyState(dirty);
     setDirtyReasonState(reason);
   }, []);
-
-  // Interceptar navegación programática
-  const originalPush = useCallback((to, state) => {
-    if (isDirty && to !== location.pathname) {
-      setPendingNavigation(() => () => navigate(to, { state }));
-      setShowConfirm(true);
-      return;
-    }
-    navigate(to, { state });
-  }, [isDirty, location.pathname, navigate]);
 
   // Bloquear cierre/recarga de pestaña
   useEffect(() => {
@@ -43,45 +31,29 @@ export function NavigationGuardProvider({ children }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  // Interceptar clics en enlaces del sidebar
-  useEffect(() => {
-    if (!isDirty) return;
-
-    const handleClick = (e) => {
-      const link = e.target.closest('a');
-      if (!link) return;
-      
-      const href = link.getAttribute('href');
-      if (!href || href.startsWith('http') || href.startsWith('#')) return;
-      if (href === location.pathname) return;
-      
-      e.preventDefault();
-      setPendingNavigation(() => () => {
-        window.location.href = href;
-      });
-      setShowConfirm(true);
-    };
-
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, [isDirty, location.pathname]);
+  const confirmNavigation = useCallback((action) => {
+    setPendingAction(() => action);
+    setShowConfirm(true);
+  }, []);
 
   const handleConfirm = () => {
     setShowConfirm(false);
     setIsDirtyState(false);
-    if (pendingNavigation) {
-      pendingNavigation();
-      setPendingNavigation(null);
+    setDirtyReasonState('');
+    if (pendingAction) {
+      const action = pendingAction;
+      setPendingAction(null);
+      action();
     }
   };
 
   const handleCancel = () => {
     setShowConfirm(false);
-    setPendingNavigation(null);
+    setPendingAction(null);
   };
 
   return (
-    <NavigationGuardContext.Provider value={{ isDirty, setDirty, dirtyReason }}>
+    <NavigationGuardContext.Provider value={{ isDirty, setDirty, dirtyReason, confirmNavigation }}>
       {children}
 
       {showConfirm && (

@@ -556,7 +556,26 @@
 
 /* Tabla: columnas ajustadas al contenido (no forzar ancho) */
 .la-table { table-layout: auto; }
-.la-td { white-space: nowrap; }
+
+/*MODIFICADO*/
+.la-td {
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 350px;
+  min-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.la-th, .la-td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 7px 12px;
+  min-width: 120px;       /* ← AGREGAR: ancho mínimo */
+}
 
 /* Pago badge */
 .la-pago-badge {

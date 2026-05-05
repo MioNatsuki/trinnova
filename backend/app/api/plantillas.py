@@ -2,7 +2,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
-import re, os, io, zipfile
+import re, io, zipfile
+from fastapi.responses import FileResponse
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
@@ -10,6 +11,8 @@ from app.models.global_models import Usuario, Plantilla, PlantillaCampo
 from app.db.router import get_project_db
 from app.services.log_service import registrar_log
 from pydantic import BaseModel
+
+import os as _os
 
 router = APIRouter()
 
@@ -79,27 +82,56 @@ def _get_campos_analisis(slug: str) -> List[str]:
 
 def _extraer_placeholders_docx(contenido: bytes) -> List[str]:
     """
-    Extrae {{campo}} de un .docx parseando el XML interno.
-    Los placeholders en Word a veces se fragmentan en múltiples runs XML,
-    por eso se une el texto completo antes de buscar con regex.
+    Extrae placeholders de un .docx:
+    1. {{campo}} (formato simple)
+    2. MERGEFIELD campo (combinación de correspondencia de Word)
+    3. DOCPROPERTY campo (propiedades de documento)
     """
     placeholders = []
     seen = set()
     try:
         with zipfile.ZipFile(io.BytesIO(contenido)) as z:
+            # Archivo principal del documento
             with z.open("word/document.xml") as f:
                 xml_text = f.read().decode("utf-8", errors="replace")
 
-        # Quitar tags XML para quedarnos solo con el texto plano
-        texto = re.sub(r"<[^>]+>", "", xml_text)
+            # Quitar tags XML para texto plano
+            texto_plano = re.sub(r"<[^>]+>", " ", xml_text)
 
-        for m in re.finditer(r"\{\{(\w+)\}\}", texto):
-            ph = m.group(1)
-            if ph not in seen:
-                seen.add(ph)
-                placeholders.append(ph)
-    except Exception:
-        pass
+            # 1. Buscar {{campo}}
+            for m in re.finditer(r"\{\{(\w+)\}\}", texto_plano):
+                ph = m.group(1)
+                if ph not in seen:
+                    seen.add(ph)
+                    placeholders.append(ph)
+
+            # 2. Buscar MERGEFIELD
+            # Formato: <w:instrText> MERGEFIELD NombreCampo </w:instrText>
+            # También puede aparecer como: MERGEFIELD "Nombre Campo"
+            for m in re.finditer(
+                r'MERGEFIELD\s+"?([^"<\s\\]+)"?',
+                xml_text,
+                re.IGNORECASE
+            ):
+                ph = m.group(1).strip()
+                if ph and ph not in seen:
+                    seen.add(ph)
+                    placeholders.append(ph)
+
+            # 3. Buscar campos de formulario / propiedades
+            for m in re.finditer(
+                r'DOCPROPERTY\s+"?([^"<\s\\]+)"?',
+                xml_text,
+                re.IGNORECASE
+            ):
+                ph = m.group(1).strip()
+                if ph and ph not in seen:
+                    seen.add(ph)
+                    placeholders.append(ph)
+
+    except Exception as e:
+        print(f"[plantillas] Error extrayendo placeholders: {e}")
+
     return placeholders
 
 def _mapeo_automatico(
@@ -108,10 +140,6 @@ def _mapeo_automatico(
     campos_idx = {c.lower(): c for c in campos_bd}
     return {ph: campos_idx.get(ph.lower()) for ph in placeholders}
 
-# ── GET / — listar plantillas ─────────────────────────────────────────────────
-# IMPORTANTE: Las rutas con path estático (/subir, /campos-temporales-slug, etc.)
-# deben registrarse ANTES que las rutas con parámetros (/{plantilla_id}).
-# FastAPI evalúa las rutas en orden de registro.
 
 @router.get("/")
 def listar_plantillas(
@@ -218,10 +246,10 @@ async def subir_plantilla_docx(
     placeholders = _extraer_placeholders_docx(contenido)
 
     # Guardar archivo físico
-    upload_dir = os.path.join("uploads", "plantillas")
-    os.makedirs(upload_dir, exist_ok=True)
+    upload_dir = _os.path.join("uploads", "plantillas")
+    _os.makedirs(upload_dir, exist_ok=True)
     safe_name = re.sub(r"[^\w.\-]", "_", file.filename)
-    ruta = os.path.join(upload_dir, f"{proyecto_id}_{safe_name}")
+    ruta = _os.path.join(upload_dir, f"{proyecto_id}_{safe_name}")
     with open(ruta, "wb") as f_out:
         f_out.write(contenido)
 
@@ -420,3 +448,19 @@ def preview_mapeo(
         ],
         "campos_disponibles": campos_bd,
     }
+
+@router.get("/{plantilla_id}/descargar")
+def descargar_plantilla(
+    plantilla_id: int,
+    current_user: Usuario = Depends(get_current_active_user),
+    db: Session = Depends(get_global_db),
+):
+    """Descarga el archivo .docx de una plantilla para edición."""
+    p = _get_plantilla_or_404(db, plantilla_id)
+    if not p.ruta_archivo or not _os.path.exists(p.ruta_archivo):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en el servidor.")
+    return FileResponse(
+        p.ruta_archivo,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{p.nombre}.docx"
+    )

@@ -5,8 +5,6 @@ import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
 import './LimpiezaAnalisis.css';
 
-const LIMIT = 50;
-
 // ── Columnas de fecha exactas por proyecto ──────────────────────────────────
 const FECHA_COLS_POR_PROYECTO = {
   pensiones:          new Set(['ultimo_abono','fecha_alta','ultima_aportacion','fecha_convenio','fecha_asignacion']),
@@ -92,48 +90,45 @@ const Icon = ({ d, d2, size=16 }) => (
 );
 
 const ICONS = {
-  spaces:    {d:"M4 6h16M4 12h16M4 18h7",d2:"M15 18l4-4m0 0l4 4m-4-4v8"},
-  streets:   {d:"M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3"},
-  upload:    {d:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",d2:"M17 8l-5-5-5 5M12 3v12"},
-  search:    {d:"M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0"},
-  chevron:   {d:"M6 9l6 6 6-6"},
-  save:      {d:"M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z",d2:"M17 21v-8H7v8M7 3v5h8"},
-  sortUp:    {d:"M12 5l-7 7h14z"},
-  sortDown:  {d:"M12 19l7-7H5z"},
-  sortNone:  {d:"M12 5l-4 4h8zM12 19l4-4H8z"},
+  spaces:   {d:"M4 6h16M4 12h16M4 18h7",d2:"M15 18l4-4m0 0l4 4m-4-4v8"},
+  streets:  {d:"M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3"},
+  upload:   {d:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",d2:"M17 8l-5-5-5 5M12 3v12"},
+  search:   {d:"M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0"},
+  chevron:  {d:"M6 9l6 6 6-6"},
+  save:     {d:"M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z",d2:"M17 21v-8H7v8M7 3v5h8"},
+  sortUp:   {d:"M12 5l-7 7h14z"},
+  sortDown: {d:"M12 19l7-7H5z"},
+  sortNone: {d:"M12 5l-4 4h8zM12 19l4-4H8z"},
 };
 
-const MemoizedCell = memo(({ 
-  pkVal, col, rawVal, proyectoSlug, editedCells, editingCell, 
-  onDoubleClick, onChange, onBlur 
+const MemoizedCell = memo(({
+  pkVal, col, rawVal, proyectoSlug, editedCells, editingCell,
+  onDoubleClick, onChange, onBlur,
 }) => {
   const err = detectErrors(rawVal, col, proyectoSlug);
-  const isDirty = editedCells[pkVal]?.[col] !== undefined;
+  const isDirty   = editedCells[pkVal]?.[col] !== undefined;
   const isEditing = editingCell?.pkVal === pkVal && editingCell?.col === col;
-  let displayVal = String(rawVal ?? '');
-  
-  if (FECHA_COLS_POR_PROYECTO[proyectoSlug]?.has(col) && rawVal) {
+  let displayVal  = String(rawVal ?? '');
+
+  if (FECHA_COLS_POR_PROYECTO[proyectoSlug]?.has(col) && rawVal)
     displayVal = formatDateForProject(String(rawVal), proyectoSlug);
-  }
 
   return (
     <td
       className={`la-td ${err ? 'la-td--error' : ''} ${isDirty ? 'la-td--dirty' : ''}`}
       title={err ? `⚠ ${err}` : 'Doble clic para editar'}
-      onDoubleClick={(e) => { e.stopPropagation(); onDoubleClick(pkVal, col); }}
-      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={e => { e.stopPropagation(); onDoubleClick(pkVal, col); }}
+      onClick={e => e.stopPropagation()}
     >
       {isEditing ? (
         <input
           autoFocus
           className="la-cell-input"
           defaultValue={String(editedCells[pkVal]?.[col] ?? rawVal ?? '')}
-          onChange={(e) => onChange(pkVal, col, e.target.value)}
+          onChange={e => onChange(pkVal, col, e.target.value)}
           onBlur={onBlur}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === 'Escape') onBlur();
-          }}
-          onClick={(e) => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') onBlur(); }}
+          onClick={e => e.stopPropagation()}
         />
       ) : (
         <>
@@ -176,21 +171,25 @@ export default function LimpiezaAnalisis() {
   const [showNdInput, setShowNdInput] = useState(false);
 
   // Edición inline
-  const [editedCells,  setEditedCells]  = useState({});
-  const [savingCells,  setSavingCells]  = useState(false);
-  const [editingCell,  setEditingCell]  = useState(null);
+  const [editedCells, setEditedCells] = useState({});
+  const [savingCells, setSavingCells] = useState(false);
+  const [editingCell, setEditingCell] = useState(null);
 
-  // Ordenamiento
-  const [sortCol, setSortCol] = useState(null);
-  const [sortDir, setSortDir] = useState('asc');
+  // Ordenamiento / paginación
+  const [sortCol,  setSortCol]  = useState(null);
+  const [sortDir,  setSortDir]  = useState('asc');
   const [pageSize, setPageSize] = useState(50);
 
-  // CSV
+  // ── CSV ─────────────────────────────────────────────────────────────────────
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvFile,      setCsvFile]      = useState(null);
   const [csvLoading,   setCsvLoading]   = useState(false);
   const [csvResult,    setCsvResult]    = useState(null);
   const csvInputRef = useRef();
+
+  // FIX: ref síncrono para saber si la carga está en curso sin depender del
+  // closure de useCallback (evita el ReferenceError de TDZ / closure stale).
+  const csvLoadingRef = useRef(false);
 
   const openCsvModal = useCallback(() => {
     setCsvFile(null);
@@ -199,27 +198,38 @@ export default function LimpiezaAnalisis() {
     setDirty(true, 'Tienes un modal de carga CSV abierto.');
   }, [setDirty]);
 
+  // FIX: closeCsvModal ya no depende del estado csvLoading (closure stale),
+  // sino del ref síncrono csvLoadingRef. Además muestra confirmación si el
+  // usuario seleccionó un archivo pero aún no lo cargó.
   const closeCsvModal = useCallback(() => {
+    // Bloquear si hay una carga activa
     if (csvLoadingRef.current) return;
+
+    // Advertir si hay un archivo pendiente sin cargar
     if (csvFile && !csvResult) {
-      if (!window.confirm('¿Cerrar sin cargar el archivo?')) return;
+      if (!window.confirm('Tienes un archivo seleccionado sin cargar. ¿Cerrar de todas formas?')) {
+        return;
+      }
     }
+
     setShowCsvModal(false);
     setCsvFile(null);
     setCsvResult(null);
     setDirty(false);
   }, [csvFile, csvResult, setDirty]);
+  // ────────────────────────────────────────────────────────────────────────────
 
-  const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
+  const totalPages       = Math.max(1, Math.ceil(data.total / pageSize));
   const pendingCellCount = Object.keys(editedCells).length;
 
-  // Guard navegación
+  // Guard de navegación
   useEffect(() => {
     const dirty = pendingCellCount > 0 || ejecutando || showCsvModal;
     setDirty(dirty, dirty ? 'Tienes cambios o una operación en progreso en Limpieza y Análisis.' : '');
     return () => setDirty(false);
   }, [pendingCellCount, ejecutando, showCsvModal, setDirty]);
 
+  // Cargar programas
   useEffect(() => {
     if (!proyectoSlug) { setProgramas([]); setPrograma('todos'); return; }
     api.get(`/analisis/${proyectoSlug}/programas`)
@@ -227,15 +237,15 @@ export default function LimpiezaAnalisis() {
       .catch(() => setProgramas([]));
   }, [proyectoSlug]);
 
-  // Limpiar ediciones y selección cuando cambia de proyecto
+  // Limpiar ediciones y selección al cambiar proyecto
   useEffect(() => {
     setEditedCells({});
     setSelected(new Set());
   }, [proyectoSlug]);
 
   const showMsg = useCallback((type, text) => {
-    setMessage({type,text});
-    setTimeout(()=>setMessage(null),5000);
+    setMessage({type, text});
+    setTimeout(() => setMessage(null), 5000);
   }, []);
 
   const loadData = useCallback(async () => {
@@ -262,7 +272,7 @@ export default function LimpiezaAnalisis() {
     try {
       const res = await api.get(`/analisis/${proyectoSlug}/estadisticas`);
       setStats(res.data);
-    } catch {}
+    } catch { /* silencioso */ }
   }, [proyectoSlug]);
 
   useEffect(() => { loadData(); loadStats(); }, [loadData, loadStats]);
@@ -273,12 +283,12 @@ export default function LimpiezaAnalisis() {
     const n = new Set(prev); n.has(pkVal) ? n.delete(pkVal) : n.add(pkVal); return n;
   });
   const toggleAll = e => e.target.checked
-    ? setSelected(new Set(data.rows.map(r=>r[data.pk])))
+    ? setSelected(new Set(data.rows.map(r => r[data.pk])))
     : setSelected(new Set());
 
-  // Ordenamiento — incluyendo columnas fijas
+  // Ordenamiento
   const handleSort = col => {
-    if (sortCol === col) setSortDir(d => d==='asc'?'desc':'asc');
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   };
 
@@ -286,12 +296,12 @@ export default function LimpiezaAnalisis() {
   const handleCellDblClick = useCallback((pkVal, col) => {
     setEditingCell({pkVal, col});
   }, []);
-  
+
   const handleCellChange = useCallback((pkVal, col, value) => {
     setEditedCells(prev => {
       const currentValue = prev[pkVal]?.[col];
       if (currentValue === value) return prev;
-      return {...prev, [pkVal]: {...(prev[pkVal]||{}), [col]: value}};
+      return {...prev, [pkVal]: {...(prev[pkVal] || {}), [col]: value}};
     });
   }, []);
 
@@ -313,79 +323,97 @@ export default function LimpiezaAnalisis() {
     }
   };
 
-  // Acciones
-  const ejecutarAccion = async (accion, valor=null) => {
-    if (selected.size===0) { showMsg('error','Selecciona al menos un registro.'); return; }
+  // Acciones masivas
+  const ejecutarAccion = async (accion, valor = null) => {
+    if (selected.size === 0) { showMsg('error', 'Selecciona al menos un registro.'); return; }
     setEjecutando(true);
     try {
       const res = await api.post(`/analisis/${proyectoSlug}/acciones-manuales`,
-        {ids:Array.from(selected), accion, valor});
+        {ids: Array.from(selected), accion, valor});
       showMsg('success', res.data.message);
       loadData(); loadStats();
     } catch (err) {
-      showMsg('error', err.response?.data?.detail||'Error.');
+      showMsg('error', err.response?.data?.detail || 'Error.');
     } finally {
       setEjecutando(false);
     }
   };
 
   const ejecutarLimpieza = async tipo => {
-    if (!window.confirm(`¿Ejecutar "${tipo==='calles'?'Normalizar calles':'Limpiar espacios'}"?`)) return;
+    if (!window.confirm(`¿Ejecutar "${tipo === 'calles' ? 'Normalizar calles' : 'Limpiar espacios'}"?`)) return;
     setEjecutando(true);
     try {
-      const endpoint = tipo==='calles'
+      const endpoint = tipo === 'calles'
         ? `/analisis/${proyectoSlug}/limpieza/normalizar-calles`
         : `/analisis/${proyectoSlug}/limpieza/limpiar-espacios`;
       const res = await api.post(endpoint);
       showMsg('success', res.data.message);
       loadData();
     } catch (err) {
-      showMsg('error', err.response?.data?.detail||'Error en limpieza.');
+      showMsg('error', err.response?.data?.detail || 'Error en limpieza.');
     } finally {
       setEjecutando(false);
     }
   };
 
+  // FIX: handleCsvUpload sincroniza csvLoadingRef junto con el estado,
+  // para que closeCsvModal pueda bloquearse sin depender del closure stale.
   const handleCsvUpload = async () => {
     if (!csvFile) return;
     setCsvLoading(true);
+    csvLoadingRef.current = true; // ← sincronizar ref
     const formData = new FormData();
     formData.append('file', csvFile);
     try {
-      const res = await api.post(`/analisis/${proyectoSlug}/cargar-viabilidad-csv`, formData,
-        {headers:{'Content-Type':'multipart/form-data'}});
+      const res = await api.post(
+        `/analisis/${proyectoSlug}/cargar-viabilidad-csv`,
+        formData,
+        { headers: {'Content-Type': 'multipart/form-data'} },
+      );
       setCsvResult(res.data);
-
-      setTimeout(() => {
-        setShowCsvModal(false);
-        setCsvResult(null);
-        setCsvFile(null);
-      }, 1500);
-
+      // Cerrar automáticamente tras 1.5 s si fue exitoso
+      if (res.data.success) {
+        setTimeout(() => {
+          setShowCsvModal(false);
+          setCsvResult(null);
+          setCsvFile(null);
+          setDirty(false);
+        }, 1500);
+      }
       await loadData();
       await loadStats();
     } catch (err) {
-      setCsvResult({success:false, message:err.response?.data?.detail||'Error.', procesados:0, errores:[]});
+      setCsvResult({
+        success: false,
+        message: err.response?.data?.detail || 'Error al cargar el archivo.',
+        procesados: 0,
+        errores: [],
+      });
     } finally {
       setCsvLoading(false);
+      csvLoadingRef.current = false; // ← limpiar ref
     }
   };
 
   const allCols = useMemo(() =>
-    data.rows.length > 0 ? Object.keys(data.rows[0]).filter(c=>!c.startsWith('_')) : [],
-    [data.rows]
+    data.rows.length > 0 ? Object.keys(data.rows[0]).filter(c => !c.startsWith('_')) : [],
+    [data.rows],
   );
-  const normalCols = useMemo(() => allCols.filter(c=>c!=='viabilidad'&&c!=='estatus_pago'), [allCols]);
+  const normalCols = useMemo(() =>
+    allCols.filter(c => c !== 'viabilidad' && c !== 'estatus_pago'),
+    [allCols],
+  );
 
+  // ── Sin proyecto seleccionado ──────────────────────────────────────────────
   if (!proyectoSlug) {
     return (
       <div className="la-page">
         <div className="la-header"><h1 className="la-title">Limpieza y Análisis</h1></div>
         <div className="la-no-project">
           <p>Selecciona un proyecto para continuar.</p>
-          <select className="la-select" value="" onChange={e=>setProyectoSlug(e.target.value)}>
+          <select className="la-select" value="" onChange={e => setProyectoSlug(e.target.value)}>
             <option value="">— Proyecto —</option>
-            {proyectos.map(p=><option key={p.id} value={p.slug}>{p.nombre}</option>)}
+            {proyectos.map(p => <option key={p.id} value={p.slug}>{p.nombre}</option>)}
           </select>
         </div>
       </div>
@@ -402,8 +430,8 @@ export default function LimpiezaAnalisis() {
             <span className="la-select-label">Proyecto:</span>
             <div className="la-dropdown">
               <select className="la-select" value={proyectoSlug}
-                onChange={e=>{setProyectoSlug(e.target.value);setPrograma('todos');}}>
-                {proyectos.map(p=><option key={p.id} value={p.slug}>{p.nombre}</option>)}
+                onChange={e => { setProyectoSlug(e.target.value); setPrograma('todos'); }}>
+                {proyectos.map(p => <option key={p.id} value={p.slug}>{p.nombre}</option>)}
               </select>
               <span className="la-chevron"><Icon {...ICONS.chevron} size={14}/></span>
             </div>
@@ -411,41 +439,44 @@ export default function LimpiezaAnalisis() {
           <div className="la-select-wrap">
             <span className="la-select-label">Programa:</span>
             <div className="la-dropdown">
-              <select className="la-select" value={programa} onChange={e=>setPrograma(e.target.value)}>
+              <select className="la-select" value={programa} onChange={e => setPrograma(e.target.value)}>
                 <option value="todos">Todos</option>
-                {programas.map(p=><option key={p.id} value={p.slug}>{p.nombre}</option>)}
+                {programas.map(p => <option key={p.id} value={p.slug}>{p.nombre}</option>)}
               </select>
               <span className="la-chevron"><Icon {...ICONS.chevron} size={14}/></span>
             </div>
           </div>
-          <form className="la-search-form" onSubmit={e=>{e.preventDefault();setBusqueda(draftBusq);setPage(1);}}>
+          <form className="la-search-form"
+            onSubmit={e => { e.preventDefault(); setBusqueda(draftBusq); setPage(1); }}>
             <span className="la-search-icon"><Icon {...ICONS.search} size={14}/></span>
             <input className="la-search-input" type="text" placeholder="Buscar…"
-              value={draftBusq} onChange={e=>setDraftBusq(e.target.value)}/>
-            {busqueda&&<button type="button" className="la-search-clear"
-              onClick={()=>{setBusqueda('');setDraftBusq('');}}>✕</button>}
+              value={draftBusq} onChange={e => setDraftBusq(e.target.value)}/>
+            {busqueda && (
+              <button type="button" className="la-search-clear"
+                onClick={() => { setBusqueda(''); setDraftBusq(''); }}>✕</button>
+            )}
           </form>
         </div>
 
         <div className="la-tools">
-          <button className="la-tool-btn" onClick={()=>ejecutarLimpieza('espacios')} disabled={ejecutando}
-            title="Elimina espacios duplicados y espacios al inicio/fin">
+          <button className="la-tool-btn" onClick={() => ejecutarLimpieza('espacios')}
+            disabled={ejecutando} title="Elimina espacios duplicados y espacios al inicio/fin">
             <Icon {...ICONS.spaces}/><span>Espacios</span>
           </button>
-          <button className="la-tool-btn" onClick={()=>ejecutarLimpieza('calles')} disabled={ejecutando}
-            title="Normaliza abreviaturas: Av. → Avenida, Gpe → Guadalupe…">
+          <button className="la-tool-btn" onClick={() => ejecutarLimpieza('calles')}
+            disabled={ejecutando} title="Normaliza abreviaturas: Av. → Avenida, Gpe → Guadalupe…">
             <Icon {...ICONS.streets}/><span>Calles</span>
           </button>
           <button className="la-tool-btn la-tool-btn--warning"
-            onClick={()=>ejecutarAccion('quitar_pagada')}
-            disabled={ejecutando||selected.size===0}
-            title="Marca seleccionados como No viable (Pagada). Siguen visibles.">
+            onClick={() => ejecutarAccion('quitar_pagada')}
+            disabled={ejecutando || selected.size === 0}
+            title="Marca seleccionados como No viable (Pagada).">
             💰<span>Pagadas</span>
           </button>
           <button className="la-tool-btn la-tool-btn--warning"
-            onClick={()=>setShowNdInput(v=>!v)}
-            disabled={ejecutando||selected.size===0}
-            title="Marca seleccionados como No viable (No Deudor). Siguen visibles.">
+            onClick={() => setShowNdInput(v => !v)}
+            disabled={ejecutando || selected.size === 0}
+            title="Marca seleccionados como No viable (No Deudor).">
             📋<span>ND</span>
           </button>
           <button className="la-tool-btn la-tool-btn--accent"
@@ -453,35 +484,47 @@ export default function LimpiezaAnalisis() {
             title="Carga viabilidad/pagos masivo desde CSV o Excel">
             <Icon {...ICONS.upload}/><span>Cargar CSV</span>
           </button>
-          {pendingCellCount>0&&(
-            <button className="la-tool-btn la-tool-btn--save" onClick={handleSaveCells}
-              disabled={savingCells} title={`Guardar ${pendingCellCount} celda(s) editada(s)`}>
-              <Icon {...ICONS.save}/><span>{savingCells?'Guardando…':`Guardar (${pendingCellCount})`}</span>
+          {pendingCellCount > 0 && (
+            <button className="la-tool-btn la-tool-btn--save"
+              onClick={handleSaveCells} disabled={savingCells}
+              title={`Guardar ${pendingCellCount} celda(s) editada(s)`}>
+              <Icon {...ICONS.save}/><span>{savingCells ? 'Guardando…' : `Guardar (${pendingCellCount})`}</span>
             </button>
           )}
         </div>
       </div>
 
-      {showNdInput&&(
+      {/* Fila ND */}
+      {showNdInput && (
         <div className="la-nd-row">
-          <input type="text" value={ndMotivo} onChange={e=>setNdMotivo(e.target.value)}
+          <input type="text" value={ndMotivo} onChange={e => setNdMotivo(e.target.value)}
             placeholder="Motivo ND…" className="la-nd-input"
-            onKeyDown={e=>{if(e.key==='Enter'&&ndMotivo.trim()){ejecutarAccion('quitar_nd',ndMotivo);setNdMotivo('');setShowNdInput(false);}}}/>
+            onKeyDown={e => {
+              if (e.key === 'Enter' && ndMotivo.trim()) {
+                ejecutarAccion('quitar_nd', ndMotivo);
+                setNdMotivo(''); setShowNdInput(false);
+              }
+            }}/>
           <button className="la-btn la-btn--viable"
-            onClick={()=>{ejecutarAccion('quitar_nd',ndMotivo);setNdMotivo('');setShowNdInput(false);}}
-            disabled={!ndMotivo.trim()||ejecutando}>Confirmar</button>
-          <button className="la-btn la-btn--ghost" onClick={()=>{setShowNdInput(false);setNdMotivo('');}}>Cancelar</button>
+            onClick={() => { ejecutarAccion('quitar_nd', ndMotivo); setNdMotivo(''); setShowNdInput(false); }}
+            disabled={!ndMotivo.trim() || ejecutando}>Confirmar</button>
+          <button className="la-btn la-btn--ghost"
+            onClick={() => { setShowNdInput(false); setNdMotivo(''); }}>Cancelar</button>
         </div>
       )}
 
       {/* STATS */}
-      {stats&&(
+      {stats && (
         <div className="la-stats">
-          {[{label:'Padrón',val:stats.padron,cls:''},{label:'Análisis',val:stats.analisis,cls:''},
-            {label:'Viables',val:stats.viable,cls:'green'},{label:'No viables',val:stats.no_viable,cls:'red'},
-            {label:'Pendientes',val:stats.pendiente,cls:'amber'}].map(s=>(
-            <div key={s.label} className={`la-stat la-stat--${s.cls||'neutral'}`}>
-              <span className="la-stat-num">{(s.val??0).toLocaleString()}</span>
+          {[
+            {label:'Padrón',      val:stats.padron,     cls:''},
+            {label:'Análisis',    val:stats.analisis,   cls:''},
+            {label:'Viables',     val:stats.viable,     cls:'green'},
+            {label:'No viables',  val:stats.no_viable,  cls:'red'},
+            {label:'Pendientes',  val:stats.pendiente,  cls:'amber'},
+          ].map(s => (
+            <div key={s.label} className={`la-stat la-stat--${s.cls || 'neutral'}`}>
+              <span className="la-stat-num">{(s.val ?? 0).toLocaleString()}</span>
               <span className="la-stat-lbl">{s.label}</span>
             </div>
           ))}
@@ -490,23 +533,32 @@ export default function LimpiezaAnalisis() {
 
       {/* ACCIONES */}
       <div className="la-actions-row">
-        <select className="la-filter-select" value={filtroVia} onChange={e=>setFiltroVia(e.target.value)}>
+        <select className="la-filter-select" value={filtroVia}
+          onChange={e => setFiltroVia(e.target.value)}>
           <option value="">Todos los estados</option>
           <option value="viable">Viables</option>
           <option value="no_viable">No viables</option>
           <option value="pendiente">Pendientes</option>
         </select>
         <div className="la-action-btns">
-          <button onClick={()=>ejecutarAccion('viable')} disabled={ejecutando||selected.size===0}
+          <button onClick={() => ejecutarAccion('viable')}
+            disabled={ejecutando || selected.size === 0}
             className="la-btn la-btn--viable">✓ Viable</button>
-          <button onClick={()=>ejecutarAccion('no_viable')} disabled={ejecutando||selected.size===0}
+          <button onClick={() => ejecutarAccion('no_viable')}
+            disabled={ejecutando || selected.size === 0}
             className="la-btn la-btn--novia">✗ No viable</button>
         </div>
-        {selected.size>0&&<span className="la-selected-count">{selected.size} seleccionados</span>}
-        {pendingCellCount>0&&<span className="la-dirty-count">⚠️ {pendingCellCount} sin guardar</span>}
+        {selected.size > 0 && (
+          <span className="la-selected-count">{selected.size} seleccionados</span>
+        )}
+        {pendingCellCount > 0 && (
+          <span className="la-dirty-count">⚠️ {pendingCellCount} sin guardar</span>
+        )}
       </div>
 
-      {message&&<div className={`la-message la-message--${message.type}`}>{message.text}</div>}
+      {message && (
+        <div className={`la-message la-message--${message.type}`}>{message.text}</div>
+      )}
 
       {/* TABLA */}
       {loading ? (
@@ -517,30 +569,28 @@ export default function LimpiezaAnalisis() {
             <thead>
               <tr>
                 <th className="la-th la-th--check la-th--sticky-check">
-                  <input type="checkbox" onChange={toggleAll}
-                    checked={data.rows.length>0&&selected.size===data.rows.length}
-                    ref={el=>{if(el)el.indeterminate=selected.size>0&&selected.size<data.rows.length;}}/>
+                  <input type="checkbox"
+                    onChange={toggleAll}
+                    checked={data.rows.length > 0 && selected.size === data.rows.length}
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < data.rows.length; }}/>
                 </th>
-
-                {normalCols.map(col=>(
-                  <th key={col} className="la-th la-th--sortable" onClick={()=>handleSort(col)}>
+                {normalCols.map(col => (
+                  <th key={col} className="la-th la-th--sortable" onClick={() => handleSort(col)}>
                     <span className="la-th-inner">
-                      <span>{col.replace(/_/g,' ')}</span>
+                      <span>{col.replace(/_/g, ' ')}</span>
                       <SortIcon col={col} sortCol={sortCol} sortDir={sortDir}/>
                     </span>
                   </th>
                 ))}
-
                 <th className="la-th la-th--sticky la-th--via la-th--sortable"
-                  onClick={()=>handleSort('viabilidad')}>
+                  onClick={() => handleSort('viabilidad')}>
                   <span className="la-th-inner">
                     <span>Viabilidad</span>
                     <SortIcon col="viabilidad" sortCol={sortCol} sortDir={sortDir}/>
                   </span>
                 </th>
-
                 <th className="la-th la-th--sticky la-th--pago la-th--sortable"
-                  onClick={()=>handleSort('estatus_pago')}>
+                  onClick={() => handleSort('estatus_pago')}>
                   <span className="la-th-inner">
                     <span>Pago</span>
                     <SortIcon col="estatus_pago" sortCol={sortCol} sortDir={sortDir}/>
@@ -549,22 +599,26 @@ export default function LimpiezaAnalisis() {
               </tr>
             </thead>
             <tbody>
-              {data.rows.length===0 ? (
-                <tr><td colSpan={normalCols.length+3} className="la-empty">
-                  {busqueda?'Sin resultados.':'No hay registros. Genera el análisis primero.'}
-                </td></tr>
-              ) : data.rows.map(row=>{
-                const pkVal = row[data.pk];
+              {data.rows.length === 0 ? (
+                <tr>
+                  <td colSpan={normalCols.length + 3} className="la-empty">
+                    {busqueda ? 'Sin resultados.' : 'No hay registros. Genera el análisis primero.'}
+                  </td>
+                </tr>
+              ) : data.rows.map(row => {
+                const pkVal     = row[data.pk];
                 const isSelected = selected.has(pkVal);
-                const pagoBadge = row['estatus_pago'];
+                const pagoBadge  = row['estatus_pago'];
 
                 return (
                   <tr key={pkVal}
-                    className={`la-tr ${isSelected?'la-tr--selected':''}`}
-                    onClick={()=>toggleSelect(pkVal)}>
+                    className={`la-tr ${isSelected ? 'la-tr--selected' : ''}`}
+                    onClick={() => toggleSelect(pkVal)}>
 
-                    <td className="la-td la-td--check la-td--sticky-check" onClick={e=>e.stopPropagation()}>
-                      <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(pkVal)}/>
+                    <td className="la-td la-td--check la-td--sticky-check"
+                      onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={isSelected}
+                        onChange={() => toggleSelect(pkVal)}/>
                     </td>
 
                     {normalCols.map(col => (
@@ -572,7 +626,11 @@ export default function LimpiezaAnalisis() {
                         key={col}
                         pkVal={pkVal}
                         col={col}
-                        rawVal={editedCells[pkVal]?.[col] !== undefined ? editedCells[pkVal][col] : row[col]}
+                        rawVal={
+                          editedCells[pkVal]?.[col] !== undefined
+                            ? editedCells[pkVal][col]
+                            : row[col]
+                        }
                         proyectoSlug={proyectoSlug}
                         editedCells={editedCells}
                         editingCell={editingCell}
@@ -582,20 +640,23 @@ export default function LimpiezaAnalisis() {
                       />
                     ))}
 
-                    <td className="la-td la-td--sticky la-td--via" onClick={e=>e.stopPropagation()}>
-                      {(()=>{
-                        const v = row['viabilidad']||'pendiente';
-                        const cfg = VIABILIDAD_CONFIG[v]||VIABILIDAD_CONFIG.pendiente;
+                    <td className="la-td la-td--sticky la-td--via"
+                      onClick={e => e.stopPropagation()}>
+                      {(() => {
+                        const v   = row['viabilidad'] || 'pendiente';
+                        const cfg = VIABILIDAD_CONFIG[v] || VIABILIDAD_CONFIG.pendiente;
                         return (
-                          <span className="la-badge" style={{background:cfg.bg,color:cfg.color}}>
-                            <span className="la-badge-dot" style={{background:cfg.dot}}/>
+                          <span className="la-badge"
+                            style={{background: cfg.bg, color: cfg.color}}>
+                            <span className="la-badge-dot" style={{background: cfg.dot}}/>
                             {cfg.label}
                           </span>
                         );
                       })()}
                     </td>
 
-                    <td className="la-td la-td--sticky la-td--pago" onClick={e=>e.stopPropagation()}>
+                    <td className="la-td la-td--sticky la-td--pago"
+                      onClick={e => e.stopPropagation()}>
                       {pagoBadge
                         ? <span className="la-pago-badge">{pagoBadge}</span>
                         : <span className="la-pago-empty">—</span>
@@ -610,54 +671,78 @@ export default function LimpiezaAnalisis() {
       )}
 
       {/* PAGINACIÓN */}
-      {!loading&&data.total>0&&(
+      {!loading && data.total > 0 && (
         <div className="la-pagination">
-          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}>← Anterior</button>
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+            ← Anterior
+          </button>
           <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
           <select value={pageSize}
-            onChange={e=>{setPageSize(Number(e.target.value));setPage(1);}}
-            style={{padding:'5px 8px',border:'1px solid var(--clr-border)',borderRadius:6,fontSize:12,fontFamily:'Outfit,sans-serif'}}>
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+            style={{
+              padding: '5px 8px', border: '1px solid var(--clr-border)',
+              borderRadius: 6, fontSize: 12, fontFamily: 'Outfit,sans-serif',
+            }}>
             <option value={10}>10</option>
             <option value={20}>20</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>
-          <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page>=totalPages}>Siguiente →</button>
+          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+            Siguiente →
+          </button>
         </div>
       )}
 
-      {/* MODAL CSV */}
-      {showCsvModal&&(
+      {/* MODAL CSV ─────────────────────────────────────────────────────────── */}
+      {showCsvModal && (
+        // FIX: El overlay llama a closeCsvModal (que ya tiene el guard interno).
+        // No se cierra si hay carga activa, y pide confirmación si hay archivo
+        // seleccionado sin cargar.
         <div className="la-modal-overlay" onClick={closeCsvModal}>
-          <div className="la-modal" onClick={e=>e.stopPropagation()}>
+          <div className="la-modal" onClick={e => e.stopPropagation()}>
             <div className="la-modal-head">
               <h2 className="la-modal-title">Cargar viabilidad / pagos masivo</h2>
               <button className="la-modal-x" onClick={closeCsvModal}>✕</button>
             </div>
             <p className="la-modal-desc">
-              Columnas aceptadas: <code>{data.pk||'cuenta'}</code> (requerida) · <code>viabilidad</code> (viable / no_viable / pendiente) · <code>estatus_pago</code> · <code>fecha_pago</code> · <code>monto_pago</code> · <code>observaciones</code> · <code>programa</code>
+              Columnas aceptadas:{' '}
+              <code>{data.pk || 'cuenta'}</code> (requerida) ·{' '}
+              <code>viabilidad</code> (viable / no_viable / pendiente) ·{' '}
+              <code>estatus_pago</code> · <code>fecha_pago</code> ·{' '}
+              <code>monto_pago</code> · <code>observaciones</code> · <code>programa</code>
             </p>
-            <div className="la-csv-drop" onClick={()=>csvInputRef.current?.click()}
-              onDrop={e=>{e.preventDefault();setCsvFile(e.dataTransfer.files[0]||null);}}
-              onDragOver={e=>e.preventDefault()}>
-              <input type="file" accept=".csv,.xlsx,.xls" ref={csvInputRef} style={{display:'none'}}
-                onChange={e=>setCsvFile(e.target.files[0]||null)}/>
+            <div className="la-csv-drop"
+              onClick={() => csvInputRef.current?.click()}
+              onDrop={e => { e.preventDefault(); setCsvFile(e.dataTransfer.files[0] || null); }}
+              onDragOver={e => e.preventDefault()}>
+              <input type="file" accept=".csv,.xlsx,.xls" ref={csvInputRef}
+                style={{display:'none'}}
+                onChange={e => setCsvFile(e.target.files[0] || null)}/>
               {csvFile
-                ?<><span className="la-csv-ok">✓</span><p>{csvFile.name}</p></>
-                :<><Icon {...ICONS.upload} size={28}/><p>Arrastra aquí o haz clic</p></>}
+                ? <><span className="la-csv-ok">✓</span><p>{csvFile.name}</p></>
+                : <><Icon {...ICONS.upload} size={28}/><p>Arrastra aquí o haz clic</p></>
+              }
             </div>
-            {csvResult&&(
-              <div className={`la-modal-result ${csvResult.success?'ok':'err'}`}>
+            {csvResult && (
+              <div className={`la-modal-result ${csvResult.success ? 'ok' : 'err'}`}>
                 <p>{csvResult.message}</p>
-                {csvResult.errores?.length>0&&(
-                  <ul>{csvResult.errores.slice(0,5).map((e,i)=><li key={i}>{e}</li>)}</ul>
+                {csvResult.errores?.length > 0 && (
+                  <ul>
+                    {csvResult.errores.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
                 )}
               </div>
             )}
             <div className="la-modal-actions">
-              <button className="la-btn la-btn--ghost" onClick={closeCsvModal}>Cerrar</button>
+              <button className="la-btn la-btn--ghost" onClick={closeCsvModal}
+                disabled={csvLoading}>
+                Cerrar
+              </button>
               <button className="la-btn la-btn--primary" onClick={handleCsvUpload}
-                disabled={!csvFile||csvLoading}>{csvLoading?'Cargando…':'Cargar'}</button>
+                disabled={!csvFile || csvLoading}>
+                {csvLoading ? 'Cargando…' : 'Cargar'}
+              </button>
             </div>
           </div>
         </div>

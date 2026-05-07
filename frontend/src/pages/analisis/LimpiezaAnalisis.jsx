@@ -155,41 +155,48 @@ export default function LimpiezaAnalisis() {
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
   const { setDirty } = useNavigationGuard();
 
-  const [programas,   setProgramas]   = useState([]);
-  const [programa,    setPrograma]    = useState('todos');
-  const [data,        setData]        = useState({rows:[], total:0, pk:null});
-  const [loading,     setLoading]     = useState(false);
-  const [page,        setPage]        = useState(1);
-  const [filtroVia,   setFiltroVia]   = useState('');
-  const [busqueda,    setBusqueda]    = useState('');
-  const [draftBusq,   setDraftBusq]   = useState('');
-  const [selected,    setSelected]    = useState(new Set());
-  const [message,     setMessage]     = useState(null);
-  const [ejecutando,  setEjecutando]  = useState(false);
-  const [stats,       setStats]       = useState(null);
-  const [ndMotivo,    setNdMotivo]    = useState('');
-  const [showNdInput, setShowNdInput] = useState(false);
+  // ── FIX: TODOS los useState primero, sin excepción ──────────────────────────
+  // Mover los estados CSV al bloque principal evita el TDZ ReferenceError
+  // que ocurría cuando closeCsvModal (useCallback) era evaluado antes de que
+  // csvLoading fuera declarado por su useState.
+
+  const [programas,     setProgramas]     = useState([]);
+  const [programa,      setPrograma]      = useState('todos');
+  const [data,          setData]          = useState({rows:[], total:0, pk:null});
+  const [loading,       setLoading]       = useState(false);
+  const [page,          setPage]          = useState(1);
+  const [filtroVia,     setFiltroVia]     = useState('');
+  const [busqueda,      setBusqueda]      = useState('');
+  const [draftBusq,     setDraftBusq]     = useState('');
+  const [selected,      setSelected]      = useState(new Set());
+  const [message,       setMessage]       = useState(null);
+  const [ejecutando,    setEjecutando]    = useState(false);
+  const [stats,         setStats]         = useState(null);
+  const [ndMotivo,      setNdMotivo]      = useState('');
+  const [showNdInput,   setShowNdInput]   = useState(false);
 
   // Edición inline
-  const [editedCells, setEditedCells] = useState({});
-  const [savingCells, setSavingCells] = useState(false);
-  const [editingCell, setEditingCell] = useState(null);
+  const [editedCells,   setEditedCells]   = useState({});
+  const [savingCells,   setSavingCells]   = useState(false);
+  const [editingCell,   setEditingCell]   = useState(null);
 
   // Ordenamiento / paginación
-  const [sortCol,  setSortCol]  = useState(null);
-  const [sortDir,  setSortDir]  = useState('asc');
-  const [pageSize, setPageSize] = useState(50);
+  const [sortCol,       setSortCol]       = useState(null);
+  const [sortDir,       setSortDir]       = useState('asc');
+  const [pageSize,      setPageSize]      = useState(50);
 
-  // ── CSV ─────────────────────────────────────────────────────────────────────
-  const [showCsvModal, setShowCsvModal] = useState(false);
-  const [csvFile,      setCsvFile]      = useState(null);
-  const [csvLoading,   setCsvLoading]   = useState(false);
-  const [csvResult,    setCsvResult]    = useState(null);
-  const csvInputRef = useRef();
+  // CSV — declarados aquí junto con todos los demás estados
+  const [showCsvModal,  setShowCsvModal]  = useState(false);
+  const [csvFile,       setCsvFile]       = useState(null);
+  const [csvLoading,    setCsvLoading]    = useState(false);
+  const [csvResult,     setCsvResult]     = useState(null);
 
-  // FIX: ref síncrono para saber si la carga está en curso sin depender del
-  // closure de useCallback (evita el ReferenceError de TDZ / closure stale).
-  const csvLoadingRef = useRef(false);
+  // ── Refs (después de todos los useState) ────────────────────────────────────
+  const csvInputRef    = useRef();
+  // Ref síncrono para que closeCsvModal no dependa del closure stale de csvLoading
+  const csvLoadingRef  = useRef(false);
+
+  // ── Callbacks ────────────────────────────────────────────────────────────────
 
   const openCsvModal = useCallback(() => {
     setCsvFile(null);
@@ -198,14 +205,11 @@ export default function LimpiezaAnalisis() {
     setDirty(true, 'Tienes un modal de carga CSV abierto.');
   }, [setDirty]);
 
-  // FIX: closeCsvModal ya no depende del estado csvLoading (closure stale),
-  // sino del ref síncrono csvLoadingRef. Además muestra confirmación si el
-  // usuario seleccionó un archivo pero aún no lo cargó.
+  // closeCsvModal usa csvLoadingRef (síncrono) en lugar de csvLoading (closure)
+  // para evitar que el overlay cierre el modal mientras hay una carga activa.
   const closeCsvModal = useCallback(() => {
-    // Bloquear si hay una carga activa
     if (csvLoadingRef.current) return;
 
-    // Advertir si hay un archivo pendiente sin cargar
     if (csvFile && !csvResult) {
       if (!window.confirm('Tienes un archivo seleccionado sin cargar. ¿Cerrar de todas formas?')) {
         return;
@@ -217,8 +221,8 @@ export default function LimpiezaAnalisis() {
     setCsvResult(null);
     setDirty(false);
   }, [csvFile, csvResult, setDirty]);
-  // ────────────────────────────────────────────────────────────────────────────
 
+  // ── Derivados (después de todos los hooks) ───────────────────────────────────
   const totalPages       = Math.max(1, Math.ceil(data.total / pageSize));
   const pendingCellCount = Object.keys(editedCells).length;
 
@@ -356,12 +360,11 @@ export default function LimpiezaAnalisis() {
     }
   };
 
-  // FIX: handleCsvUpload sincroniza csvLoadingRef junto con el estado,
-  // para que closeCsvModal pueda bloquearse sin depender del closure stale.
+  // handleCsvUpload sincroniza csvLoadingRef junto con el estado
   const handleCsvUpload = async () => {
     if (!csvFile) return;
     setCsvLoading(true);
-    csvLoadingRef.current = true; // ← sincronizar ref
+    csvLoadingRef.current = true;
     const formData = new FormData();
     formData.append('file', csvFile);
     try {
@@ -371,7 +374,6 @@ export default function LimpiezaAnalisis() {
         { headers: {'Content-Type': 'multipart/form-data'} },
       );
       setCsvResult(res.data);
-      // Cerrar automáticamente tras 1.5 s si fue exitoso
       if (res.data.success) {
         setTimeout(() => {
           setShowCsvModal(false);
@@ -391,7 +393,7 @@ export default function LimpiezaAnalisis() {
       });
     } finally {
       setCsvLoading(false);
-      csvLoadingRef.current = false; // ← limpiar ref
+      csvLoadingRef.current = false;
     }
   };
 
@@ -694,11 +696,8 @@ export default function LimpiezaAnalisis() {
         </div>
       )}
 
-      {/* MODAL CSV ─────────────────────────────────────────────────────────── */}
+      {/* MODAL CSV */}
       {showCsvModal && (
-        // FIX: El overlay llama a closeCsvModal (que ya tiene el guard interno).
-        // No se cierra si hay carga activa, y pide confirmación si hay archivo
-        // seleccionado sin cargar.
         <div className="la-modal-overlay" onClick={closeCsvModal}>
           <div className="la-modal" onClick={e => e.stopPropagation()}>
             <div className="la-modal-head">

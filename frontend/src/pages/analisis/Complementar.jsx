@@ -49,7 +49,11 @@ export default function Complementar() {
   const [sortCol, setSortCol]           = useState(null);
   const [sortDir, setSortDir]           = useState('asc');
 
-  const csvInputRef = useRef();
+  // FIX: Ref síncrono para que closeCsvModal no dependa del closure stale de csvLoading.
+  // Sin esto, cuando el overlay llama a closeCsvModal, el valor de csvLoading
+  // capturado en el closure puede ser `false` aunque la carga esté en progreso.
+  const csvLoadingRef = useRef(false);
+  const csvInputRef   = useRef();
 
   const totalPages = Math.max(1, Math.ceil(data.total / limit));
 
@@ -61,11 +65,25 @@ export default function Complementar() {
     setDirty(true, 'Tienes un modal de carga CSV abierto.');
   }, [setDirty]);
 
+  // FIX: closeCsvModal usa csvLoadingRef (síncrono) y avisa si hay archivo
+  // sin cargar, igual que en LimpiezaAnalisis. Esto resuelve el bug donde
+  // el clic fuera del modal lo cerraba silenciosamente con cambios sin guardar.
   const closeCsvModal = useCallback(() => {
-    if (csvLoading) return;
+    // Bloquear si la carga está en progreso
+    if (csvLoadingRef.current) return;
+
+    // Advertir si el usuario seleccionó un archivo pero aún no lo cargó
+    if (csvFile && !csvResult) {
+      if (!window.confirm('Tienes un archivo seleccionado sin cargar. ¿Cerrar de todas formas?')) {
+        return;
+      }
+    }
+
     setShowCsvModal(false);
+    setCsvFile(null);
+    setCsvResult(null);
     setDirty(false);
-  }, [csvLoading, setDirty]);
+  }, [csvFile, csvResult, setDirty]);
 
   const openGenModal = useCallback(async () => {
     try {
@@ -198,25 +216,34 @@ export default function Complementar() {
     } finally { setGenerating(false); }
   }, [editedRows, proyectoSlug, showMsg, loadData, closeGenModal]);
 
+  // FIX: handleCsvComplementar sincroniza csvLoadingRef para que closeCsvModal
+  // pueda bloquearse correctamente sin depender del closure stale.
   const handleCsvComplementar = useCallback(async () => {
     if (!csvFile) return;
     setCsvLoading(true);
+    csvLoadingRef.current = true; // ← sync ref
     const formData = new FormData();
     formData.append('file', csvFile);
     try {
       const res = await api.post(`/analisis/${proyectoSlug}/cargar-complemento-csv`, formData,
         { headers: { 'Content-Type': 'multipart/form-data' } });
       setCsvResult(res.data);
-      setTimeout(() => {
-        closeCsvModal();
-        setCsvResult(null);
-        setCsvFile(null);
-      }, 1500);
+      if (res.data.success) {
+        setTimeout(() => {
+          setShowCsvModal(false);
+          setCsvResult(null);
+          setCsvFile(null);
+          setDirty(false);
+        }, 1500);
+      }
       loadData();
     } catch (err) {
       setCsvResult({ success: false, message: err.response?.data?.detail || 'Error.', procesados: 0, errores: [] });
-    } finally { setCsvLoading(false); }
-  }, [csvFile, proyectoSlug, loadData, closeCsvModal]);
+    } finally {
+      setCsvLoading(false);
+      csvLoadingRef.current = false; // ← clear ref
+    }
+  }, [csvFile, proyectoSlug, loadData, setDirty]);
 
   const columnasEditables = data.columnas_editables;
   const columnasPadronVisible = useMemo(() => columnasPadron, [columnasPadron]);
@@ -418,7 +445,7 @@ export default function Complementar() {
               </div>
             )}
             <div className="comp-modal-footer">
-              <button className="btn-save" onClick={closeCsvModal}>Cancelar</button>
+              <button className="btn-save" onClick={closeCsvModal} disabled={csvLoading}>Cancelar</button>
               <button className="btn-primary" onClick={handleCsvComplementar}
                 disabled={!csvFile || csvLoading}>
                 {csvLoading ? 'Procesando…' : 'Subir y complementar'}

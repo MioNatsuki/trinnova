@@ -276,7 +276,7 @@ export default function Complementar() {
               )}
             </form>
 
-            <button onClick={openCsvModal} className="btn-save">📂 CSV masivo</button>
+            <button onClick={openCsvModal} className="btn-save">CSV masivo</button>
 
             <button onClick={handleSave}
               disabled={saving || generating || pendingCount === 0}
@@ -287,7 +287,7 @@ export default function Complementar() {
             <button onClick={openGenModal}
               disabled={saving || generating}
               className="btn-primary">
-              {generating ? 'Generando…' : '⚡ Guardar y generar análisis'}
+              {generating ? 'Generando…' : 'Guardar y generar análisis'}
             </button>
           </div>
         </div>
@@ -399,7 +399,7 @@ export default function Complementar() {
         <div className="comp-overlay" onClick={closeGenModal}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
             <div className="comp-modal-header">
-              <h3>⚡ Generar análisis</h3>
+              <h3>Generar análisis</h3>
               <button className="comp-modal-x" onClick={closeGenModal}>✕</button>
             </div>
             {genInfo?.previo > 0 && (
@@ -419,7 +419,7 @@ export default function Complementar() {
         <div className="comp-overlay" onClick={closeCsvModal}>
           <div className="comp-modal" onClick={e => e.stopPropagation()}>
             <div className="comp-modal-header">
-              <h3>📂 Complementar masivamente</h3>
+              <h3>Complementar masivamente</h3>
               <button className="comp-modal-x" onClick={closeCsvModal}>✕</button>
             </div>
             <p className="comp-modal-desc">

@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Determinación de Crédito Fiscal</title>
+<style>
+/* ============ VARIABLES ============ */
+:root {
+  --negro: #000;
+  --blanco: #fff;
+  --gris-header: #cccdcf;
+  --gris-input: #dbdde3;
+  --gris-tag: #b1b2b5;
+  --gris-tag-texto: #b1b2b5;
+  --naranja: #ea6202;
+  --borde: 1px solid var(--negro);
+  --borde-naranja: 1px solid var(--naranja);
+  --borde-transp: 1px solid #b1b2b500;
+  --fuente: 'Arial', sans-serif;
+}
+
+/* ============ RESET ============ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  min-height: 100%;
+  min-width: 100%;
+}
+
+body {
+  font-family: var(--fuente);
+  background: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+
+/* ============ PÁGINA ============ */
+.pagina {
+  width: 816px;
+  height: 1286px;
+  margin: 0 auto 20px;
+  background: var(--blanco);
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+  position: relative;
+  overflow: hidden;
+  page-break-after: always;
+}
+
+.pagina:last-child { page-break-after: auto; }
+
+@media print {
+  body { background: var(--blanco); padding: 0; }
+  .pagina { box-shadow: none; margin: 0; }
+}
+
+/* ============ UTILIDADES ============ */
+.abs { position: absolute; }
+.flex { display: flex; align-items: flex-start; }
+.flex-col { display: inline-flex; flex-direction: column; vertical-align: top; margin-right: 1px; }
+.min-w { min-width: 100%; }
+.p-0 { font-size: 0; line-height: 1.2; margin: 0; }
+
+/* Texto base */
+.txt {
+  color: var(--negro);
+  font-family: var(--fuente);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.txt-negrita { font-weight: 700; }
+.txt-medium { font-weight: 500; }
+.txt-italic { font-style: italic; }
+.txt-subrayado { text-decoration: underline; }
+.txt-centro { text-align: center; }
+.txt-izq { text-align: left; }
+.txt-just { text-align: justify; }
+
+/* Rectángulos */
+.rect { position: absolute; background: var(--blanco); border: var(--borde); }
+.rect-gris { background: var(--gris-header); }
+.rect-tag { background: var(--gris-tag); border-radius: 8px; }
+.rect-transp { background: #b1b2b500; }
+
+/* SVG paths */
+.path { position: absolute; }
+.path svg { position: absolute; top: 0; left: 0; }
+
+/* ============ IMÁGENES ============ */
+.logo-left {
+  position: absolute;
+  left: 26px;
+  top: 19px;
+  width: 160px;
+  height: 80px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.logo-right {
+  position: absolute;
+  right: 16px;
+  top: 19px;
+  width: 210px;
+  height: 47px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* ============ ENCABEZADO ============ */
+.encabezado {
+  position: absolute;
+  left: 196px;
+  top: 25px;
+  width: 406px;
+  text-align: center;
+}
+
+.encabezado p { font-size: 0; line-height: 1.2; margin: 0; }
+.encabezado span { font-size: 14px; color: var(--negro); font-family: var(--fuente); }
+.encabezado .pequeno { font-size: 11px; }
+
+/* ============ BLOQUE DE TEXTO (usado para párrafos largos) ============ */
+.bloque-texto { position: absolute; }
+
+.bloque-texto .contenido {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 100%;
+  margin-right: 1px;
+  vertical-align: top;
+}
+
+.centrado {
+    text-align: center !important;
+    text-align-last: center !important;
+}
+
+.bloque-texto p {
+  font-size: 0;
+  line-height: 1.15;
+  margin: 0 0 3px 0;
+  text-align: justify;
+  text-align-last: left;
+}
+
+.bloque-texto .f11 { font-size: 10.5px; }
+.bloque-texto .f12 { font-size: 12px; }
+.bloque-texto .f14 { font-size: 10.5px; }
+.bloque-texto .f9 { font-size: 9.4px;}
+.bloque-texto .f10 { font-size: 10px; }
+.bloque-texto .f8 { font-size: 9px; }
+.bloque-texto .f7 { font-size: 7px; }
+.bloque-texto .f5 { font-size: 5px; }
+
+.bloque-texto span {
+  color: var(--negro);
+  font-family: var(--fuente);
+  font-weight: 400;
+}
+
+.bloque-separado p {
+  margin-bottom: 3px;
+}
+
+.linea-firma {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  margin: 0 0 4px 0;
+}
+
+.linea {
+  flex: 1;
+  border-bottom: 1px solid #000;
+  height: 0;
+}
+
+.linea-completa {
+  width: 100%;
+}
+
+.campo-subrayado {
+  display: inline-block;
+  min-width: 670px;
+  border-bottom: 1px solid #000;
+  width: 91%;
+}
+
+/* ============ CHECKBOX / CAMPOS FORM ============ */
+.campo-texto {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+}
+
+.campo-texto p { font-size: 0; line-height: 1.2; margin: 0; }
+.campo-texto span { font-size: 11px; color: var(--negro); font-family: var(--fuente); }
+
+.campo-rect {
+  position: absolute;
+  background: var(--gris-tag);
+  height: 15px;
+}
+
+/* ============ TABLA CHECKBOX ============ */
+.tabla-check {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabla-check p { font-size: 0; line-height: 1.2; margin: 0; }
+.tabla-check span { font-size: 11px; color: var(--negro); font-family: var(--fuente); font-weight: 400; }
+
+/* ============ PIÉ DE PÁGINA ============ */
+.pagina-num {
+  position: absolute;
+  width: 816px;
+
+  display: flex;
+  justify-content: center;
+}
+
+.pagina-num span {
+  font-size: 10px;
+  color: var(--negro);
+  font-family: var(--fuente);
+  white-space: pre;
+}
+
+/* ============ TEXTO VERTICAL ============ */
+.texto-vertical {
+  position: absolute;
+  left: 791px;
+  height: 11px;
+  transform: rotate(-90deg);
+  transform-origin: left top;
+  display: flex;
+  align-items: flex-start;
+}
+
+.texto-vertical span {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--negro);
+  font-family: var(--fuente);
+  white-space: pre;
+}
+
+/* ============ QR ============ */
+.qr-code {
+  position: absolute;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* ============ TEXTOS LARGOS ============ */
+.texto-justificado {
+  text-align: justify;
+}
+
+.texto-justificado span {
+  font-size: 11px;
+  color: var(--negro);
+  font-family: var(--fuente);
+}
+
+/* ============ TABLA PRINCIPAL ============ */
+.predial {
+    position: absolute;
+    left: 24px;
+    top: 130px;
+    width: 763px;
+    border-collapse: collapse;
+    font-family: Arial, sans-serif;
+    font-size: 8px;
+}
+
+.predial .titulo-predial {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600px;
+}
+
+.predial .texto-izquierda {
+    text-align: left;
+}
+
+.predial td {
+    border: 1.5px solid #000;
+    padding: 2px 5px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.predial .gris {
+    background: #e0e0e0;
+}
+
+.predial tr:nth-child(1) td,
+.predial tr:nth-child(2) td {
+    height: 25px;
+}
+.predial tr:nth-child(3) td {
+    height: 20px;
+}
+.predial tr:nth-child(4) td,
+.predial tr:nth-child(5) td,
+.predial tr:nth-child(6) td,
+.predial tr:nth-child(7) td {
+    height: 20px;
+}
+
+/* ============ TABLA ADEUDOS ============ */
+.adeudos {
+    position: absolute;
+    left: 24px;
+    top: 328px;
+
+    width: 763px;
+
+    border-collapse: collapse;
+
+    font-family: Calibri, sans-serif;
+    font-size: 9px;
+}
+
+.adeudos .titulo-adeudos {
+    text-align: center;
+    font-size: 8px;
+    font-weight: bold;
+}
+
+.adeudos .texto-izquierda {
+    text-align: left;
+}
+
+.adeudos td {
+    border: 1.5px solid #000;
+    padding: 2px 5px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.adeudos tr:nth-child(1) td,
+.adeudos tr:nth-child(2) td,
+.adeudos tr:nth-child(3) td,
+.adeudos tr:nth-child(4) td,
+.adeudos tr:nth-child(5) td,
+.adeudos tr:nth-child(6) td,
+.adeudos tr:nth-child(7) td {
+    height: 15px;
+}
+
+/* =========== TABLA DESGLOSE ============ */
+.desglose {
+    position: absolute;
+    left: 24px;
+    top: 465px;
+
+    width: 763px;
+
+    border-collapse: collapse;
+
+    font-family: Calibri, sans-serif;
+    font-size: 9px;
+}
+
+.desglose .titulo-desglose {
+    text-align: center;
+    font-size: 8px;
+    font-weight: bold;
+}
+
+.desglose .texto-izquierda {
+    text-align: left;
+}
+
+.desglose td {
+    border: 1.5px solid #000;
+    padding: 2px 5px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.desglose tr:nth-child(1) td,
+.desglose tr:nth-child(2) td,
+.desglose tr:nth-child(3) td,
+.desglose tr:nth-child(4) td,
+.desglose tr:nth-child(5) td,
+.desglose tr:nth-child(6) td,
+.desglose tr:nth-child(7) td {
+    height: 15px;
+}
+
+/* ============ DATOS LEVANTADOS - VISITA DEL CONTRIBUYENTE ============ */
+.dlc-titulo {
+  position: absolute;
+  left: 17px;
+  top: 725px;
+  width: 781px;
+  height: 26px;
+  border: 1.5px solid var(--naranja);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dlc-titulo span {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--negro);
+  font-family: var(--fuente);
+}
+
+.dlc-col {
+  position: absolute;
+  top: 775px;
+}
+
+.dlc-col-titulo {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: var(--fuente);
+  color: var(--negro);
+  margin-bottom: 4px;
+  display: block;
+}
+
+.dlc-fila {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 10.5px;
+  font-family: var(--fuente);
+  color: var(--negro);
+  white-space: nowrap;
+  line-height: 1.55;
+}
+
+.dlc-linea {
+  display: inline-block;
+  border-bottom: 1px solid var(--negro);
+  height: 11px;
+  vertical-align: bottom;
+}
+
+.dlc-cruces {
+  position: absolute;
+  top: 775px;
+  left: 580px;
+}
+
+.dlc-cruces-titulo {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: var(--fuente);
+  color: var(--negro);
+  margin-bottom: 10px;
+  display: block;
+}
+
+.dlc-cruces-fila {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--fuente);
+  color: var(--negro);
+  margin-bottom: 10px;
+}
+</style>
+</head>
+
+<body>
+<!-- ========================================== -->
+<!-- PÁGINA 1: FRENTE                           -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina1">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno"><b>Tesorería Municipal de Guadalajara</b></span></p>
+    <p><span class="pequeno"><b>Dirección de Política Fiscal y Mejora Hacendaria</b></span></p>
+    <p><span class="pequeno"><b>Jefatura de Ejecución Fiscal</b></span></p>
+    <p style="margin-top:18px;">
+        <span class="pequeno">
+            <b>Determinación de Crédito Fiscal por Adeudo del Impuesto Predial</b>
+        </span>
+    </p>
+  </div>
+
+  <!-- Código de barras -->
+  <div class="abs flex" style="left:695px;top:112px;height:11px;">
+    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{CODEBAR}}</span>
+  </div>
+
+  <!-- Rectángulos de datos del predio -->
+  <table class="predial">
+    <colgroup>
+        <col style="width:148px">
+        <col style="width:80px">
+        <col style="width:120px">
+        <col style="width:115px">
+        <col style="width:150px">
+        <col style="width:150px">
+    </colgroup>
+    <tr>
+        <td colspan="2"><b>SUPERFICIE DEL TERRENO</b><p></p>{{terreno}}</td>
+        <td colspan="2"><b>SUPERFICIE DE CONSTRUCCIÓN</b><p></p>{{construccion}}</td>
+        <td colspan="5" class="titulo-predial"><b>FOLIO:</b> {{folio_req}}-{{axo_req}}</td>
+    </tr>
+    <tr>
+        <td><b>RECAUDADORA</b></td>
+        <td><b>TIPO</b></td>
+        <td><b>CUENTA PREDIAL</b></td>
+        <td><b>CLAVE CUENTA</b></td>
+        <td><b>CLAVE CATASTRAL</b></td>
+        <td><b>FECHA EMISIÓN</b></td>
+        <td><b>ZONA</b></td>
+        <td><b>SUBZONA</b></td>
+        <td><b>MZ</b></td>
+    </tr>
+    <tr>
+        <td>{{recaudadora}}</td>
+        <td>{{tipo}}</td>
+        <td>{{cta}}</td>
+        <td>{{cve_cuenta}}</td>
+        <td>{{cve_catastral}}</td>
+        <td>{{fecha_emision}}</td>
+        <td>{{zona}}</td>
+        <td>{{subzona}}</td>
+        <td>{{manzana}}</td>
+    </tr>
+    <tr><td colspan="9" class="texto-izquierda"><b>NOMBRE(S) DEL(OS) CONTRIBUYENTE(S):</b> {{propietario}}</td></tr>
+    <tr><td colspan="9" class="texto-izquierda"><b>DOMICILIO DEL CONTRIBUYENTE:</b> Municipio: {{municipio}} Calle: {{domicilio}} Núm. Ext: {{no_ext}} Núm. Int: {{no_int}}</td></tr>
+    <tr><td colspan="9" class="texto-izquierda"><b>UBICACIÓN DEL PREDIO:</b> Col: {{ubic_colonia}} Calle: {{ubicacion}} Núm. Ext: {{ubic_no_ext}} Núm. Int: {{ubic_no_int}}</td></tr>
+    <tr><td colspan="9" class="texto-izquierda"><b>OBSERVACIONES:</b> {{calle_encontrado}} {{no_ext_3}} {{no_int_3}} {{colonia_3}} {{colonia}} {{calle}} {{numero}} {{obs}} {{OBS_CLAVE_ABREVIADO}}</td></tr>
+</table>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:300px;">
+    <span>{{pmo}}-{{acronimo}}-{{cartografia}}{{orden}}</span>
+  </div>
+
+  <!-- Texto USUARIO DEUDOR -->
+  <div class="bloque-texto" style="left:24px;top:287px;width:761px;">
+    <div class="contenido">
+      <p><span class="f9"> En virtud de que a la fecha no ha cubierto el pago del <b>IMPUESTO PREDIAL</b> del inmueble anteriormente mencionado del que es propietario, según lo establecen los artículos 92 y 93 de la Ley de Hacienda Municipal del Estado de Jalisco, en las fechas de pago que establece el artículo 103 de la mencionada ley, es decir, dentro de los primeros quince días del primer mes de cada bimestre, <b>ES PROCEDENTE DETERMINAR EL CRÉDITO FISCAL EN LOS TÉRMINOS SIGUIENTES:</b></span></p>
+    </div>
+  </div>
+
+  <!-- Tabla de adeudos - Headers -->
+   <table class="adeudos">
+    <colgroup>
+        <col style="width:381px">
+        <col style="width:380px">
+    </colgroup>
+    <tr>
+        <td colspan="2" class="gris titulo-adeudos"><b>TOTALES </b></td>
+    </tr>
+    <tr>
+        <td><b>IMPUESTO</b></td>
+        <td>{{impuesto}}</td>
+    </tr>
+    <tr>
+        <td><b>RECARGOS</b></td>
+        <td>{{recargo}}</td>
+    </tr>
+    <tr>
+        <td><b>ACTUALIZACIÓN</b></td>
+        <td>{{actualizacion}}</td>
+    </tr>
+    <tr>
+        <td><b>MULTA</b></td>
+        <td>{{total_multas}}</td>
+    </tr>
+    <tr>
+        <td><b>GASTOS DE NOTIFICACIÓN</b></td>
+        <td>{{total_gastos}}</td>
+    </tr>
+    <tr>
+        <td><b>TOTAL DE CRÉDITO FISCAL</b></td>
+        <td>{{saldo}}</td>
+    </tr>
+</table>
+
+  <!-- POR TODO LO ANTERIOR -->
+  <div class="bloque-texto bloque-separado" style="left:24px;top:448px;width:751px;">
+    <div class="contenido">
+      <p><span class="f9">En virtud de los periodos bimestrales omitidos, mismos que se detallan a continuación y sus accesorios legales, el <b>CRÉDITO FISCAL</b> se determinó de la siguiente manera:</span></p>
+    </div>
+  </div>
+
+  <!-- Tabla de adeudos - Detalles -->
+   <table class="desglose">
+    <tr>
+        <td colspan="6" class="gris titulo-adeudos"><b>DETALLES DEL ADEUDO DEL IMPUESTO PREDIAL</b></td>
+    </tr>
+    <tr>
+        <td><b>AÑO DE ADEUDO</b></td>
+        <td><b>BIMESTRE</b></td>
+        <td><b>VALOR FISCAL</b></td>
+        <td><b>TASA</b></td>
+        <td><b>IMPUESTO</b></td>
+        <td><b>RECARGO</b></td>
+    </tr>
+    <tr>
+        <td>{{ano_bimestres_1}}</td>
+        <td>{{bimestres_1}}</td>
+        <td>{{valor_fiscal_1}}</td>
+        <td>{{tasa_1}}</td>
+        <td>{{impuesto_1}}</td>
+        <td>{{recargo_1}}</td>
+    </tr>
+    <tr>
+        <td>{{ano_bimestres_2}}</td>
+        <td>{{bimestres_2}}</td>
+        <td>{{valor_fiscal_2}}</td>
+        <td>{{tasa_2}}</td>
+        <td>{{impuesto_2}}</td>
+        <td>{{recargo_2}}</td>
+    </tr>
+    <tr>
+        <td>{{ano_bimestres_3}}</td>
+        <td>{{bimestres_3}}</td>
+        <td>{{valor_fiscal_3}}</td>
+        <td>{{tasa_3}}</td>
+        <td>{{impuesto_3}}</td>
+        <td>{{recargo_3}}</td>
+    </tr>
+    <tr>
+        <td>{{ano_bimestres_4}}</td>
+        <td>{{bimestres_4}}</td>
+        <td>{{valor_fiscal_4}}</td>
+        <td>{{tasa_4}}</td>
+        <td>{{impuesto_4}}</td>
+        <td>{{recargo_4}}</td>
+    </tr>
+    <tr>
+        <td>{{ano_bimestres_5}}</td>
+        <td>{{bimestres_5}}</td>
+        <td>{{valor_fiscal_5}}</td>
+        <td>{{tasa_5}}</td>
+        <td>{{impuesto_5}}</td>
+        <td>{{recargo_5}}</td>
+    </tr>
+</table>
+
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">1</span><span> de </span><span class="txt-negrita">3</span>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 2: REVERSA                          -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina2">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno"><b>Tesorería Municipal de Guadalajara</b></span></p>
+    <p><span class="pequeno"><b>Dirección de Política Fiscal y Mejora Hacendaria</b></span></p>
+    <p><span class="pequeno"><b>Jefatura de Ejecución Fiscal</b></span></p>
+    <p style="margin-top:18px;">
+        <span class="pequeno">
+            <b>Determinación de Crédito Fiscal por Adeudo del Impuesto Predial</b>
+        </span>
+    </p>
+  </div>
+
+  <!-- Texto LOS GASTOS DE NOTIFICACIÓN -->
+  <div class="bloque-texto bloque-separado" style="left:20px;top:118px;width:766px;">
+    <div class="contenido">
+      <p><span class="f9 txt-negrita"><b>1.) Por lo que ve a los ejercicios fiscales hasta el ejercicio fiscal 2018:</b></span></p>
+      <span class="f9">El crédito fiscal referente al Impuesto Predial de los años antes establecidos, se determinó de la siguiente manera:</span>
+      <span class="f9" style="text-align: justify;line-height: 1.2;">Tomando como base EL VALOR FISCAL del Inmueble, que a su vez se determinó sumando el valor fiscal del terreno más el valor de la construcción; obtenidos las Tablas de Valores Unitarios de Suelo y Construcciones aprobados por el H. Congreso del Estado de Jalisco mediante decreto 19260 de fecha 8 de noviembre de 2001, publicado en el Periódico Oficial “El Estado de Jalisco” el 13 de diciembre del 2001, aplicable para los valores del año 2002; en el decreto 19682 de fecha 14 de noviembre de 2002, publicado en el Periódico Oficial “El Estado de Jalisco” el 17 de diciembre del 2002, aplicable para los valores del año 2003; en el decreto 20182 de fecha 28 de octubre de 2003, publicado en el Periódico Oficial “El Estado de Jalisco” el 20 de diciembre del 2003, aplicable para los valores del año 2004; en el decreto 20782 de fecha 16 de noviembre de 2004, publicado en el Periódico Oficial “El Estado de Jalisco” el 7 de diciembre del 2004, aplicable para los valores del año 2005; en el decreto 21062-LVII/05 de fecha 15 de noviembre de 2005, publicado en el Periódico Oficial “El Estado de Jalisco” el 01 de diciembre del 2005, aplicable para los valores del año 2006; en el decreto 21587-LVII/06 de fecha 08 de noviembre de 2006, publicado en el Periódico Oficial “El Estado de Jalisco” el 25 de noviembre del 2006, aplicable para los valores del año 2007; en el decreto 220251-LVIII/07 de fecha 14 de noviembre de 2007, publicado en el Periódico Oficial “El Estado de Jalisco” el 11 de diciembre del 2007, aplicable para los valores del año 2008; Decreto 22417 del 13 de noviembre del 2008, publicado en el Periódico Oficial “El Estado de Jalisco” el 04 de diciembre del 2008, aplicable para los valores de los años 2009 al 2012; en el Decreto 24194 del 14 de noviembre del 2012, publicado en el Periódico Oficial “El Estado de Jalisco” el 11 de diciembre del 2012, aplicable para los valores del año 2013 y 2014; además para el 2014, considerando un 4% como factor de valor inflacionario en base al párrafo último del artículo 21 de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el Ejercicio Fiscal 2014; Decreto 25062 del 13 de noviembre del 2014, publicado en el Periódico Oficial “El Estado de Jalisco” el 27 de noviembre del 2014, aplicable para los valores del año 2015, en el Decreto 25954 del 10 de noviembre del 2016, publicado en el Periódico Oficial “El Estado de Jalisco” el 26 de noviembre del 2016, aplicable para los valores del año 2017, en el decreto 26527 del 08 de Noviembre del 2017, y publicado en el Periódico Oficial “El Estado de Jalisco” el 21 de noviembre del 2017, aplicable para los valores del año 2018, como lo disponen los artículos 94 fracciones I, V, VI, XI y XII, 97, 98 y 106 de la Ley de Hacienda Municipal del Estado de Jalisco; lo anterior en virtud de que el contribuyente no cumplió con su obligación de determinar y declarar el valor fiscal de su inmueble, como lo establece la fracción II del artículo 94 antes citado.</span>
+      <span class="f9" style="text-align: justify;line-height: 1.2;">Multiplicado por LA TASA, que de acuerdo a lo dispuesto por el artículo 98 y 106 de la Ley de Hacienda Municipal del Estado de Jalisco, será la establecida en las Leyes de Ingresos del Municipio de Guadalajara, Jalisco vigente en cada ejercicio fiscal. En el caso concreto, artículo 25 fracción III, inciso f, de las Leyes de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2001, 2002, 2003, 2004, 2005 y 2006; artículo 25 fracción II, inciso b, de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el Ejercicios Fiscales 2007; artículo 22 fracción II, inciso b, de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el Ejercicios Fiscales 2008; artículo 21 fracción II, inciso b) para los Ejercicios Fiscales del 2009 al 2016; así como en el artículo 22 fracciones I y II, para los Ejercicios Fiscales 2017 y 2018.</span>
+      <span class="f9" style="text-align: justify;line-height: 1.2;">El resultado es el Impuesto Predial a pagar bimestralmente, de conformidad con el artículo 106 de la Ley de Hacienda Municipal del Estado de Jalisco por los ejercicios comprendidos hasta el Ejercicio Fiscal 2018.</span>
+      <p><span class="f9 txt-negrita"><b>2.) Por lo que ve a los ejercicios fiscales del año 2019 al presente:</b></span></p>
+      <span class="f9">El crédito fiscal referente al Impuesto Predial de los años antes establecidos, se determinó de la siguiente manera:</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">Tomando como base EL VALOR FISCAL del Inmueble, que a su vez se determinó sumando el valor fiscal del terreno más el valor de la construcción; obtenidos las Tablas de Valores Unitarios de Suelo y Construcciones aprobados por el H. Congreso del Estado de Jalisco mediante Decreto 26983 del 17 de octubre del 2018, publicado en el Periódico Oficial “El Estado de Jalisco” el 01 de noviembre del 2018 aplicable para los valores del año 2019, en el decreto 27435 del 23 de octubre del 2019, publicado en el Periódico Oficial “El Estado de Jalisco” el 05 de diciembre del 2019, aplicable para los valores del año 2020, en el decreto 28032 del 11 de noviembre del 2020, publicado en el Periódico Oficial “El Estado de Jalisco” el 08 de diciembre del 2020 aplicable para los valores del año 2021; en el decreto 28536/LXIII/21, publicado en el Periódico Oficial “El Estado de Jalisco” el 09 de diciembre del 2021, aplicable para los valores del año 2022; en el decreto 28906/LXIII/22, publicado en el Periódico Oficial “El Estado de Jalisco" el 17 de Diciembre del 2022 aplicable para los valores del año 2023, en el decreto 29300/LXIII/23, emitido por el Congreso del Estado de Jalisco el día 15 de noviembre de 2023, publicado en el periódico oficial de El Estado de Jalisco el día 7 de diciembre de 2023, aplicable para los valores del año 2024,  el decreto 29619/LXIII/24 publicado en el Periódico Oficial “El Estado de Jalisco”, el día 19 de noviembre de 2024, aplicable para los valores del Ejercicios Fiscales 2025, y el decreto 29909/LXIV/25, publicado en el Periodico Oficial “El Estado de Jalisco”, el día 13 de diciembre de 2025, como lo disponen los artículos 94 fracciones I, V, VI, XI y XII, 97, 98 y 106 de la Ley de Hacienda Municipal del Estado de Jalisco; lo anterior en virtud de que el contribuyente no cumplió con su obligación de determinar y declarar el valor fiscal de su inmueble, como lo establece la fracción II del artículo  94 antes citado.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">Al valor fiscal se le aplica la Tabla 1 del artículo 22 fracción I, de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2019, 2020, 2021, 2022, 2023, 2024, 2025 y la Tabla 1 del artículo 23 fracción I, de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicio Fiscal 2026, en los siguientes términos:</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;"><b>EL LÍMITE INFERIOR</b> se refiere al monto menor establecido en la Tabla 1 antes citada, correspondiente al rango en el que se ubique el VALOR FISCAL del inmueble materia del impuesto predial, lo anterior atendiendo al principio de progresividad del sistema tributario, a efecto de respetar la capacidad económica de los contribuyentes para aportar al gasto público.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">Se aplicará <b>LA TASA</b> relativa al VALOR FISCAL que de acuerdo al rango corresponda, conforme a lo dispuesto por el artículo 98 y 106 de la Ley de Hacienda Municipal del Estado de Jalisco, establecida en las Leyes de Ingresos del Municipio de Guadalajara, Jalisco vigente en cada Ejercicios Fiscales. En el caso concreto, en el artículo 22 fracción I, tabla 1, para los Ejercicios Fiscales 2019, 2020, 2021, 2022, 2023, 2024, 2025 y la Tabla 1 del artículo 23 fracción I, de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicio Fiscal 2026</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">La <b>CUOTA FIJA</b> se refiere a la cantidad establecida en la Tabla 1 del artículo 22 Fracción I, de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2019, 2020, 2021, 2022, 2023, 2024, 2025 y la Tabla 1 del artículo 23 fracción I, de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicio Fiscal 2026, que corresponde al rango del VALOR FISCAL del inmueble.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">Para el cálculo del Impuesto Predial se deberá restar al VALOR FISCAL del inmueble, el LÍMITE INFERIOR correspondiente al rango en que se ubique el mismo, el resultado deberá de multiplicarse por LA TASA relativa al rango aplicado y, al importe de esta operación se le sumará la CUOTA FIJA establecida para el rango utilizado de la Tabla 1 del artículo 22 Fracción I, de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2019, 2020, 2021, 2022, 2023, 2024, 2025 y la Tabla 1 del artículo 23 fracción I, de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicio Fiscal 2026.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">El resultado es el Impuesto Predial a pagar bimestralmente, de conformidad con el artículo 106 de la Ley de Hacienda Municipal del Estado de Jalisco por los ejercicios comprendidos del año 2019 al presente.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;"><b>3.) LOS RECARGOS</b> se generaron por no haber cumplido con la obligación fiscal de pagar el Impuesto Predial bimestralmente de manera oportuna, en los términos que establece el artículo 103 de la Ley de Hacienda Municipal del Estado de Jalisco, estos es, dentro de los primeros quince días del primer mes de cada bimestre, por lo que su conducta se ubica en el supuesto establecido por el artículo 52 de la Ley de Hacienda Municipal del Estado de Jalisco, que ordena que deberán cubrirse recargos, en concepto de indemnización al fisco municipal por falta de pago oportuno, de acuerdo a la tasa de recargos fijada en las leyes de ingresos municipales. Los recargos se causarán por cada mes o fracción de mes, que se computará a partir del día siguiente de la fecha en que se venza el plazo para el pago, hasta que éste se efectúe; lo anterior en concordancia con el artículo 73 fracción I, relacionado con el artículo 74 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2001, 2002, 2003, 2004; artículo 85 fracción I, relacionado con el artículo 86 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2005, 2006, 2007; artículo 83 fracción I, relacionado con el artículo 84 de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el Ejercicio Fiscal 2008; artículo 81 fracción I, relacionado con el artículo 82 de las Leyes de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2009 y 2010; artículo 82 fracción I, relacionado con el artículo 83 de las Leyes de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2011 y 2012; artículo 65 fracción I, relacionado con el artículo 66 de la Ley de Ingresos del Municipio de Guadalajara, Jalisco vigente en el Ejercicios Fiscales 2013; artículo 67 fracción I, relacionado con el artículo 68 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2014, 2015 y 2016; artículo 31 fracción I, relacionado con el artículo 32 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2017 y 2018, que disponen la tasa del 1% mensual de recargos para los años precisados; y en el artículo 31 fracción I, relacionado con el artículo 32 de la Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2019, 2020, 2021, 2022, 2023, 2024 y 2025, así como del artículo 32 fracción I, relacionado con el artículo 33 de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el Ejercicio Fiscal 2026, que establecen el porcentaje de recargos del 1.47% mensual.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;"><b>4.) ACTUALIZACIÓN.</b> Cuando no se cubran las contribuciones por concepto de impuestos, derechos, aprovechamientos y contribuciones especiales municipales, se actualizarán por el transcurso del tiempo y con motivo de los cambios de precios en el país, conforme a lo establecido en el Artículo 44 bis de la Ley de Hacienda Municipal del Estado de Jalisco, tomando el factor resultante de dividir el Índice Nacional de Precios al Consumidor (INPC) publicado en el Diario Oficial de la Federación por el Instituto Nacional de Estadística y Geografía, vigente en el momento en que suceda el pago, entre el citado índice vigente al momento en que se hace exigible el pago por parte del fisco municipal.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;"><b>5.) MULTA.</b> Por no cubrir el Impuesto Predial en la forma, fecha y términos que establece el artículo 103 de la Ley de Hacienda Municipal del Estado de Jalisco, estos es, dentro de los primeros quince días del primer mes de cada bimestre, se impone una multa del 30% sobre la contribución omitida; lo anterior con fundamento en lo dispuesto por el artículo 77 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2001, 2002, 2003, 2004; artículo 89 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2005, 2006 y 2007; artículo 87 fracción V numeral 1, de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicios Fiscales 2008; artículo 85 fracción V numeral 1, de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2009 y 2010; artículo 86 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2011 y 2012; artículo 69 fracción V numeral 1 de la Ley de Ingresos del Municipio de Guadalajara para el Ejercicios Fiscales 2013; artículo 71 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2014, 2015 y 2016; artículo 75 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara para los Ejercicios Fiscales 2017, 2018, 2019, 2020, 2021 y 2022; artículo 77 fracción V numeral 1 de las Leyes de Ingresos del Municipio de Guadalajara, Jalisco para los Ejercicios Fiscales 2023, 2024, 2025 y 2026. En todas se establece que el rango de la sanción será entre el 20% y el 50% de la contribución omitida. En el caso concreto se impuso la multa del 30%, atendiendo los términos para la individualización de las sanciones normados en la fracción I del artículo 197 de la Ley de Hacienda Municipal del Estado de Jalisco; haciendo saber al contribuyente, que en caso de volver a incurrir en la infracción cometida, se le podrá aplicar una multa mayor por ser reincidente, en los términos que dispone la fracción VII de la norma antes invocada.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;"><b>6.) LOS GASTOS DE NOTIFICACIÓN.</b> se generan conforme a lo dispuesto por el artículo 34 fracción I de la Ley de Ingresos del Municipio de Guadalajara, Jalisco para el ejercicio fiscal 2026, que establece que por las notificaciones de créditos fiscales para el cumplimiento de obligaciones fiscales no satisfechas dentro de los plazos legales, se cobrará a quien se notifique o incurra en el incumplimiento, un importe equivalente a seis veces el valor diario de la Unidad de Medida y Actualización, por cada notificación. El valor diario de la Unidad de Medida y Actualización determinada por el Instituto Nacional de Estadística y Geografía para el ejercicio fiscal 2026, es de $ 117.31 pesos mexicanos, de conformidad con el Decreto publicado en el Diario Oficial de la Federación el día 09 de enero de 2026. Por lo anterior, el costo de la notificación del presente requerimiento es igual a $703.86.</span>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">El adeudo, junto con los accesorios legales, que por este medio se notifican, deberán de cubrirse dentro de los 15 días hábiles siguientes a aquel en que surta efectos la notificación de la presente determinación de crédito fiscal por adeudo de impuesto predial, de conformidad a lo establecido en el artículo 43 fracción I de la Ley de Hacienda Municipal del Estado Jalisco, apercibido que de no hacerlo en el término concedido, se ordenará requerir el pago por los medios legales necesarios e iniciar en su contra el Procedimiento Administrativo de Ejecución, previsto en el Capítulo II, Sección PRIMERA del Título Primero, del Libro Quinto de la Ley de Hacienda Municipal del Estado de Jalisco. La presente determinación se realiza con fundamento en lo dispuesto por los artículos 33, 37 fracción III, 43, 44, 92, 93, 94, 98, 103, 106, 242 fracción I y 244 de la Ley de Hacienda Municipal del Estado de Jalisco.</span>
+    </div>
+  </div>
+
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">2 </span><span>de </span><span class="txt-negrita">3</span>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 3: ACTA DE NOTIFICACIÓN              -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina3">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno"><b>Tesorería Municipal de Guadalajara</b></span></p>
+    <p><span class="pequeno"><b>Dirección de Política Fiscal y Mejora Hacendaria</b></span></p>
+    <p><span class="pequeno"><b>Jefatura de Ejecución Fiscal</b></span></p>
+    <p style="margin-top:18px;">
+        <span class="pequeno">
+            <b>Determinación de Crédito Fiscal por Adeudo del Impuesto Predial</b>
+        </span>
+    </p>
+  </div>
+
+  <!-- Texto LOS GASTOS DE NOTIFICACIÓN -->
+  <div class="bloque-texto bloque-separado" style="left:20px;top:118px;width:766px;">
+    <div class="contenido">
+      <p><span class="f9 txt-negrita">Para la notificación del presente se designa mediante oficio <b>TES/564/2025</b> a los C. C. ERIKA LIZETH SUCILLA BARAJAS, JESSICA TORRES CABRERA, ALBERTO SERGIO SÁNCHEZ RODRIGUEZ, JUAN JOSE ORTIZ PADILLA, EDITH GUADALUPE BARRIOS PEREZ, FABIOLA YAZMIN GARCIA LOPEZ, FERNANDO DANIEL CARRILLO GONZALEZ, MAYRA JANETH MEDRANO VELASCO, JUANA JANETH BRISEÑO GARCIA, CELINA GUADALUPE TENA MEZA, ADRIANA MARICELA SANDOVAL MURILLO, AMELIA BERENICE PERALTA LOPEZ, ALSIRA SULEICA CONTRERAS CEJA, AIDA ELIZABETH ASCENCIO DELGADO, AIDE JOSEFINA SANTILLAN MEDINA, ALEXIS DAVID HERNANDEZ ACEVES, ANDREA VIRIDIANA PEGUERO MURILLO, ANTONIO CORDOVA GOMEZ, ARTURO DE JESUS MEJIA ALVAREZ, BACILIO ALBERTO HERNANDEZ BOBADILLA, CAROLINA GUADALUPE PRADO MUÑIZ, CYNTHIA CONCEPCION PONCE MARQUEZ, DAVID DE JESUS MARTINEZ URDIANO, DULCE MARIA DEL CARMEN, EDGAR ALEJANDRO LARA RITO, EDGAR DAMIAN LOPEZ GONZALEZ, ELBA CAROLINA CARRILLO ESTRADA, ENRIQUE CHRISTOPHER ZAMBRANO VALENZUELA, EVA CITLALLY TORRES MENDEZ, GUSTAVO FRANCISCO CASTILLO PEREZ, HERIBERTO PÍNTO PIÑON, HUGO BENITEZ MARTINEZ, JAVIER ALEJANDRO PADILLA BAÑALES, JESSICA ALEJANDRA PRADO AVALOS, JESUS ALEJANDRO RODRIGUEZ VELEZ, JOHANA ALEJANDRA FRAIRE LOPEZ, JOSE GERARDO HERNANDEZ TORRES, KAREN GUADALUPE SANTOYO GUZMAN, LEOBARDO JESUS DELGADO HERNANDEZ, LUIS RICARDO MEJIA ALVAREZ, MARCELA JANETTE MALDONADO RAMOS, MARIA JEOVANNY CERVANTES PUENTES, OSCAR OSVALDO MUÑOZ LANDEROS, SERGIO ARTURO OLVERA RUBIO, VALERIA ISABEL HERNANDEZ GONZALEZ, YANET MARISOL VENTURA DE LA ROSA, ALMA CECILIA MEJIA SANCHEZ, ARACELI PEÑA COVARRUBIAS, CATALINA TRUJILLO MERCADO, DANIELA XARENI PONCE MEDINA, ERNESTINA CORREA SANDOVAL, ERNESTO ALEJANDRO VAZQUEZ MONREAL, HECTOR SAUL MARTINEZ TACALO, JORDAN MICHAEL QUIROZ OGAZON, JOSE DOLORES ORTIZ CASTOR, JOSE LUIS VELAZQUEZ GUAJARDO, KARINA ALICIA PAZ TOVAR, MADELEIN RUIZ MORENO, MARIA DE JESUS ALVARADO VILLALVAZO, MARIA DE LOS ANGELES CASTILLO DE HARO, MARIA DE LOURDES LEAL DIAZ, MARIA MAGDALENA DEL REFUGIO LOPEZ FLORES, MAXIMINO SAN JUAN MARTINEZ, MAYRA NATHALY ORELLANA ORTIZ, MIGUEL ANGEL CASILLAS RAMIREZ, NANCY GUADALUPE CASTILLO GARCIA, PATRICIA AURORA RAMOS VELAZQUEZ, ROSA IDALIA PEREZ GARCIA, SANDRA CATALINA RUIZ SANCHEZ, SERGIO ALBA GOMEZ, EVERARDO MENDOZA AMAYA, JUAN JOSE GOMEZ LEON, MARISOL SOLORIO HERNANDEZ, ESTEFANIE LOPEZ RABELERO, STEVEN CESAR VAZQUEZ ORTIZ, MARIA DE LOURDES KARINA BALTAZAR URIBE, MIRIAM GUADALUPE JIMÉNEZ GARCIA, OSCAR RAEL GARCÍA GONZÁLEZ, ARTURO SANABRIA MARTÍNEZ, como autorizados para que en conjunto o separadamente, practiquen la presente diligencia; atentos a lo que disponen los artículos 33 fracciones I, incisos a) b) y c), II incisos a) y b) y III, 242 y 244, de la Ley de Hacienda Municipal del Estado de Jalisco; el personal adscrito a esta Tesorería del Municipio de Guadalajara, Jalisco, deberá identificarse al momento de la diligencia, con los documentos en los que aparece su fotografía y firma.</span></p><p></p>
+      <p><span class="f9">Para la notificación de la presente resolución, se habilitan los días y horas inhábiles, de conformidad a lo dispuesto en el artículo 250 último párrafo, en relación con el artículo 20 fracción III, de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p><p></p>
+      <p><span class="f9">En caso de inconformidad, el contribuyente podrá impugnar el acto, interponiendo el Recurso administrativo de Reconsideración a que se refiere el Título Segundo, Capítulo Único del Libro Quinto de la Ley de Hacienda Municipal del Estado de Jalisco, dentro de los quince días siguientes a aquél en que surta efectos su notificación, de conformidad con lo dispuesto por el artículo 320 fracción I de la Ley de Hacienda Municipal del Estado de Jalisco, o demandar su nulidad dentro del término de los 30 días hábiles siguientes a aquel en que surta efectos su notificación ante el Tribunal de Justicia Administrativa del Estado de Jalisco, en los términos de lo dispuesto por el artículo 31 tercer párrafo de la Ley de Justicia Administrativa del Estado de Jalisco.</span></p><p></p>
+      <p><span class="f9"><b>NOTIFÍQUESE Y CÚMPLASE;</b></span></p>
+      <span class="f9" style="text-align: justify; line-height: 1.2;">Así lo proveyó y firma la Licenciada Irlanda Loerythe Baumbach Valencia, Tesorera Municipal de Guadalajara, en ejercicio de las atribuciones conferidas en los artículos 115 fracción IV, de la Constitución Política de los Estados Unidos Mexicanos, artículo 88 de la Constitución Política del Estado de Jalisco, 67 fracciones I y IV de la Ley del Gobierno y la Administración Pública Municipal del Estado de Jalisco, 23 fracciones I, III incisos a), b) y c), IV y X primer párrafo, de la Ley de Hacienda Municipal del Estado de Jalisco en relación el artículo 214 fracciones VII, VIII, IX, XI,  XLVI y LII, del Código de Gobierno del Municipio de Guadalajara.</span>
+    </div>
+  </div>
+
+  <!-- Texto sobre firma -->
+  <div class="abs flex-col" style="left:250px;top:520px;width:315px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>Atentamente</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>Guadalajara, Jalisco</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>“2026, año para cuidar Guadalajara entre todas y todos”</b></span></p>
+  </div>
+
+  <!-- Firma -->
+  <div style="position:absolute;left:328px;top:530px;width:160px;height:133px;background:url('./irlanda.png') no-repeat center/contain;"></div>
+
+  <!-- Línea de firma -->
+  <div class="path" style="left:283px;top:610px;width:238px;height:1px;border-top:2px solid var(--negro);"></div>
+
+  <!-- Texto bajo firma -->
+  <div class="abs flex-col" style="left:250px;top:620px;width:315px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>L.C.P. Irlanda Loerythe Baumbach Valencia</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>Tesorera Municipal de Guadalajara</b></span></p>
+  </div>
+
+  <!-- QR -->
+  <div class="qr-code" style="left:618px;top:1020px;width:160px;height:240px;background-image:url('./qrgdl.png');"></div>
+
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">3 </span><span>de </span><span class="txt-negrita">3</span>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 4: DETERMINACIÓN DE CRÉDITO         -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina4">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno"><b>Acta Circunstanciada de la Notificación</b></span></p>
+    <p><span class="pequeno"><b>la Determinación de Crédito Fiscal</b></span></p>
+    <p><span class="pequeno"><b>por adeudo de Impuesto Predial</b></span></p>
+  </div>
+
+  <!-- CLAVE APA -->
+  <div class="abs flex"
+     style="left:550px; top:83px; height:30px; display:flex; flex-direction:column; gap:2px;">
+  <span class="txt" style="font-size:11px; white-space:nowrap;">
+    <b>Cuenta Predial: <u>_______________{{cuenta}}</u></b>
+  </span>
+  <span class="txt" style="font-size:11px; white-space:nowrap;">
+    <b>Número de Folio: <u>__{{folio-req}}-{{axo-req}}</u></b>
+  </span>
+</div>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:300px;">
+    <span>{{pmo}}-{{acronimo}}-{{cartografia}}{{orden}}</span>
+  </div>
+
+  <!-- Texto EN... -->
+  <div class="bloque-texto" style="left:16px;top:122px;width:760px;">
+    <div class="contenido" style="text-align:justify;">
+      <p><span class="f11" style="line-height: 1.5;">En Guadalajara, Jalisco, siendo las _________ horas del día __________ del mes de ___________________ del año 2026, el(la) suscrito(a) Notificador(a) y Ejecutor(a) Fiscal de nombre ____________________________________________________________________________ en cumplimiento a la resolución cuyo folio se describe en la parte superior derecha del presente y con fundamento en los artículos 33, 242 y 244 de la Ley de Hacienda Municipal del Estado de Jalisco, me constituyo en el domicilio del(la) contribuyente <u>{{propietario}}</u> ubicado en <u>{{ubicación}}</u> número exterior <u>{{ubic_no_ext}}</u>, número interior <u>{{ubic_no_int}}</u>, Colonia <u>{{ubic_colonia}}</u> de esta ciudad, con el objeto de llevar a cabo la notificación de la Resolución Determinante del Crédito Fiscal por adeudo del Impuesto Predial, identificada con el número de folio precisado al rubro en la parte superior derecha de la presente acta y, cerciorado que es el domicilio correcto del(la) contribuyente citado(a), por haber constatado de la fachada el número de la finca y la nomenclatura de la calle o vía que corresponde al domicilio del(la) contribuyente, haciendo constar que para la notificación de cita _________________ precedió citatorio, por ____________ haberse encontrado al(la) contribuyente; en este momento sale del domicilio una persona de nombre _____________________________________________________________________ <p></p><p></p><p></p><p class="linea-firma"><span class="linea linea-completa"></span></p></span></p><span class="f11" style="line-height: 1.5;">
+      , ante quien me identifico con constancia de acreditación expedida por la Tesorera Municipal de Guadalajara, con vigencia del
+      <u>03</u> de <u>MARZO</u> del año <u>2025</u> al <u>30</u> de <u>SEPTIEMBRE</u> del año <u>2027</u>, a quien informo el objeto de la presente diligencia y le requiero expresamente la presencia del(la) contribuyente y/o su representante legal, preguntando si éste se encuentra presente, quien contesta de manera expresa, que ___________ se encuentra presente, por lo tanto __________ le es posible atender esta diligencia, en virtud de que _________________________________________________________________________________________</span><span class="f11" style="line-height: 1.5;">____________________________________________________________________________________, por esta razón se procede a llevar a cabo la notificación con quien me atiende, quien tiene relación de ________________________________________________ del(la) contribuyente y se identifica con ______________________________________________, número _________________________________________________________ en la que aparece su fotografía y firma, siendo su media filiación: ____________________________________________________________________________________________, por lo que procedo ante él (ella) a notificar el documento señalado con anterioridad, entregando el original del mismo a la persona que atiende la diligencia, misma que se da por terminada, firmando al calce las personas que en ella intervinieron y quisieron hacerlo, sin que su negativa a firmar invalide su contenido y alcance legal.</span>
+    </div>
+  </div>
+
+  <!-- Firmas -->
+  <div class="abs flex-col" style="left:35px;top:500px;width:375px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">NOMBRE Y FIRMA del Notificador - Ejecutor Fiscal</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Tesorería Municipal de Guadalajara, Jalisco</span></p>
+  </div>
+  <div class="abs flex-col" style="left:375px;top:500px;width:426px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">_________________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Nombre y firma del contribuyente, del sujeto obligado</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">o persona que atiende la diligencia. Con apego al artículo 244</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p>
+  </div>
+
+  <!-- Testigos -->
+  <div class="abs flex-col" style="left:75px;top:570px;width:300px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Testigo de Asistencia (en caso de haberlo)</span></p>
+  </div>
+  <div class="abs flex-col" style="left:425px;top:570px;width:300px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Testigo de Asistencia (en caso de haberlo)</span></p>
+  </div>
+
+  <!-- Fe de erratas -->
+  <div class="bloque-texto" style="left:15px;top:650px;width:811px;">
+    <div class="contenido">
+      <p><span class="f11"><b>EL SUSCRITO NOTIFICADOR Y EJECUTOR FISCAL HAGO CONSTAR LA SIGUIENTE FE DE ERRATAS:</b></span></p>
+      <p><span class="f11"><b>1.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p><p></p>
+      <p><span class="f11"><b>2.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p>
+    </div>
+  </div>
+
+   <!-- ============ DATOS LEVANTADOS CORRESPONDIENTES A LA VISITA DEL CONTRIBUYENTE ============ -->
+  <div class="dlc-titulo">
+    <span>DATOS LEVANTADOS CORRESPONDIENTES A LA VISITA DEL CONTRIBUYENTE</span>
+  </div>
+
+  <!-- I- DATOS DE LA FINCA -->
+  <div class="dlc-col" style="left:19px;width:200px;">
+    <span class="dlc-col-titulo">I- DATOS DE LA FINCA:</span>
+    <div class="dlc-fila"><b>□ Plantas</b> <span class="dlc-linea" style="width:55px;"></span></div>
+    <div class="dlc-fila"><b>□ Puertas</b> <span class="dlc-linea" style="width:55px;"></span></div>
+    <div class="dlc-fila"><b>□ Color:</b> <span class="dlc-linea" style="width:61px;"></span></div>
+    <div class="dlc-fila"><b>□ Medidor CFE:</b> <span class="dlc-linea" style="width:26px;"></span></div>
+    <div class="dlc-fila"><span class="dlc-linea" style="width:110px;"></span></div>
+  </div>
+
+  <div class="dlc-col" style="left:165px;width:140px;">
+    <span class="dlc-col-titulo" style="visibility:hidden;">.</span>
+    <div class="dlc-fila"><b>□ Habitada</b></div>
+    <div class="dlc-fila"><b>□ Deshabitada</b></div>
+    <div class="dlc-fila"><b>□ Abandonada</b></div>
+    <div class="dlc-fila"><b>□ Lote baldío</b></div>
+  </div>
+
+  <div class="dlc-col" style="left:280px;width:150px;">
+    <span class="dlc-col-titulo" style="visibility:hidden;">.</span>
+    <div class="dlc-fila"><b>□ Habitacional</b></div>
+    <div class="dlc-fila"><b>□ Comercial</b></div>
+    <div class="dlc-fila"><b>□ Nombre: </b><span class="dlc-linea" style="width:30px;"></span></div>
+    <div class="dlc-fila"><span class="dlc-linea" style="width:90px;"></span></div>
+  </div>
+
+  <div class="dlc-col" style="left:400px;width:140px;">
+    <span class="dlc-col-titulo" style="visibility:hidden;">.</span>
+    <div class="dlc-fila"><b>□ Restringido</b></div>
+    <div class="dlc-fila"><b>□ Libre</b></div>
+    <div class="dlc-fila"><b>□ Dom. Predio</b></div>
+    <div class="dlc-fila"><b>□ Dom. Fiscal</b></div>
+  </div>
+
+  <!-- III- CRUCES DE CALLE -->
+  <div class="dlc-cruces">
+    <span class="dlc-cruces-titulo">III- CRUCES DE CALLE</span>
+    <div class="dlc-cruces-fila">Entre: <span class="dlc-linea" style="width:130px;"></span></div>
+    <div class="dlc-cruces-fila" style="margin-left:42px;"><span class="dlc-linea" style="width:130px;"></span></div>
+    <div class="dlc-cruces-fila">&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbspY: <span class="dlc-linea" style="width:130px;"></span></div>
+    <div class="dlc-cruces-fila" style="margin-left:18px;">&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp<span class="dlc-linea" style="width:130px;"></span></div>
+  </div>
+
+  <!-- II- MEDIA FILIACIÓN -->
+  <div class="abs" style="left:19px;top:880px;">
+    <span class="dlc-col-titulo">II- MEDIA FILIACIÓN</span>
+  </div>
+
+  <div class="dlc-fila" style="position:absolute;left:60px;top:900px;"><b>
+    Genero: □ Hombre &nbsp;&nbsp;□ Mujer
+    &nbsp;&nbsp;&nbsp;Tez color: □ Blanca &nbsp;&nbsp;□ Morena &nbsp;&nbsp;□ Negra</b>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:60px;top:920px;"><b>
+    Complexión: □ Delgada &nbsp;&nbsp;□ Media &nbsp;&nbsp;□ Robusta &nbsp;&nbsp;□ Rollizo</b>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:60px;top:940px;"><b>
+    Color de Ojos: □ Negros &nbsp;&nbsp;□ Cafés &nbsp;&nbsp;□ Verdes &nbsp;&nbsp;□ Azules &nbsp;&nbsp;□ Otro</b>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:60px;top:960px;"><b>
+    Cabello: □ SI &nbsp;&nbsp;&nbsp;&nbsp;□ NO</b>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:60px;top:980px;"><b>
+    Color de Cabello: □ Negro &nbsp;&nbsp;□ Castaño &nbsp;&nbsp;□ Rubio &nbsp;&nbsp;□ Pelirrojo</b>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:60px;top:1000px;"><b>
+    Bigote: □ SI &nbsp;&nbsp;□ NO &nbsp;&nbsp;&nbsp;□ Otro: </b><span class="dlc-linea" style="width:140px;"></span>
+  </div>
+
+  <div class="dlc-fila" style="position:absolute;left:60px;top:1020px;"><b>
+    Edad (aproximada):</b> <span class="dlc-linea" style="width:130px;"></span>
+  </div>
+  <div class="dlc-fila" style="position:absolute;left:330px;top:1020px;"><b>
+    Estatura(aproximada):</b> <span class="dlc-linea" style="width:110px;"></span>
+  </div>
+
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 5: CITATORIO                        -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina5">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px; text-align: center;">
+    <h3 style="color: #808080; margin: 0;">
+      CITATORIO
+    </h3>
+  </div>
+
+  <!-- CLAVE APA -->
+  <div class="abs flex" style="left:660px;top:85px;">
+    <span class="txt" style="font-size:9px;display:block;">
+        <b>FOLIO/CUENTA:</b>
+    </span>
+  </div>
+
+  <div class="abs flex" style="left:630px;top:105px;">
+    <span class="txt" style="font-size:12px;display:block;">
+        <b><u>{{folio-req}}-{{axo-req}}</u></b>
+    </span>
+  </div>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:300px;">
+    <span>{{pmo}}-{{acronimo}}-{{cartografia}}{{orden}}</span>
+  </div>
+
+  <!-- Texto EN... -->
+  <div class="bloque-texto" style="left:24px;top:145px;width:750px; text-align: justify; line-height: 1.5;">
+    <div class="contenido">
+      <p><span class="f8"><b>SUJETO OBLIGADO:</b></span></p>
+      <p style="margin-bottom:45px;"><span class="f11"><span class="campo-subrayado">{{propietario}}</span><span class="f11"></span></p>
+      <span class="f11">Me constituí en <u>Col: {{ubic_colonia}} Calle: {{ubicacion}} Núm Ext: {{ubic_no_ext}} Núm. Int: {{ubic_no_int}}</u> en el Municipio de Guadalajara, Jalisco, siendo las ___________ horas con __________ minutos del día ______________ del mes de _____________________________ del año 2026, legalmente designado mediante oficio <b>TES/564/2025</b> como Notificador adscrito a la Tesorería Municipal en mención, de nombre _________________________________________________________________________________________________________________, hago constar, que:</span>
+      <span class="f11"><b>I)</b> Para efectos del cumplimiento del pago por el adeudo del impuesto predial derivado de un crédito fiscal, se ordena notificar a quien resulte el sujeto obligado al pago del mismo, actuando con apego a las disposiciones de la materia y relativas a la identificación del domicilio del notificado previstas en los artículos 29, 30, 31, 33, 110, 242 y 244 de la Ley de Hacienda Municipal del Estado de Jalisco;</span>
+      <span class="f11"><b>II)</b> Una vez habiéndome constituido en el domicilio señalado en la parte superior de este documento y cerciorándome de que en dicho domicilio debe entablarse la diligencia de notificación, por tratarse del domicilio _______________________________________________________________________, solicité ser atendido por persona mayor de edad y con capacidad legal para atender esta visita, haciendo constar que me recibió y atendió la persona que dijo llamarse ___________________________________________________________________________________________, quien manifestó tener con relación al predio o el contribuyente la calidad de ________________________________________________________________________.</span>
+      <span class="f11"><b>III)</b> Me identifiqué ante esta persona, exhibiendo mi credencial vigente, misma que contiene mi nombre, fotografía, cargo y firma.</span>
+      <span class="f11"><b>IV)</b> Acto seguido, la persona que atiende el presente acto se identificó ante mí exhibiendo _________________________________________________________, con folio o número ______________________________________________________, misma que presumo su validez oficial, por ser expedida por una autoridad pública y coincidir los datos y fotografía con el nombre y rasgos fisonómicos de quien me atiende.</span>
+      <span class="f11"><b>V)</b> Se hace del conocimiento a quien atiende que el presente acto que mi enconmienda es de carácter personal, por lo que requerí la presencia del contribuyente o el representante legal del mismo y al constatar que este no se encuentra presente en el domicilio en que se actúa dejo el presente CITATORIO, indicando el día __________ del mes de ______________________________ del año 2026, a las ________________ horas con ______________ minutos, para que el sujeto obligado buscado espere al suscrito notificador y ejecutor fiscal, a efecto de desarrollar la diligencia de notificación que se me encomienda, apercibidos de que en el caso de no encontrarse presentes, se ejecutará a pesar de su ausencia la orden de notificación con quien se encuentre en el domicilio, el vecino más próximo al lugar, o bien se dejará la notificación en un lugar visible del inmueble mediante instructivo, surtiendo en cualquiera de estos casos los efectos jurídicos correspondientes de la notificación, conforme a los artículos 242 fracción I y 244 de la Ley de Hacienda Municipal del Estado de Jalisco.</span>
+      <span class="f11">No existiendo más circunstancias que detallar en el presente Citatorio, se da por terminado, siendo las _______________ horas con __________________ minutos del día en que se actúa para que surta sus efectos legales correspondientes. Leen y firman el Citatorio quienes pudieron y quisieron hacerlo, sin que su negativa sea causal de invalidez del mismo y se deja una copia en poder de la persona que me atiende.</span>
+
+    </div>
+  </div>
+
+  <!-- Firmas -->
+  <div class="abs flex-col" style="left:35px;top:780px;width:375px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">NOMBRE Y FIRMA del Notificador - Ejecutor Fiscal</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Tesorería Municipal de Guadalajara, Jalisco</span></p>
+  </div>
+  <div class="abs flex-col" style="left:375px;top:780px;width:426px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">_________________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Nombre y firma de la persona que atiende la diligencia</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Con apego al artículo 86 de la Ley del</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Procedimiento Administrativo del Estado de Jalisco</span></p>
+  </div>
+
+  <!-- Fe de erratas -->
+  <div class="bloque-texto" style="left:15px;top:908px;width:811px;">
+    <div class="contenido">
+      <p style="margin-bottom:40px;"><span class="f11"><b>EL SUSCRITO NOTIFICADOR Y EJECUTOR FISCAL HAGO CONSTAR LA SIGUIENTE FE DE ERRATAS:</b></span></p>
+      <p style="margin-bottom:15px;"><span class="f11"><b>1.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p>
+      <p><span class="f11"><b>2.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p>
+    </div>
+  </div>
+
+  
+
+</div>
+</body>
+</html>

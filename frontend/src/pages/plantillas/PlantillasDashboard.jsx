@@ -82,7 +82,7 @@ export default function PlantillasDashboard() {
   const openEdit = (p) => {
     setProyectoSlug(p.proyecto_slug);
     navigate(`/plantillas/crear?edit=${p.id}`);
-};
+  };
 
   const handleEditSave = async () => {
     setEditSaving(true);

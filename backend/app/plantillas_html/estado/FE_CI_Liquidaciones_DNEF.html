@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<meta charset="UTF-8">
+<head>
+  <style>
+    /* FUENTE ARIAL */
+    * {
+        font-family: 'Arial', Arial, sans-serif !important;
+     }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100vw;
+      min-height: 100vh;
+    }
+
+    /* CONTENEDOR PRINCIPAL CON FONDO */
+    .liquidacio-0513028c18de {
+      position: relative;
+      width: 816px;
+      height: 1286px;
+      overflow: hidden;
+    }
+
+    /* Fondo con opacidad */
+    .liquidacio-0513028c18de::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: url('./fondo.png') no-repeat top center / 100% 100%;
+      opacity: 0.30;
+      z-index: -1;
+    }
+
+    /* TABLA CON BORDES VISIBLES */
+    .board-0548ed92f5b1 {
+      position: absolute;
+      left: 55px;
+      top: 190px;
+      width: 706px;
+      height: 205px;
+      border: 1px solid #000000;
+      display: grid;
+      grid-template-rows: 80px 25px 25px 25px 50px;
+      grid-template-columns: 110px 596px;
+    }
+
+    .board-0548ed92f5b1 > div {
+      border: 1px solid #000000;
+      padding: 4px 8px;
+      display: flex;
+      align-items: center;
+    }
+
+    .board-0548ed92f5b1 .text-left {
+      justify-content: flex-end;
+      text-align: right;
+      font-weight: 700;
+      font-size: 10px;
+    }
+
+    .board-0548ed92f5b1 .text-right {
+      justify-content: flex-start;
+      text-align: left;
+      font-weight: 400;
+      font-size: 10px;
+    }
+
+    /* IMAGEN DE FIRMA */
+    .image-057476dfbc06 {
+      position: absolute;
+      left: 270px;
+      top: 785px;
+      width: 244px;
+      height: 257px;
+      background: url('./firma.png') no-repeat center center / contain;
+      z-index: 2;
+    }
+
+    /* CÓDIGO DE BARRAS */
+    .c-o-d-e-b-a-r-05214b39831f {
+      position: absolute;
+      left: 700px;
+      top: 75px;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: pre;
+    }
+
+    /* PO ORDEN ACRONIMO INICIAL */
+    .p-o-o-0521e3b8dce2 {
+      position: absolute;
+      left: 780px;
+      top: 250px;
+      font-size: 7px;
+      font-weight: 700;
+      color: #fd0000;
+      white-space: pre;
+      transform: rotate(270deg);
+      transform-origin: top left;
+      width: 9px;
+    }
+
+    /* DATOS SUPERIORES */
+    .datos-superiores {
+      position: absolute;
+      left: 450px;
+      top: 150px;
+      width: 310px;
+      text-align: right;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.0;
+    }
+
+    .datos-superiores .documento-numero {
+      color: #ff0000;
+    }
+
+    /* TEXTO INSTITUCIÓN */
+    .d-i-r-e-c-c-i-n-051fda888056 {
+      position: absolute;
+      top: 110px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: max-content;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.0;
+    }
+
+    /* TEXTO COMPLETO */
+    .texto-completo {
+      position: absolute;
+      left: 65px;
+      top: 410px;
+      width: 692px;
+      font-size: 12px;
+      text-align: justify;
+      line-height: 1.15;
+    }
+
+    /* ATENTAMENTE */
+    .a-t-e-n-t-a-m-e-n-t-05741fa8eafc {
+      position: absolute;
+      left: 357px;
+      top: 850px;
+      text-align: center;
+      font-size: 10px;
+    }
+
+    /* FIRMA NOMBRE Y CARGO */
+    .f-i-r-m-a-05766d31452c {
+      position: absolute;
+      left: 361px;
+      top: 960px;
+      text-align: center;
+    }
+
+    .f-i-r-m-a-05766d31452c .firma-nombre {
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .f-i-r-m-a-05766d31452c .firma-cargo {
+      font-size: 9px;
+      font-weight: 400;
+    }
+
+    /* LÍNEA */
+    .path-05751db39541 {
+      position: absolute;
+      left: 180px;
+      top: 950px;
+      width: 450px;
+      height: 1px;
+      background: #000000;
+    }
+
+    /* PÁGINA */
+    .pgina-1-d-057920bf7146 {
+      position: absolute;
+      left: 672px;
+      top: 1239px;
+      text-align: right;
+      font-size: 12px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+<div class="frame liquidacio-0513028c18de">
+  
+  <!-- CÓDIGO DE BARRAS -->
+  <div class="c-o-d-e-b-a-r-05214b39831f">{{CODEBAR}}</div>
+
+  <!-- PO ORDEN ACRONIMO INICIAL -->
+  <div class="p-o-o-0521e3b8dce2">{{PO}} {{ORDEN}} {{ACRONIMO}} {{INICIAL}}</div>
+
+  <!-- TEXTO INSTITUCIÓN -->
+  <div class="d-i-r-e-c-c-i-n-051fda888056">
+    DIRECCIÓN GENERAL DE ORIENTACIÓN Y SERVICIOS<br>
+    DIRECCIÓN DE NOTIFICACIÓN Y EJECUCIÓN FISCAL
+  </div>
+
+  <!-- DATOS SUPERIORES -->
+  <div class="datos-superiores">
+    Guadalajara, Jalisco a {{fecha_de_emisión}}<br>
+    <span class="documento-numero">Número de Documento: {{NO_DOCUMENTO}}</span><br>
+    ASUNTO: INVITACIÓN DE PAGO
+  </div>
+
+  <!-- TABLA -->
+  <div class="board-0548ed92f5b1">
+    <div class="text-left">RESOLUCIÓN<br>DETERMINANTE</div>
+    <div class="text-right" style="display: block; padding: 15px 8px;">
+      <strong>CRÉDITO:</strong> {{CREDITO}}<br>
+      <strong>FECHA DEL DOCUMENTO DETERMINANTE:</strong> {{FECHA_DOCUMENTO_DETERMINANTE}}<br>
+      <strong>FECHA DE NOTIFICACIÓN:</strong> {{FECHA_NOTIFICACION}}<br>
+      <strong>AUTORIDAD IMPOSITORA:</strong> {{AUTORIDAD_IMPOSITORA}}
+    </div>
+
+    <div class="text-left">NOMBRE</div>
+    <div class="text-right">{{NOMBRE_RAZON_SOCIAL}}</div>
+
+    <div class="text-left">DOMICILIO</div>
+    <div class="text-right">{{CALLE_NUMERO}}, COLONIA: {{COLONIA}}, C.P. {{CODIGO_POSTAL}}, MUNICIPIO: {{MUNICIPIO}}</div>
+
+    <div class="text-left">RFC</div>
+    <div class="text-right">{{RFC}}</div>
+
+    <div class="text-left">IMPORTE<br>HISTÓRICO</div>
+    <div class="text-right">{{IMPORTE_HISTORICO_DETERMINADO}}</div>
+  </div>
+
+  <!-- IMAGEN DE FIRMA -->
+  <div class="image-057476dfbc06"></div>
+
+  <!-- TODO EL TEXTO EN UN SOLO DIV -->
+  <div class="texto-completo">
+    La Dirección General de Orientación y Servicios a través de la Dirección de Notificación y Ejecución Fiscal, dependientes del Servicio Estatal Tributario del Estado de Jalisco SET, órgano desconcentrado de la Secretaría de Hacienda Pública del Estado de Jalisco, con carácter de autoridad fiscal de conformidad con el artículo 22, fracción XXI, del Código Fiscal del Estado de Jalisco y actuando como autoridad fiscal federal en virtud a lo establecido en las cláusulas Cuartas y Octava fracción I, inciso d) del Convenio de Colaboración Administrativa en Materia Fiscal Federal celebrado el 29 de mayo de 2015, entre el Gobierno del Estado de Jalisco y la Secretaría de Hacienda y Crédito Público, publicado en el Diario Oficial de la Federación el día 28 de Julio de 2015 y en el periódico oficial "El Estado de Jalisco", el día 1 de agosto de 2015, y el artículo 14, de la Ley de Coordinación Fiscal; en el ejercicio de las facultades conferidas en el artículo 33, fracción IV, inciso b) del Código Fiscal de la Federación; 1, 9, 22 primer párrafo, fracciones XI y XXI, y 43, del Código Fiscal del Estado de Jalisco; 21, fracción IV, incisos b), 27, 36, fracciones XXV, XXXI, XXXII, LII, LIV, LIX, último párrafo, numeral 2 y 37, numeral 2, del Reglamento Interno del Servicio Estatal Tributario del Estado de Jalisco, <strong>le informa y realiza la siguiente invitación.</strong>
+    <br><br>
+    Esta autoridad fiscal tiene controlado un adeudo fiscal a su cargo por concepto de contribuciones federales y sus accesorios, al que le correspondió el número de crédito: <strong>{{CREDITO}}</strong>, mismo que derivó del ejercicio de facultades de comprobación por parte de la <strong>{{AUTORIDAD_DETERMINANTE}}</strong>, por un importe histórico de <strong>{{IMPORTE_HISTORICO_DETERMINADO}}</strong> (<strong>{{IMPORTE_LETRA}}</strong>), se le informa que para obtener la referencia bancaria para el pago del crédito fiscal antes referido, cuyo importe deberá actualizarse de conformidad con la legislación fiscal aplicable, así como para obtener mayor información sobre el mismo, puede acudir previa cita, a las oficinas de la Dirección de Servicios al Contribuyente, dependientes del Servicio Estatal Tributario de Jalisco, ubicadas en Av. Magisterio No. 1499 A, Sótano, Col. Miraflores, C.P. 44270, en esta ciudad de Guadalajara, Jalisco, donde será atendido por personal de la Dirección de Notificación y Ejecución Fiscal; o comunicarse a los teléfonos (33) 3819-2791 extensiones: 22791 y 23715, de lunes a viernes de 08:30 a 15:30 horas, o bien, al correo electrónico <strong style="color:#4C7BEA;">dnotificacionyejecucion.shp@jalisco.gob.mx</strong>.
+    <br><br>
+    La presente constituye una invitación para que realice el pago del adeudo a su cargo, o acuda a nuestras oficinas para recibir la orientación necesaria para regularizar su situación fiscal, previo a instaurar el Procedimiento Administrativo de Ejecución que corresponda.
+    <br><br>
+    En caso de que, a la fecha de la notificación de la presente invitación, ya hubiese cubierto la totalidad del adeudo descrito con antelación, agradeceremos hacer caso omiso a la presente.
+    <br><br>
+    Sin otro particular.
+  </div>
+
+  <!-- ATENTAMENTE -->
+  <div class="a-t-e-n-t-a-m-e-n-t-05741fa8eafc">
+    ATENTAMENTE
+  </div>
+
+  <!-- LÍNEA -->
+  <div class="path-05751db39541"></div>
+
+  <!-- FIRMA Y CARGO -->
+  <div class="f-i-r-m-a-05766d31452c">
+    <div class="firma-nombre">{{FIRMA}}</div>
+    <div class="firma-cargo">{{CARGO}}</div>
+  </div>
+
+  <!-- PÁGINA -->
+  <div class="pgina-1-d-057920bf7146">
+    Página 1 de 1
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Acta de Notificación - Requerimiento de Pago</title>
+  <style>
+    /* ============ RESET Y FUENTE GLOBAL ============ */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Arial', Arial, sans-serif;
+      background-color: #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    /* Contenedor de página para impresión */
+    .pagina-container {
+      width: 816px;
+      margin: 0 auto 20px auto;
+      background: white;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .pagina-container + .pagina-container {
+      page-break-before: always;
+      margin-top: 20px;
+    }
+
+    /* ============ ESTILOS COMPARTIDOS ============ */
+    .pagina {
+      position: relative;
+      width: 816px;
+      height: 1286px;
+      background: white;
+      overflow: hidden;
+    }
+
+    /* Líneas divisoras */
+    .linea-divisora {
+      position: absolute;
+      left: 53px;
+      height: 1px;
+      background-color: #000000;
+      width: 710px;
+    }
+
+    /* Cajas */
+    .caja-borde {
+      border: 1px solid #7f56c5;
+      background: white;
+    }
+
+    .caja-titulo-morada {
+      background-color: #7f56c5;
+      color: white;
+      font-weight: bold;
+      padding: 3px 12px;
+      display: inline-block;
+      border-radius: 8px;
+      font-size: 8px;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    /* Textos */
+    .texto-label {
+      font-size: 6px;
+      font-weight: 600;
+      color: black;
+      letter-spacing: 0.3px;
+    }
+
+    .texto-dato {
+      font-size: 6px;
+      font-weight: 600;
+      color: black;
+    }
+
+    .texto-normal {
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: black;
+    }
+
+    .texto-negrita {
+      font-weight: 700;
+    }
+
+    /* Checkboxes */
+    .checkbox-custom {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .checkbox-custom input {
+      width: 11px;
+      height: 11px;
+      border: 1px solid #7f56c5;
+      border-radius: 3px;
+      appearance: none;
+      background: white;
+      cursor: pointer;
+    }
+
+    .checkbox-custom input:checked {
+      background-color: #7f56c5;
+    }
+
+    .checkbox-custom label {
+      font-size: 8px;
+      font-weight: 700;
+      color: #0c0000;
+    }
+
+    /* Media print */
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+        margin: 0;
+      }
+      .pagina-container {
+        box-shadow: none;
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ==================== PÁGINA 1: FRENTE ==================== -->
+<div class="pagina-container">
+  <div class="pagina" style="position: relative;">
+    
+    <!-- Título principal -->
+    <div style="position: absolute; left: 327px; top: 31px; font-size: 11px; font-weight: 700; text-align: center;">Requerimiento de Pago Vencido</div>
+    
+    <!-- Caja grande que contiene DATOS DEL AFILIADO, AVAL, GARANTÍA y OBSERVACIONES -->
+    <div class="caja-borde" style="position: absolute; left: 45px; top: 72px; width: 728px; height: 270px;"></div>
+    
+    <!-- CABECERAS DE SECCIÓN (dentro de la caja) -->
+    <div style="position: absolute; left: 45px; top: 72px; width: 728px; height: 13px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 49px; top: 74px; color: white; font-size: 8px; font-weight: 700;">DATOS DE LA GARANTÍA</div>
+    
+    <div style="position: absolute; left: 45px; top: 115px; width: 728px; height: 13px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 49px; top: 117px; color: white; font-size: 8px; font-weight: 700;">DATOS DEL AFILIADO</div>
+    
+    <div style="position: absolute; left: 45px; top: 214px; width: 728px; height: 13px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 49px; top: 216px; color: white; font-size: 8px; font-weight: 700;">DATOS DEL AVAL</div>
+    
+    <div style="position: absolute; left: 45px; top: 291px; width: 728px; height: 13px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 49px; top: 294px; color: white; font-size: 8px; font-weight: 700;">OBSERVACIONES</div>
+    
+    <!-- ===== DATOS DEL AFILIADO ===== -->
+    <div style="position: absolute; left: 53px; top: 148px; font-size: 6px; font-weight: 600;">NOMBRE DEL AFILIADO</div>
+    <div style="position: absolute; left: 53px; top: 130px; font-size: 10px; font-weight: 600;">{{nombre}}</div>
+    
+    <div style="position: absolute; left: 529px; top: 148px; font-size: 6px; font-weight: 600;">NÚMERO DE AFILIADO</div>
+    <div style="position: absolute; left: 529px; top: 130px; font-size: 10px; font-weight: 600;">{{afiliado}}</div>
+    
+    <div style="position: absolute; left: 662px; top: 148px; font-size: 6px; font-weight: 600;">NÚMERO DE PRÉSTAMO</div>
+    <div style="position: absolute; left: 662px; top: 130px; font-size: 10px; font-weight: 600;">{{prestamo}}</div>
+
+    <div style="position: absolute; left: 53px; top: 176px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
+    <div style="position: absolute; left: 53px; top: 158px; font-size: 10px; font-weight: 600;">{{afiliado_calle}} {{afiliado_exterior}} {{afiliado_interior}} COLONIA: {{afiliado_colonia}} POBLACIÓN: {{afiliado_población}} MUNICIPIO: {{afiliado_municipio}}</div>
+
+    <div style="position: absolute; left: 53px; top: 204px; font-size: 6px; font-weight: 600;">C.P.</div>
+    <div style="position: absolute; left: 53px; top: 186px; font-size: 10px; font-weight: 600;">{{afiliado_cp}}</div>
+    
+    <div style="position: absolute; left: 192px; top: 204px; font-size: 6px; font-weight: 600;">TELÉFONO</div>
+    <div style="position: absolute; left: 158px; top: 186px; font-size: 10px; font-weight: 600;">{{afiliado_lada}} {{afiliado_telefono}}</div>
+    
+    <div style="position: absolute; left: 361px; top: 204px; font-size: 6px; font-weight: 600;">CELULAR</div>
+    <div style="position: absolute; left: 350px; top: 186px; font-size: 10px; font-weight: 600;">{{afiliado_celular}}</div>
+
+    <div style="position: absolute; left: 662px; top: 204px; font-size: 6px; font-weight: 600;">TIPO DE PRÉSTAMO</div>
+    <div style="position: absolute; left: 662px; top: 186px; font-size: 10px; font-weight: 600;">{{tipo_prestamo}}</div>
+    
+    <div style="position: absolute; left: 676px; top: 29px; font-size: 10px; font-weight: 600;">{{CODEBAR}}</div>
+    
+    
+    <div style="position: absolute; left: 795px; top: 200px; font-size: 6px; font-weight: 600; transform: rotate(270deg); transform-origin: left top; white-space: nowrap;">{{pmo}} - {{orden}} - {{subestatus}} - GA</div>
+    
+    <!-- Líneas divisoras en DATOS DEL AFILIADO -->
+    <div class="linea-divisora" style="top: 142px;"></div>
+    <div class="linea-divisora" style="top: 172px;"></div>
+    <div class="linea-divisora" style="top: 200px;"></div>
+    
+    
+    <!-- ===== DATOS DEL AVAL ===== -->
+    <div class="linea-divisora" style="top: 100px;"></div>
+    <div class="linea-divisora" style="top: 242px;"></div>
+    <div class="linea-divisora" style="top: 272px;"></div>
+
+    <div style="position: absolute; left: 53px; top: 248px; font-size: 6px; font-weight: 600;">NOMBRE DEL AVAL</div>
+    <div style="position: absolute; left: 53px; top: 230px; font-size: 10px; font-weight: 600;">{{aval_nombre}}</div>
+
+    <div style="position: absolute; left: 53px; top: 276px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
+    <div style="position: absolute; left: 53px; top: 258px; font-size: 10px; font-weight: 600;">{{aval_calle}} {{aval_exterior}} {{aval_interior}} COLONIA: {{aval_colonia}} MUNICIPIO: {{aval_municipio}}</div>
+
+    <div style="position: absolute; left: 529px; top: 248px; font-size: 6px; font-weight: 600;">TELÉFONO</div>
+    <div style="position: absolute; left: 529px; top: 230px; font-size: 10px; font-weight: 600;">{{aval_telefono}}</div>
+    
+    <div style="position: absolute; left: 662px; top: 248px; font-size: 6px; font-weight: 600;">CELULAR</div>
+    <div style="position: absolute; left: 662px; top: 230px; font-size: 10px; font-weight: 600;">{{aval_celular}}</div>
+    
+    <!-- ===== DATOS DE LA GARANTÍA ===== -->
+    <div style="position: absolute; left: 53px; top: 105px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
+    <div style="position: absolute; left: 53px; top: 89px; font-size: 10px; font-weight: 600;">{{garantia_direccion}} COLONIA: {{garantia_colonia}} POBLACIÓN: {{garantia_poblacion}} MUNICIPIO: {{garantia_municipio}}</div>
+    
+    <!-- ===== OBSERVACIONES (campo de texto) ===== -->
+    <div style="position: absolute; left: 53px; top: 324px; font-size: 10px; font-weight: 600;">{{observaciones}}</div>
+    <div style="position: absolute; left: 53px; top: 309px; font-size: 10px; font-weight: 600;">ENTRE CALLES: {{afiliado_cruza1}} Y {{afiliado_cruza2}}</div>
+    
+    <!-- Texto legal extenso (fuera de la caja) -->
+    <div style="position: absolute; left: 45px; top: 355px; width: 728px; text-align: justify;">
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
+        <span style="font-weight: 700;">ESTIMADO AFILIADO DEUDOR.</span> Por este conducto, el Departamento de Cobranza Jurídica tiene a bien informarle que el crédito otorgado en atención a las prestaciones y servicios de seguridad social que le ofrece el Instituto de Pensiones del Estado de Jalisco, ha sido asignado para su recuperación, a través de procedimientos judiciales, extrajudiciales y análogos, dado que:
+    </p>
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
+        <span style="font-weight: 700;">a)</span> Usted está considerado como sujeto obligado al pago, en virtud de su condición de afiliado deudor por el otorgamiento del préstamo al que se refieren los artículos 17 fracción I, Incisos a, b, c, d, II, y III, primer párrafo del Reglamento General de Prestaciones, Derechos y Obligaciones de Afiliados y Pensionados de la Dirección de Pensiones del Estado de Jalisco, artículos 113, 114 primer párrafo, 116, 118 fracción V, 119 fracción V, 122 fracciones I, II, III y IV y 123 fracción IV, V, VII de la Ley del Instituto de Pensiones del Estado de Jalisco.
+    </p>  
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
+        <span style="font-weight: 700;">b)</span> Que dicha condición de sujeto obligado y su vinculación con la omisión en el pago del préstamo se deriva de la información y datos asentados en los registros correspondientes del Instituto de Pensiones del Estado de Jalisco.
+    </p> 
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
+        <span style="font-weight: 700;">c)</span> Que dentro del género de obligaciones como afiliado o pensionado que debe cumplir cabalmente y como sujeto obligado al pago con relación al préstamo obtenido, se encuentra la obligación de regularizarse y/o liquidar su préstamo, a través de retenciones o pagos directamente en el Instituto de Pensiones del Estado de Jalisco esto de conformidad con los artículos 114, 116, 123 fracción IV, V, VII, VIII de la Ley del Instituto de Pensiones del Estado de Jalisco.
+    </p>
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
+        POR TODO LO ANTERIOR, SE LE NOTIFICA EL PRÉSTAMO VENCIDO AL SUJETO OBLIGADO, AVAL O RESPONSABLE SOLIDARIO, PARA LA REGULARIZACION Y/O LIQUIDACION DEL MISMO, RESPECTO DE SU ADEUDO CON RELACIÓN AL PRÉSTAMO OBTENIDO POR PARTE DEL INSTITUTO DE PENSIONES DEL ESTADO DE JALISCO, JUNTO CON SUS ACCESORIOS LEGALES DERIVADOS. ASÍ MISMO SE CONCEDE UN <span style="font-weight: 700;">PLAZO DE 15 (QUINCE) DÍAS HÁBILES</span>, CONTADOS A PARTIR DEL DÍA SIGUIENTE EN QUE SURTA EFECTOS LA NOTIFICACIÓN RESPECTIVA PARA EL CUMPLIMIENTO DE DICHA OBLIGACIÓN DE PAGO, APERCIBIDO TAMBIÉN DE QUE EN EL CASO DE NO HACERLO SE DARA SEGUIMIENTO AL PROCEDIMIENTO LEGAL CORRESPONDIENTE.
+    </p>
+    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 0;">
+        Los siguientes saldos son para uso informativo del adeudo y están actualizados hasta la fecha de impresión de este documento.
+    </p>
+
+    <div style="position: absolute; left: 628px; top: 352px; font-size: 12px; font-weight: 600;">{{fecha_emision}}</div>
+
+    </div>
+    
+    <!-- TABLA DE ADEUDOS (dentro de rectangle-0b89d114df96) -->
+    <div class="caja-borde" style="position: absolute; left: 46px; top: 730px; width: 728px; height: 55px; background: white;"></div>
+    
+    <table style="position: absolute; left: 55px; top: 735px; width: 710px; border-collapse: collapse;">
+      <tr>
+        <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">ÚLTIMO ABONO</td>
+        <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">MONTO VENCIDO</td>
+        <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">SALDO POR VENCER</td>
+        <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">INT. MORATORIO</td>
+        <td style="width: 99px; padding: 4px 0; font-size: 11px; font-weight: 600;">TOTAL</td>
+      </tr>
+      <tr>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{ultimo_abono_mod}}</td>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{adeudo}}</td>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{saldo_por_vencer}}</td>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{moratorio}}</td>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{liquidacion}}</td>
+      </tr>
+    </table>
+    
+    <div class="linea-divisora" style="top: 752px;"></div>
+    
+    <!-- Texto IMPORTANTE -->
+    <div style="position: absolute; left: 45px; top: 797px; width: 728px; text-align: justify;">
+      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 700;">IMPORTANTE:</span> Los préstamos a corto y mediano plazo causan el interés que para cada tipo determina el Consejo Directivo del Instituto de Pensiones del Estado, de manera general, con referencia a la Tasa de Interés Interbancaria de Equilibrio (TIIE), o la que en su caso la sustituya, vigente en la fecha de otorgamiento del préstamo, más los puntos porcentuales que el propio Consejo Directivo determine, de conformidad con el artículo 115 de la Ley del Instituto de Pensiones del Estado de Jalisco; y para los préstamos de esquema hipotecario, estos causan el interés que de manera general determina el Consejo Directivo del Instituto de Pensiones del Estado de Jalisco, conforme a las tasas del mercado vigentes en la fecha de otorgamiento del préstamo, más los puntos porcentuales adicionales que el propio Consejo Directivo del Instituto de Pensiones del Estado de Jalisco autorice, con base en los estudios financieros y actuariales que al efecto se realicen, de conformidad con el artículo 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 600;">EL MONTO VENCIDO</span> del adeudo se determinó de acuerdo con la omisión de los pagos que debe realizar el sujeto obligado de manera quincenal o mensual (según se hubiese determinado). Dicho monto se sujetará a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas entre el deudor directo, el aval solidario y el Instituto de Pensiones del Estado de Jalisco, conforme a lo establecido en los artículos 113 y 123, fracciones III y V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 600;">LOS INTERESES MORATORIOS</span> que acompañan al préstamo obtenido por el deudor directo y, en su caso, el aval solidario, están sujetos a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas, tal y como se establece en los artículos 115 y 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="font-size: 12px; line-height: 1.5;"><span style="font-weight: 600;">EL SALDO POR VENCER</span> se encuentra estipulado en los contratos y títulos de crédito que documenten las obligaciones contraídas, siendo aquel que, junto con el monto vencido del préstamo y los intereses moratorios, arroja un total del adeudo; lo anterior, de conformidad con los artículos 114, 115 y 123, fracción V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+    </div>
+    
+    <!-- Rectángulos inferiores -->
+    <div style="position: absolute; left: 0px; top: 1253px; width: 600px; height: 15px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 600px; top: 1253px; width: 700px; height: 15px; background: #B1B2B5;"></div>
+    
+  </div>
+</div>
+
+<!-- ==================== PÁGINA 2: REVERSO ==================== -->
+<div class="pagina-container">
+  <div class="pagina" style="position: relative;">
+    
+    <!-- Título reverso -->
+    <div style="position: absolute; left: 327px; top: 31px; text-align: center; font-size: 11px; font-weight: 700;">
+      Acta de Notificación<br>del Requerimiento de Pago Vencido
+    </div>
+    
+    <!-- Texto acta -->
+    <div style="position: absolute; left: 53px; top: 75px; width: 718px; font-size: 12px; line-height: 1.5; text-align: justify;">
+      <p>En el domicilio _______________________________________________________________________________________________ del municipio de __________________________________________________________, Jalisco, siendo las _____ horas con ______ minutos, del día _______ del mes ________________________ del año 202__, el suscrito Notificador de nombre _________________________________________________________________________ hago constar que:</p>
+      <p>a) Para la ejecución del presente acto de notificación __________ resultó necesario dejar un Citatorio Previo, mismo que fue dejado en el mismo domicilio en que se ejecuta este acto, el día _________ del mes _____________________ del año en que se actúa.</p>
+      <p>b) Me constituí en el domicilio señalado en la parte superior de este documento, una vez que me cercioré de que en dicho domicilio debe entablarse esta diligencia de notificación, por tratarse del domicilio __________________________________________, verificando la nomenclatura oficial del Municipio en este Estado, sobre la calle, la finca o predio en que se actúa, el cruce de las calles circundantes al domicilio, el dicho de los vecinos y de la persona que me atiende en el lugar.</p>
+      <p>c) Una vez en el domicilio, solicité ser atendido por una persona mayor de edad y con capacidad legal para atender esta visita, haciendo constar que me recibió y atendió la persona que, bajo protesta de decir la verdad, manifestó llamarse _______________________________________________________, quien me dijo estar autorizada o facultada para atender la notificación, toda vez que me recibió con la calidad de _______________________________.</p>
+      <p>e) Me identifiqué ante esa persona, exhibiendo mi credencial, misma que contiene mi nombre, fotografía y firma.</p>
+      <p>d) Acto seguido, la persona que me atiende se identifica con ___________________________________________________________, folio o número _____________________________________________, misma que presumo vigente por estar expedida por una autoridad pública y coincidir los datos y fotografía con el nombre y rasgos físicos de quien me atiende.</p>
+      <p style="font-weight: 700;">POR TODO LO ANTERIOR, SE LE NOTIFICA EL PRÉSTAMO VENCIDO AL SUJETO OBLIGADO, AL AVAL O RESPONSABLE SOLIDARIO, PARA LA REGULARIZACIÓN O LIQUIDACIÓN DEL MISMO, RESPECTO DE SU ADEUDO CON RELACIÓN AL PRÉSTAMO OBTENIDO POR PARTE DEL INSTITUTO DE PENSIONES DEL ESTADO DE JALISCO, JUNTO CON SUS ACCESORIOS LEGALES DERIVADOS. ASIMISMO, SE CONCEDE UN PLAZO DE 15 (QUINCE) DÍAS HÁBILES, CONTADO A PARTIR DEL DÍA SIGUIENTE A AQUEL EN QUE SURTA EFECTOS LA NOTIFICACIÓN RESPECTIVA, PARA EL CUMPLIMIENTO DE DICHA OBLIGACIÓN DE PAGO, APERCIBIDO TAMBIÉN DE QUE, EN EL CASO DE NO HACERLO, SE DARÁ SEGUIMIENTO AL PROCEDIMIENTO LEGAL CORRESPONDIENTE.</p>
+      <p>Enterada y consciente de estos hechos y de los alcances jurídicos del acto, la persona que me atiende manifestó lo siguiente: ____________________________________________________________________________________________________________</p>
+      <p>____________________________________________________________________________________________________________</p>
+      <p>Se concluye esta diligencia de notificación y se cierra esta acta en que se hace constar, siendo las ______ horas con ______ minutos del día en que se actúa, y se entrega a la persona que me atiende una copia de las actuaciones de este procedimiento, la que, una vez leída por los presentes, es ratificada y firmada por quienes pudieron y quisieron hacerlo, sin que su negativa a firmar o recibirla sea causal de invalidez de este acto administrativo. CONSTE.</p>
+    </div>
+    
+    <!-- Firmas -->
+    <div style="position: absolute; left: 74px; top: 745px; text-align: center; font-size: 10px;">
+        <div style="border-top: 1px solid black; width: 300px; margin-bottom: 8px;"></div>
+        Nombre y Firma del Prestador de Servicios de<br>
+        Cobranza Externa
+    </div>
+    
+    <div style="position: absolute; left: 455px; top: 745px; text-align: center; font-size: 10px;">
+        <div style="border-top: 1px solid black; width: 300px; margin-bottom: 8px;"></div>
+        Nombre y Firma del Deudor Directo, Aval del Préstamo<br>o Persona que Atiende la Diligencia
+    </div>
+    
+    <div style="position: absolute; left: 74px; top: 825px; text-align: center; font-size: 10px;">
+      <div style="border-top: 1px solid black; width: 300px; margin-bottom: 8px;"></div>
+        Testigo de Asistencia (En caso de haberlo)
+    </div>
+    
+    <div style="position: absolute; left: 455px; top: 825px; text-align: center; font-size: 10px;">
+      <div style="border-top: 1px solid black; width: 300px; margin-bottom: 8px;"></div>
+        Testigo de Asistencia (En caso de haberlo)
+    </div>
+    
+    <!-- Fe de erratas -->
+    <div style="position: absolute; left: 53px; top: 870px; width: 712px; font-size: 12px;">
+      <p><span style="font-weight: 500;">EL SUSCRITO NOTIFICADOR Y EJECUTOR FISCAL HAGO CONSTAR LA SIGUIENTE FE DE ERRATAS:</span></p>
+      <p>1. Lo del paréntesis no aplica; lo correcto es: ___________________________________________________________________</p>
+      <p>2. Lo del paréntesis no aplica; lo correcto es: ___________________________________________________________________</p>
+    </div>
+    
+    <!-- Cuadro OBSERVACIONES (reverso) -->
+    <div class="caja-borde" style="position: absolute; left: 53px; top: 1027px; width: 718px; height: 73px;"></div>
+    <div style="position: absolute; left: 52px; top: 1028px; background: #7f56c5; text-align: center; width: 718px; color: white; font-size: 12px; font-weight: 700; padding: 0 20px;">OBSERVACIONES</div>
+    
+    <!-- Cabeceras de las tablas de checkboxes -->
+    <div class="caja-titulo-morada" style="position: absolute; left: 61px; top: 1115px; width: 96px; height: 26px;align-content: center;">DILIGENCIA DE NOTIFICACIÓN</div>
+    <div class="caja-titulo-morada" style="position: absolute; left: 165px; top: 1115px; width: 96px; height: 26px;align-content: center;">CONDICIONES DEL DOMICILIO</div>
+    <div class="caja-titulo-morada" style="position: absolute; left: 269px; top: 1116px; width: 96px; height: 26px;align-content: center;">ESTATUS DE CUENTA</div>
+    <div class="caja-titulo-morada" style="position: absolute; left: 373px; top: 1115px; width: 96px; height: 26px;align-content: center;">ESTATUS DE DILIGENCIA</div>
+    <div class="caja-titulo-morada" style="position: absolute; left: 477px; top: 1115px; width: 111px; height: 26px;align-content: center;">IDENTIFICADORES</div>
+    <div class="caja-titulo-morada" style="position: absolute; left: 596px; top: 1115px; width: 169px; height: 26px;align-content: center;">ACTUALIZACIÓN DE DATOS DE CONTACTO DE DEUDORES</div>
+    
+    <!-- Fila 1 de checkboxes -->
+    <div style="position: absolute; left: 71px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Dom. Afiliado</label></div>
+    <div style="position: absolute; left: 171px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Habitada</label></div>
+    <div style="position: absolute; left: 273px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Pagado</label></div>
+    <div style="position: absolute; left: 382px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Personal</label></div>
+    <div style="position: absolute; left: 482px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Plantas: ___________</label></div>
+    <div style="position: absolute; left: 607px; top: 1145px;" class="checkbox-custom"><input type="checkbox"> <label>Domicilio: _______________</label></div>
+
+    
+    <!-- Fila 2 -->
+    <div style="position: absolute; left: 71px; top: 1164px;" class="checkbox-custom"><input type="checkbox"> <label>Dom. Aval</label></div>
+    <div style="position: absolute; left: 171px; top: 1165px;" class="checkbox-custom"><input type="checkbox"> <label>Deshabitada</label></div>
+    <div style="position: absolute; left: 273px; top: 1165px;" class="checkbox-custom"><input type="checkbox"> <label>Convenio</label></div>
+    <div style="position: absolute; left: 382px; top: 1164px;" class="checkbox-custom"><input type="checkbox"> <label>Instructivo</label></div>
+    <div style="position: absolute; left: 482px; top: 1164px;" class="checkbox-custom"><input type="checkbox"> <label>Puertas: ___________</label></div>
+    
+    <!-- Fila 3 -->
+    <div style="position: absolute; left: 71px; top: 1184px;" class="checkbox-custom"><input type="checkbox"> <label>Dom. Garantía</label></div>
+    <div style="position: absolute; left: 171px; top: 1185px;" class="checkbox-custom"><input type="checkbox"> <label>Lote o Baldío</label></div>
+    <div style="position: absolute; left: 273px; top: 1185px;" class="checkbox-custom"><input type="checkbox"> <label>Depurado</label></div>
+    <div style="position: absolute; left: 382px; top: 1184px;" class="checkbox-custom"><input type="checkbox"> <label>Recibe un Tercero</label></div>
+    <div style="position: absolute; left: 482px; top: 1184px;" class="checkbox-custom"><input type="checkbox"> <label>Color: _____________</label></div>
+    
+    <!-- Fila 4 -->
+    <div style="position: absolute; left: 273px; top: 1205px;" class="checkbox-custom"><input type="checkbox"> <label>Trámite en IPEJAL</label></div>
+    <div style="position: absolute; left: 382px; top: 1204px;" class="checkbox-custom"><input type="checkbox"> <label>No Diligenciado</label></div>
+    <div style="position: absolute; left: 382px; top: 1204px;" class="checkbox-custom"><input type="checkbox"> <label>No Diligenciado</label></div>
+    <div style="position: absolute; left: 482px; top: 1204px;" class="checkbox-custom"><input type="checkbox"> <label>Medidor CFE: _______</label></div>
+    <div style="position: absolute; left: 607px; top: 1204px;" class="checkbox-custom"><input type="checkbox"> <label>Contacto: ______________</label></div>
+    
+    <!-- Fila 5 -->
+    <div style="position: absolute; left: 273px; top: 1225px;" class="checkbox-custom"><input type="checkbox"> <label>Juicio</label></div>
+    <div style="position: absolute; left: 482px; top: 1224px;" class="checkbox-custom"><input type="checkbox"> <label>C.P.: _________________</label></div>
+    
+    <!-- Rectángulos inferiores reverso -->
+    <div style="position: absolute; left: 0px; top: 1253px; width: 600px; height: 15px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 600px; top: 1253px; width: 816px; height: 15px; background: #B1B2B5;"></div>
+    
+    <!-- Mensaje de pago -->
+    <div style="position: absolute;left: 53px;top: 930px;width: 718px;height: 73px;border: 2px solid #7f56c5;display: flex;
+        align-items: center;justify-content: center;text-align: center;font-size: 18px;font-weight: 900;padding: 10px;
+        box-sizing: border-box;">
+        "SI USTED YA REALIZÓ EL PAGO DE DICHO ADEUDO, HAGA CASO OMISO A LA PRESENTE NOTIFICACIÓN"
+    </div>
+    
+  </div>
+</div>
+
+</body>
+</html>

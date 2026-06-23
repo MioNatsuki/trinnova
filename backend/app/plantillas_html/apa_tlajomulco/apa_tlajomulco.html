@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Determinación de Crédito Fiscal</title>
+<style>
+/* ============ VARIABLES ============ */
+:root {
+  --negro: #000;
+  --blanco: #fff;
+  --gris-header: #cccdcf;
+  --gris-input: #dbdde3;
+  --gris-tag: #b1b2b5;
+  --gris-tag-texto: #b1b2b5;
+  --naranja: #ea6202;
+  --borde: 1px solid var(--negro);
+  --borde-naranja: 1px solid var(--naranja);
+  --borde-transp: 1px solid #b1b2b500;
+  --fuente: 'Calibri', 'Arial', sans-serif;
+}
+
+/* ============ RESET ============ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  min-height: 100%;
+  min-width: 100%;
+}
+
+body {
+  font-family: var(--fuente);
+  background: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+
+/* ============ PÁGINA ============ */
+.pagina {
+  width: 816px;
+  height: 1286px;
+  margin: 0 auto 20px;
+  background: var(--blanco);
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+  position: relative;
+  overflow: hidden;
+  page-break-after: always;
+}
+
+.pagina:last-child { page-break-after: auto; }
+
+@media print {
+  body { background: var(--blanco); padding: 0; }
+  .pagina { box-shadow: none; margin: 0; }
+}
+
+/* ============ UTILIDADES ============ */
+.abs { position: absolute; }
+.flex { display: flex; align-items: flex-start; }
+.flex-col { display: inline-flex; flex-direction: column; vertical-align: top; margin-right: 1px; }
+.min-w { min-width: 100%; }
+.p-0 { font-size: 0; line-height: 1.2; margin: 0; }
+
+/* Texto base */
+.txt {
+  color: var(--negro);
+  font-family: var(--fuente);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.txt-negrita { font-weight: 700; }
+.txt-medium { font-weight: 500; }
+.txt-italic { font-style: italic; }
+.txt-subrayado { text-decoration: underline; }
+.txt-centro { text-align: center; }
+.txt-izq { text-align: left; }
+.txt-just { text-align: justify; }
+
+/* Rectángulos */
+.rect { position: absolute; background: var(--blanco); border: var(--borde); }
+.rect-gris { background: var(--gris-header); }
+.rect-tag { background: var(--gris-tag); border-radius: 8px; }
+.rect-transp { background: #b1b2b500; }
+
+/* SVG paths */
+.path { position: absolute; }
+.path svg { position: absolute; top: 0; left: 0; }
+
+/* ============ IMÁGENES ============ */
+.logo-left {
+  position: absolute;
+  left: 26px;
+  top: 19px;
+  width: 160px;
+  height: 80px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.logo-right {
+  position: absolute;
+  right: 16px;
+  top: 19px;
+  width: 210px;
+  height: 47px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* ============ ENCABEZADO ============ */
+.encabezado {
+  position: absolute;
+  left: 196px;
+  top: 14px;
+  width: 406px;
+  text-align: center;
+}
+
+.encabezado p { font-size: 0; line-height: 1.2; margin: 0; }
+.encabezado span { font-size: 14px; color: var(--negro); font-family: var(--fuente); }
+.encabezado .pequeno { font-size: 10.5px; }
+
+/* ============ BLOQUE DE TEXTO (usado para párrafos largos) ============ */
+.bloque-texto { position: absolute; }
+
+.bloque-texto .contenido {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 100%;
+  margin-right: 1px;
+  vertical-align: top;
+}
+
+.bloque-texto p {
+  font-size: 0;
+  line-height: 1.15;
+  margin: 0 0 3px 0;
+  text-align: justify;
+  text-align-last: left;
+}
+
+.bloque-texto .f11 { font-size: 10.5px; }
+.bloque-texto .f12 { font-size: 12px; }
+.bloque-texto .f14 { font-size: 10.5px; }
+.bloque-texto .f9 { font-size: 9px; }
+.bloque-texto .f10 { font-size: 10px; }
+.bloque-texto .f8 { font-size: 8px; }
+.bloque-texto .f7 { font-size: 7px; }
+.bloque-texto .f5 { font-size: 5px; }
+
+.bloque-texto span {
+  color: var(--negro);
+  font-family: var(--fuente);
+  font-weight: 400;
+}
+
+.bloque-separado p {
+  margin-bottom: 10px;
+}
+
+.linea-firma {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  margin: 0 0 4px 0;
+}
+
+.linea {
+  flex: 1;
+  border-bottom: 1px solid #000;
+  height: 0;
+}
+
+.linea-completa {
+  width: 100%;
+}
+
+.campo-subrayado {
+  display: inline-block;
+  min-width: 670px;
+  border-bottom: 1px solid #000;
+  width: 91%;
+}
+
+/* ============ TABLA DE ADEUDOS ============ */
+.tabla-header, .tabla-dato {
+  position: absolute;
+  height: 35px;
+  border: var(--borde);
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.tabla-dato span,
+.tabla-header span {
+  font-size: 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+.tabla-header { background: var(--gris-header); top: 515px; }
+.tabla-dato { background: var(--blanco); top: 545px; }
+
+.tabla-header span, .tabla-dato span {
+  color: var(--negro);
+  font-family: var(--fuente);
+  font-weight: 700;
+}
+
+.tabla-header span { font-size: 9px; }
+.tabla-dato span { font-size: 9px; }
+
+.tabla-header .flex-col,
+.tabla-dato .flex-col {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.tabla-header p,
+.tabla-dato p {
+  width: 100%;
+  margin: 0;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  text-align: center;
+}
+
+.tabla-dato span,
+.tabla-header span {
+  font-size: 9px;
+
+  width: 100%;
+  text-align: center;
+}
+.col-periodo-d { left: 26px; width: 95px; }
+.col-periodo-h { left: 120px; width: 95px; }
+.col-agua { left: 214px; width: 125px; }
+.col-colectores { left: 338px; width: 86px; }
+.col-infra { left: 422px; width: 124px; }
+.col-recargos { left: 544px; width: 75px; }
+.col-act { left: 616px; width: 101px; }
+.col-saldo { left: 715px; width: 64px; }
+
+/* ============ SECCIÓN GASTOS/MULTAS/CONEXIONES ============ */
+.seccion-fila {
+  position: absolute;
+  left: 544px;
+  width: 173px;
+  height: 26px;
+  background: var(--gris-header);
+  border: var(--borde);
+}
+
+.seccion-fila-der {
+  position: absolute;
+  left: 715px;
+  width: 64px;
+  height: 26px;
+  background: var(--blanco);
+  border: var(--borde);
+}
+
+.seccion-label {
+  position: absolute;
+  left: 544px;
+  width: 173px;
+  height: 26px;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  padding: 0;
+  margin: 0;
+
+  box-sizing: border-box;
+}
+
+.seccion-valor {
+  position: absolute;
+  left: 715px;
+  width: 64px;
+  height: 26px;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  padding: 0;
+  margin: 0;
+
+  box-sizing: border-box;
+}
+
+.seccion-label span,
+.seccion-valor span {
+  display: block;
+
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--fuente);
+  color: var(--negro);
+
+  line-height: 1;
+  margin: 0;
+
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* ============ CHECKBOX / CAMPOS FORM ============ */
+.campo-texto {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+}
+
+.campo-texto p { font-size: 0; line-height: 1.2; margin: 0; }
+.campo-texto span { font-size: 11px; color: var(--negro); font-family: var(--fuente); }
+
+.campo-rect {
+  position: absolute;
+  background: var(--gris-tag);
+  height: 15px;
+}
+
+/* ============ TABLA CHECKBOX ============ */
+.tabla-check {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabla-check p { font-size: 0; line-height: 1.2; margin: 0; }
+.tabla-check span { font-size: 11px; color: var(--negro); font-family: var(--fuente); font-weight: 400; }
+
+/* ============ PIÉ DE PÁGINA ============ */
+.pagina-num {
+  position: absolute;
+  width: 816px;
+
+  display: flex;
+  justify-content: center;
+}
+
+.pagina-num span {
+  font-size: 10px;
+  color: var(--negro);
+  font-family: var(--fuente);
+  white-space: pre;
+}
+
+/* ============ TEXTO VERTICAL ============ */
+.texto-vertical {
+  position: absolute;
+  left: 791px;
+  height: 11px;
+  transform: rotate(-90deg);
+  transform-origin: left top;
+  display: flex;
+  align-items: flex-start;
+}
+
+.texto-vertical span {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--negro);
+  font-family: var(--fuente);
+  white-space: pre;
+}
+
+/* ============ QR ============ */
+.qr-code {
+  position: absolute;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* ============ MEDIA FILIACIÓN ============ */
+.media-filiacion-tabla {
+  position: absolute;
+  left: 17px;
+  top: 1207px;
+  width: 585px;
+  border: 1px solid var(--naranja);
+  display: flex;
+  flex-direction: row;
+}
+
+.media-filiacion-label {
+  width: 30px;
+  min-width: 30px;
+  background: #b1b2b500;
+  border-right: 1px solid var(--naranja);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.media-filiacion-label span {
+  font-size: 6px;
+  font-weight: 700;
+  font-family: var(--fuente);
+  color: var(--negro);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  text-align: center;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.media-filiacion-contenido {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.media-filiacion-fila {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 2px 6px;
+  min-height: 16px;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.media-filiacion-fila:last-child {
+  border-bottom: none;
+}
+
+.media-filiacion-fila span {
+  font-size: 8.5px;
+  font-family: var(--fuente);
+  color: var(--negro);
+  white-space: nowrap;
+}
+
+.mf-underline {
+  display: inline-block;
+  min-width: 50px;
+  border-bottom: 1px solid #000;
+  height: 10px;
+  vertical-align: bottom;
+}
+
+.mf-underline-sm {
+  display: inline-block;
+  min-width: 30px;
+  border-bottom: 1px solid #000;
+  height: 10px;
+  vertical-align: bottom;
+}
+
+/* ============ TEXTOS LARGOS ============ */
+.texto-justificado {
+  text-align: justify;
+}
+
+.texto-justificado span {
+  font-size: 11px;
+  color: var(--negro);
+  font-family: var(--fuente);
+}
+</style>
+</head>
+<body>
+
+<!-- ========================================== -->
+<!-- PÁGINA 1: FRENTE                           -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina1">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 599px; width: 210px; height: 46px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno">H. Ayuntamiento de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p><span class="pequeno">Tesorería Municipal de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p style="margin-top:18px;">
+        <span class="pequeno">
+            DETERMINACIÓN DE CRÉDITO FISCAL POR ADEUDO DE LOS
+        </span>
+    </p>
+    <p><span class="pequeno">DERECHOS POR USO O APROVECHAMIENTO DE AGUA POTABLE</span></p>
+  </div>
+
+  <!-- Rectángulos de datos del predio -->
+  <div class="rect rect-gris" style="left:24px;top:115px;width:338px;height:26px;"></div>
+  <div class="rect" style="left:361px;top:115px;width:158px;height:26px;"></div>
+  <div class="rect" style="left:24px;top:140px;width:338px;height:26px;background:#dbdde3;"></div>
+  <div class="rect" style="left:361px;top:140px;width:158px;height:26px;"></div>
+  <div class="rect" style="left:24px;top:162px;width:765px;height:26px;"></div>
+  <div class="rect" style="left:24px;top:182px;width:765px;height:26px;"></div>
+  <div class="rect" style="left:24px;top:202px;width:765px;height:26px;"></div>
+
+  <!-- Datos del predio -->
+  <div class="abs flex" style="left:34px;top:120px;height:17px;">
+    <span class="txt txt-negrita" style="font-size:14px;white-space:pre;">CLAVE APA: {{clave_apa}}</span>
+  </div>
+  <div class="abs flex" style="left:34px;top:142px;height:17px;">
+    <span class="txt txt-negrita" style="font-size:14px;white-space:pre;">ID APA: {{id_apa}}</span>
+  </div>
+  <div class="abs flex" style="left:34px;top:168px;height:11px;">
+    <span class="txt txt-medium" style="font-size:9px;white-space:pre;"><b>NOMBRE DEL USUARIO:</b> {{propietario_nombre}}</span>
+  </div>
+  <div class="abs flex" style="left:34px;top:188px;height:11px;">
+    <span class="txt txt-medium" style="font-size:9px;white-space:pre;"><b>UBICACIÓN DEL PREDIO:</b> {{domicilio}}</span>
+  </div>
+  <div class="abs flex" style="left:34px;top:208px;height:11px;">
+    <span class="txt txt-medium" style="font-size:9px;white-space:pre;"> {{cuenta_vinculada}} <b>OBSERVACIONES:</b> {{observaciones}}</span>
+  </div>
+
+  <!-- Fechas y código -->
+  <div class="abs flex-col" style="left:401px;top:117px;">
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:9px;white-space:pre;">FECHA DE CORTE</span></p>
+    <p class="p-0 txt-centro"><span class="txt txt-medium" style="font-size:9px;white-space:pre;">{{fecha_corte}}</span></p>
+  </div>
+  <div class="abs flex-col" style="left:398px;top:140px;">
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:9px;white-space:pre;">FECHA DE EMISIÓN</span></p>
+    <p class="p-0 txt-centro"><span class="txt txt-medium" style="font-size:9px;white-space:pre;">{{fecha_emision}}</span></p>
+  </div>
+  <div class="abs flex" style="left:625px;top:130px;height:11px;">
+    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{CODEBAR}}</span>
+  </div>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:185px;">
+    <span>{{guia}}</span>
+  </div>
+
+  <!-- Texto USUARIO DEUDOR -->
+  <div class="bloque-texto" style="left:26px;top:232px;width:763px;">
+    <div class="contenido">
+      <p><span class="f11 txt-negrita"><b>USUARIO DEUDOR:</b></span><span class="f11"> Con fundamento en los artículos 1, 14, 16, 31, párrafo primero, fracción IV; artículo 115, párrafo primero, fracción II, párrafo primero y segundo, inciso a), fracción III, párrafo primero, inciso a), fracción IV, párrafo primero, inciso c), penúltimo párrafo, y artículo 133 de la Constitución Política de los Estados Unidos Mexicanos; artículo 5, párrafo primero, fracción I; artículo 73, párrafo primero, fracción II; artículo 77, párrafo primero, fracción II; artículo 79, primer párrafo, fracción I; artículo 88, párrafo primero, fracción III; y artículo 89, primer y último párrafo de la Constitución Política del Estado de Jalisco. Asimismo, con fundamento en los artículos 1, 2, 3, 4, primer párrafo, numeral 99; artículos 10 y 37, primer párrafo, fracciones II, V, VI, VIII y XVI; artículo 40, primer párrafo, fracción II; artículos 64 y 67, primer párrafo, fracciones I y IV; artículo 75, párrafo primero, fracción III; artículo 79, párrafo primero; artículos 81 y 94, fracción I de la Ley del Gobierno y la Administración Pública Municipal del Estado de Jalisco. También se fundamenta en los artículos 1, 2, 5, 9, 10, 12, fracciones I, II y III; 14, 19, 20, fracción III; artículos 23, fracciones I, IV, X, en su primer párrafo, y fracciones XII y XIII; artículos 37, fracción III; artículos 42, 43, primer párrafo; 44, 44 bis, 52, 132, fracción V; 133, 134 y 157 de la Ley de Hacienda Municipal del Estado de Jalisco. Se consideran, además, los artículos 1, 3, 63, letra A, fracción V; artículos 64, 101 y 102, fracciones I y II; artículos 103, 104, 106, 107, 117, fracción I; artículos 128, fracción I, II, III y V; artículos 129, 130, 131, 132, 133 y 135 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para el Ejercicio Fiscal 2025. Se consideran, además, los artículos 1, 3, 63, letra A, fracción V; artículos 64, 101 y 102, fracciones I y II; artículos 103, 104, 106, 107, 108, 109, 111, 112, 117, fracción I; artículos 128, fracción I, II, III y V; artículos 129, 130, 131, 132 y 134 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para el Ejercicio Fiscal 2024. Igualmente, se contemplan los artículos 1, 3, 63, letra A, fracción V; artículos 64, 106 y 107, fracciones I y II; artículos 108, 109, 111, 112 y 122, fracción I; artículos 133, fracción I, II, III y V; artículos 134, 135, 136 y 137 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para el Ejercicio Fiscal 2023. Además, se toman en cuenta los artículos 1, 3, 62, letra A, fracción V; 63, 98, 99, fracciones I y II; artículos 100, 101, 103, 104 y 114, fracción I; 125, fracción I, II, III y V; 126, 127, 128 y 129 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para el Ejercicio Fiscal 2022. Del mismo modo, se consideran los artículos 1, 3, 62, letra A, fracción V; artículos 63, 98, 99, fracciones I y II; artículos 100, 101, 103, 104 y 107, fracción I; 118, fracción I, II, III y V; 119, 120, 121 y 122 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para los Ejercicios Fiscales 2020 y 2021. Asimismo, se tiene en cuenta lo dispuesto en los artículos 1, 44, 45, 46, 47, 48, 49, 50, 51, 52, 83, 84, 85 bis, 87, 88, 91, 92, 93 y 94 de la Ley del Agua para el Estado de Jalisco y sus Municipios, así como los demás artículos aplicables. Finalmente, se consideran los artículos 1, 2, 3, 4, 5; 57, 67, 111 primer párrafo, fracción IX inciso a y b y demás relativos del Reglamento Del Gobierno y la Administración Pública Del Municipio De Tlajomulco De Zúñiga, Jalisco.</span></p>
+      <p style="margin-top:9px;"><span class="f11">Toda vez que a la fecha,</span><span class="f11 txt-negrita"> <b>NO SE HAN CUBIERTO LOS ADEUDOS CON RELACIÓN AL PAGO POR LOS DERECHOS DERIVADOS DEL USO O APROVECHAMIENTO DEL AGUA POTABLE EN LA PROPIEDAD ANTES SEÑALADA, SE PROCEDE A REALIZAR LA DETERMINACIÓN DEL CRÉDITO FISCAL</b> </span><span class="f11">de conformidad con lo siguiente:</span></p>
+    </div>
+  </div>
+
+  <!-- Tabla de adeudos - Headers -->
+  <div class="tabla-header col-periodo-d">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>PERIODO</span></p>
+      <p class="p-0 txt-centro"><span>DESDE</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-periodo-h">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>PERIODO</span></p>
+      <p class="p-0 txt-centro"><span>HASTA</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-agua">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>AGUA Y/O</span></p>
+      <p class="p-0 txt-centro"><span>ALCANTARILLADO</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-colectores">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>COLECTORES</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-infra">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>INFRAESTRUCTURA</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-recargos">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>RECARGOS</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-act">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>ACTUALIZACIÓN</span></p>
+    </div>
+  </div>
+  <div class="tabla-header col-saldo">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>SALDO</span></p>
+    </div>
+  </div>
+
+  <!-- Tabla de adeudos - Datos -->
+  <div class="tabla-dato col-periodo-d">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{axo_ini}} - {{mes_ini}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-periodo-h">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{axo_fin}} - {{mes_fin}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-agua">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{adeudo_agua}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-colectores">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span style="font-size:9px;">{{adeudo_colectores}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-infra" style="left:422px;width:123px;">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span style="font-size:9px;">{{adeudo_infraestructura}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-recargos">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{recargos}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-act">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{actualizacion}}</span></p>
+    </div>
+  </div>
+  <div class="tabla-dato col-saldo">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span>{{saldo}}</span></p>
+    </div>
+  </div>
+
+  <!-- Gastos de Notificación -->
+  <div class="seccion-fila" style="top:579px;"></div>
+  <div class="seccion-fila-der" style="top:579px;"></div>
+  <div class="seccion-label" style="top:579px;">
+    <span>GASTOS DE NOTIFICACIÓN</span>
+  </div>
+  <div class="seccion-valor" style="top:579px;">
+    <span>{{gasto_estimado}}</span>
+  </div>
+
+  <!-- Multas -->
+  <div class="seccion-fila" style="top:604px;"></div>
+  <div class="seccion-fila-der" style="top:604px;"></div>
+  <div class="seccion-label" style="top:604px;">
+    <span>MULTAS</span>
+  </div>
+  <div class="seccion-valor" style="top:604px;">
+    <span>{{multa}}</span>
+  </div>
+
+  <!-- Conexiones -->
+  <div class="seccion-fila" style="top:629px;"></div>
+  <div class="seccion-fila-der" style="top:629px;"></div>
+  <div class="seccion-label" style="top:629px;">
+    <span>CONEXIONES</span>
+  </div>
+  <div class="seccion-valor" style="top:629px;">
+    <span>{{conexiones}}</span>
+  </div>
+
+  <!-- Total -->
+  <div class="seccion-fila" style="top:651px;"></div>
+  <div class="seccion-fila-der" style="top:651px;"></div>
+  <div class="seccion-label" style="top:651px;">
+    <span>TOTAL ADEUDO</span>
+  </div>
+  <div class="seccion-valor" style="top:651px;">
+    <span>{{total_adeudo}}</span>
+  </div>
+
+  <!-- Aviso Importante -->
+  <div class="rect rect-transp" style="left:26px;top:579px;width:519px;height:98px;border:var(--borde);"></div>
+  <div class="bloque-texto" style="left:34px;top:585px;width:501px;">
+    <div class="contenido">
+      <p><span class="f12 txt-negrita"><b><u>AVISO IMPORTANTE:</u></b> </span><span class="f12">Los valores de adeudo notificado a Usted conforme al desglose anterior, se encuentran sujetos a modificaciones mensuales en el valor de los recargos, conforme al artículo 52 de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p>
+      <p><span class="f12">Recomendamos CONSULTE SU SALDO, visitando la página del municipio.</span></p>
+      <p><span class="f12"> </span></p>
+      <p><span class="f12 txt-italic txt-negrita"><b>https://tesoreria.tlajomulco.gob.mx/Impuestos/</b></span></p>
+    </div>
+  </div>
+
+  <!-- MISMA QUE SE ORDENA NOTIFICAR -->
+  <div class="bloque-texto bloque-separado" style="left:29px;top:685px;width:751px;">
+    <div class="contenido">
+      <p><span class="f11 txt-negrita"><b>MISMA QUE SE ORDENA NOTIFICAR AL USUARIO DEUDOR, A SU REPRESENTANTE LEGAL O SUJETO OBLIGADO, PARA QUE SATISFAGA, MEDIANTE LA LIQUIDACIÓN DE DICHO ADEUDO, SU OBLIGACIÓN FISCAL CON RESPECTO A LOS DERECHOS ANTES MENCIONADOS, JUNTO CON LOS ACCESORIOS LEGALES DERIVADOS DEL MISMO.</b></span><span class="f11"> En complemento de lo anterior, se enumeran los siguientes fundamentos legales: artículos 14, 16, 31, fracción IV; 115, fracción IV, incisos a) y c) de la Constitución Política de los Estados Unidos Mexicanos; artículos 73 y 88, fracciones I y III de la Constitución Política del Estado de Jalisco; artículos 4, primer párrafo, numeral 98; 67, fracción I; y 81 de la Ley del Gobierno y la Administración Pública Municipal del Estado de Jalisco; y los artículos 33, 44, 46, 54, 157 y 242, fracción I, y 244 de la Ley de Hacienda Municipal del Estado de Jalisco y los artículos 12, 13 y 14 de la Ley del Procedimiento Administrativo del Estado de Jalisco.</span></p>
+      <p><span class="f11">El adeudo, junto con los accesorios legales que por este medio se notifican, </span><span class="f11 txt-negrita"><b>DEBERÁ CUBRIRSE DENTRO DE LOS 15 DÍAS HÁBILES </b></span><span class="f11">contados a partir del día siguiente a aquel en que surta efectos la notificación de la presente resolución, en términos de lo dispuesto en el artículo 43, fracción I, de la Ley de Hacienda Municipal del Estado de Jalisco. Se apercibe que, de no realizar el pago en el término concedido, </span><span class="f11 txt-negrita"><b>SE ORDENARÁ REQUERIR EL PAGO POR LOS MEDIOS LEGALES NECESARIOS E INICIAR EN SU CONTRA EL PROCEDIMIENTO ADMINISTRATIVO DE EJECUCIÓN</b></span><span class="f11">, cuyo objeto es la recuperación del crédito fiscal notificado, mediante el embargo y posterior remate de sus bienes, de conformidad con lo establecido en el artículo 92 de la Ley del Agua para el Estado de Jalisco y sus Municipios, así como en los artículos 252 y 253 de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p>
+      <p><span class="f11 txt-negrita"><b>CUOTA POR DERECHOS DE PRESTACIÓN DE SERVICIOS DE AGUA POTABLE:</b></span><span class="f11"> Es un ingreso que percibe el Municipio por la prestación del servicio público y por el uso o aprovechamiento del agua potable, participando así de la naturaleza jurídica de las contribuciones, establecido en las Leyes de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco. Se prevé en los siguientes artículos: Para el ejercicio fiscal 2011 y anteriores: artículos 31, fracción V; 45, 46, 47, 48 y 52, fracción I. Para el ejercicio fiscal 2012: artículos 39, inciso a), fracción V; 54, 55, 56, 57 y 60, fracción I. Para el ejercicio fiscal 2013: artículos 41, inciso a), fracción V; y 56. Para el ejercicio fiscal 2014: artículos 44, apartado a), fracción V; 78, 79, 80, 81, 83 y 84, fracción I. Para los ejercicios fiscales 2015, 2016 y 2017: artículos 48, apartado A, fracción V; 82, 83, 84, 85, 87, 88 y 91, fracción I. Para los ejercicios fiscales 2018 y 2019: artículos 51, apartado A, fracción V; 87, 88, 89, 90, 92, 93 y 96, fracción I. Para los ejercicios fiscales 2020 y 2021: artículos 62, apartado A, fracción V; 63, 98, 99, fracciones I y II; 100, 101, 103, 104 y 107, fracción I. Para el ejercicio fiscal 2022: artículos 62, apartado A, fracción V; 63, 98, 99, fracciones I y II; 100, 101, 103, 104 y 114, fracción I. Para el ejercicio fiscal 2023: artículos 63, apartado A, fracción V; 64, 106, 107, fracciones I y II; 108, 109, 111, 112 y 122, fracción I. Para el ejercicio fiscal 2024 y 2025: artículos 63, apartado A, fracción V; 64, 101, 102, fracciones I y II; 103, 104, 106, 107 y 117, fracción I.</span></p>
+      <p><span class="f11 txt-negrita"><b>LOS RECARGOS:</b> </span><span class="f11">Son los intereses que se generaron en concepto de indemnización al fisco municipal, por no haber cumplido con la obligación fiscal de pagar en tiempo y forma los derechos por el uso o aprovechamiento del Agua Potable, en concordancia con las Leyes de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco.</span></p>
+      <p><span class="f11">Se aplican los siguientes numerales: Para los ejercicios fiscales 2011 y anteriores: artículos 78, fracción I, y 79. Para el ejercicio fiscal 2012: artículos 83, fracción I, y 86. Para el ejercicio fiscal 2013: artículos 79, fracción I, y 82. Para el ejercicio fiscal 2014: artículos 97, fracción I, y 100. Para el ejercicio fiscal 2015: artículos 101, fracción I, y 104. Para los ejercicios fiscales 2016 y 2017: artículos 104, fracción I, y 107. Para los ejercicios fiscales 2018 y 2019: artículos 107, fracción I, y 110. Para los ejercicios fiscales 2020 y 2021: artículos 118, fracción I, y 121. Para el ejercicio fiscal 2022: artículos 125, fracción I, y 128. Para el ejercicio fiscal 2023: artículos 133, fracción I, y 136. Para el ejercicio fiscal 2024: artículos 128, fracción I, y 131, Para el ejercicio fiscal 2025: artículos 129 fracción I y 132.</span></p>
+      <p><span class="f11 txt-negrita"><b>ACTUALIZACIÓN:</b> </span><span class="f11">Cuando no se cubran las contribuciones por concepto de impuestos, derechos, aprovechamientos y contribuciones especiales municipales dentro de los plazos establecidos por la ley, se actualizarán por el transcurso del tiempo y con motivo de los cambios de precios en el país. Para ello, se aplicará el factor de actualización a las cantidades que deban actualizarse. Dicho factor se obtendrá dividiendo A entre B, donde:<br> A = Índice Nacional de Precios al Consumidor vigente en el momento en que se realice el pago del contribuyente.<br>B = Índice citado, vigente en el momento en que se hace exigible el pago por parte del fisco.<br>Las actualizaciones no se calcularán por fracciones de mes. Todo lo anterior con fundamento en los artículos 107, fracción II y 111 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, para el ejercicio fiscal de 2018 y 2019; los artículos 118, fracción II y 122 para el ejercicio fiscal 2020 y 2021; los artículos 125, fracción II y 129 para el ejercicio fiscal 2022; los artículos 133, fracción II y 137 para el ejercicio fiscal 2023; y los artículos 128, fracción II y 132 para el ejercicio fiscal 2024 y y los artículos 129 fracción II y 133 para el ejercicio fiscal 2025.</span></p>
+    </div>
+  </div>
+
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">1</span><span> de </span><span class="txt-negrita">2</span>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 2: REVERSA                          -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina2">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 7px;"></div>
+  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno">H. Ayuntamiento de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p><span class="pequeno">Tesorería Municipal de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p style="margin-top:18px;">
+        <span class="pequeno">
+            DETERMINACIÓN DE CRÉDITO FISCAL POR ADEUDO DE LOS
+        </span>
+    </p>
+    <p><span class="pequeno">DERECHOS POR USO O APROVECHAMIENTO DE AGUA POTABLE</span></p>
+  </div>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:185px;">
+    <span>{{guia}}</span>
+  </div>
+
+  <!-- Texto LOS GASTOS DE NOTIFICACIÓN -->
+  <div class="bloque-texto bloque-separado" style="left:20px;top:118px;width:766px;">
+    <div class="contenido">
+      <p><span class="f14 txt-negrita"><b>LOS GASTOS DE NOTIFICACIÓN Y DE LOS GASTOS DE EJECUCIÓN</b></span><span class="f14">: Son causados por la práctica de la diligencia de notificación de requerimientos de pago de obligaciones no satisfechas dentro de los plazos legales y, en su caso, de embargo, previstas en el procedimiento administrativo de ejecución. Estos se harán efectivos conjuntamente con el crédito fiscal por considerarse, como ya se señaló, accesorios de este, en las cantidades y porcentajes que se establecen conforme a los artículos 193, fracción XII; 252; 254; y 280 de la Ley de Hacienda Municipal del Estado de Jalisco, y con apego a lo establecido en los numerales 78, fracción XII y 81 para el ejercicio fiscal de los años 2010 y 2011 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco; los artículos 83, fracción IV y 88 para el ejercicio fiscal 2012; numerales 79, fracción IV y 84 para el ejercicio fiscal del año 2013; los numerales 97, fracción IV y 102 para el ejercicio fiscal del año 2014; artículos 101, fracción IV y 106 para el ejercicio del año 2015; los artículos 104, fracción IV y 109 para el ejercicio fiscal 2016 y 2017; los artículos 107, fracción V y 113 para el ejercicio fiscal 2018 y 2019; los artículos 118, fracción V y 124 para el ejercicio fiscal 2020 y 2021; los artículos 125, fracción V y 131 para el ejercicio fiscal 2022; los artículos 133, fracción V y 139 para el ejercicio fiscal 2023; y los artículos 128, fracción V y 134 para el ejercicio fiscal 2024 y los artículos 129, fracción V, y 135 para el ejercicio fiscal 2025.</span></p>
+      <p><span class="f14 txt-negrita"><b>LA MULTA</b></span><span class="f14"> Con la finalidad de desincentivar el uso de prácticas que impliquen la omisión del pago de contribuciones, y basada en los criterios establecidos en el artículo 197 de la Ley de Hacienda Municipal del Estado de Jalisco, se impone una multa sobre el monto total de la obligación fiscal omitida, según corresponda al periodo legal applicable, por no cubrir la cuota de derechos por uso y aprovechamiento de agua potable. Esta sanción podrá ser progresiva en caso de hacer caso omiso a la presente determinación de crédito fiscal, teniendo como fundamento lo siguiente:</span></p>
+      <p><span class="f14">Las Leyes de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, aplicándose los artículos 78, fracción II y 82, fracción II, inciso c) para los ejercicios fiscales 2010 y 2011; para el ejercicio fiscal del año 2012, los artículos 83, fracción II y 85; para el ejercicio fiscal del año 2013, los numerales 79, fracción II y 81; para el ejercicio del año 2014, el artículo 97, fracción II y 99; para el ejercicio fiscal del año 2015, los artículos 101, fracción II y 103; para los ejercicios fiscales de los años 2016 y 2017, los artículos 104, fracción II y 106; para los ejercicios fiscales de los años 2018 y 2019, los artículos 107, fracción III y 109; los artículos 118, fracción III y 120 para el ejercicio fiscal 2020 y 2021; los artículos 125, fracción III y 127 para el ejercicio fiscal 2022; los artículos 133, fracción III y 135 para el ejercicio fiscal 2023; y los artículos 128, fracción III y 130 para el ejercicio fiscal 2024 los artículos 129, fracción III y 131 para el ejercicio fiscal 2025.</span></p>
+      <p class="linea-firma"> <span class="f14"> Para la notificación del presente se designa a los C.C. </span><span class="linea"></span></p><p class="linea-firma"><span class="linea linea-completa"></span></p>
+      <p><span class="f14">como autorizados para que practiquen en conjunto o por separado la presente diligencia; atentos a lo que disponen los artículos 33 fracciones I, incisos a) b) y c) y II incisos a) y b) y III, 242 y 244, de la Ley de Hacienda Municipal del Estado de Jalisco; acreditados mediante el oficio __________________________________________________________ deberán de identificarse al momento de la diligencia, en los términos legales, con los documentos en los que aparece su fotografía y firma. Asimismo, para la práctica de este acto administrativo, se resuelve habilitar los días y horas inhábiles necesarios para la realización de las diligencias encomendadas a los notificadores, sin que lo anterior altere el cálculo de los plazos, con fundamento en el artículo 250 de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p>
+      <p><span class="f14">En caso de inconformidad, el contribuyente podrá impugnar el acto, interponiendo el Recurso administrativo de Reconsideración a que se refiere el Título Segundo, Capítulo Único del Libro Quinto de la Ley de Hacienda Municipal del Estado de Jalisco, dentro de los quince días siguientes a aquél en que surta efectos su notificación, de conformidad con lo dispuesto por el artículo 320 fracción I de la Ley de Hacienda Municipal del Estado de Jalisco, o demandar su nulidad dentro del término de los 30 días hábiles siguientes a aquel en que surta efectos su notificación ante el Tribunal de Justicia Administrativa del Estado de Jalisco, en los términos de lo dispuesto por el artículo 31 segundo párrafo de la Ley de Justicia Administrativa del Estado de Jalisco.</span></p>
+      <p><span class="f14">Así lo determino el</span><span class="f14 txt-negrita"> <b>Lic. Christian Castro Castro. Tesorero Municipal de Tlajomulco de Zúñiga, Jalisco</b>,</span><span class="f14"> con las facultades que le fueron conferidas por los artículos 20 fracción III y 23 fracciones I, III y X primer párrafo de la Ley de Hacienda Municipal del Estado de Jalisco,quien al calce suscribe y firma de manera facsímil esta determinación, ordenando asímismo su notificación.</span></p>
+    </div>
+  </div>
+
+  <!-- Firma -->
+  <div style="position:absolute;left:328px;top:750px;width:160px;height:133px;background:url('./firma_tlajo.png') no-repeat center/contain;"></div>
+
+  <!-- Línea de firma -->
+  <div class="path" style="left:283px;top:880px;width:238px;height:1px;border-top:2px solid var(--negro);"></div>
+
+  <!-- Texto bajo firma -->
+  <div class="abs flex-col" style="left:306px;top:885px;width:180px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b> CHRISTIAN CASTRO CASTRO</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>TESORERO MUNICIPAL</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b> DE TLAJOMULCO DE ZUÑIGA</b></span></p>
+  </div>
+
+  <!-- QR -->
+  <div class="qr-code" style="left:618px;top:1020px;width:183px;height:240px;background-image:url('./escanea_aqui.png');"></div>
+
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">2 </span><span>de </span><span class="txt-negrita">2</span>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- PÁGINA 3: ACTA DE NOTIFICACIÓN              -->
+<!-- ========================================== -->
+<div class="pagina" id="pagina3">
+
+  <!-- Logos -->
+  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 7px;"></div>
+  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
+
+  <!-- Rectángulo pequeño -->
+  <div class="rect" style="left:17px;top:1207px;width:31px;height:66px;background:#b1b2b5B7;border:var(--borde-naranja);"></div>
+
+  <!-- Encabezado -->
+  <div class="encabezado" style="left: 205px; width: 406px;">
+    <p><span class="pequeno">H. Ayuntamiento de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p><span class="pequeno">Tesorería Municipal de Tlajomulco de Zuñiga, Jalisco</span></p>
+    <p style="margin-top:18px;"><span class="pequeno">ACTA DE NOTIFICACIÓN DE LA DETERMINACIÓN DE CRÉDITO</span></p>
+    <p><span class="pequeno">FISCAL POR ADEUDO DE LOS DERECHOS POR USO O</span></p>
+    <p><span class="pequeno">APROVECHAMIENTO DE AGUA POTABLE</span></p>
+  </div>
+
+  <!-- CLAVE APA -->
+  <div class="rect rect-transp" style="left:590px;top:80px;width:198px;height:30px;border:2px solid var(--naranja);"></div>
+  <div class="abs flex" style="left:613px;top:85px;height:17px;">
+    <span class="txt" style="font-size:14px;white-space:pre;"><b>CLAVE APA: {{clave_apa}}</b></span>
+  </div>
+
+  <!-- Guía vertical -->
+  <div class="texto-vertical" style="top:185px;">
+    <span>{{guia}}</span>
+  </div>
+
+  <!-- Texto EN... -->
+  <div class="bloque-texto" style="left:16px;top:119px;width:770px;">
+    <div class="contenido">
+      <p><span class="f11">En <u>{{domicilio}}</u></span><span class="campo-subrayado">{{domicilio}}</span><span class="f11">,</span></p>
+      <p><span class="f11">en el Municipio de Tlajomulco de Zúñiga, Jalisco, siendo las ______ horas con _______ minutos, del día ______ del mes de __________________________________ del año 202__, el suscrito Notificador y Ejecutor Fiscal, como servidor público adscrito a la Tesorería Municipal en mención, de nombre ______________________________</span></p>
+      <p><span class="f11">____________________________________________________________, hago constar que, en cumplimiento de las disposiciones legales que rigen el proceso de notificación en materia fiscal que:</span></p>
+      <p><span class="f11 txt-negrita"><b>a)</b></span><span class="f11"> Para el cumplimiento de la orden de notificación de la determinación de un crédito fiscal por adeudo del Impuesto de los Derechos por uso o Aprovechamiento de Agua Potable a cargo del sujeto obligado al pago, actúo con apego a las disposiciones de la materia relativas a la identificación del domicilio del notificado y sujeto obligado a quien debe dirigirse dicha diligencia, previstas en los artículos 29, 30 fracciones I,II,III,IV,V,VII,IX,X,XI y XIII, 31 fracciones I, II y III, y 33 fracciones I, II y III, 242, 244 de la Ley de Hacienda Municipal del Estado de Jalisco, los artículos 1, 44, 45, 46, 47, 48, 49, 50, 51, 52, 83, 84, 85 bis, 87, 88, 97, 91, 93 y 94 de la Ley del Agua para el Estado de Jalisco y sus municipios y los artículos 12,13 y 14 de la Ley del Procedimiento Administrativo del Estado de Jalisco.</span></p>
+      <p><span class="f11 txt-negrita"><b>b)</b></span><span class="f11"> Para la ejecución del presente acto administrativo de notificación __________________________ resultó necesario dejar un Citatorio previo, mismo que fue dejado en el mismo domicilio en que se ejecuta este acto, el día _________ del mes ___________________________ del año en que se actúa.</span></p>
+      <p><span class="f11 txt-negrita"><b>c)</b></span><span class="f11"> Para enterar de modo personal al contribuyente, como se ordena en el artículo 242 fracción I de la Ley de Hacienda Municipal del Estado de Jalisco, me constituí física y legalmente en el domicilio señalado en la parte superior de la Determinación del crédito fiscal por adeudo de los derechos por el uso o aprovechamiento del Agua potable, cerciorándome plenamente de que en dicho domicilio debe entablarse esta diligencia de notificación, por tratarse del domicilio del cual se desprende el adeudo por omisión en el pago por los derechos por el uso o aprovechamiento del Agua Potable . Para garantía de lo anterior, hago constar que verifiqué la nomenclatura oficial del Municipio instalada sobre la calle y en particular la finca o predio en que se actúa; así mismo, el cruce de las calles circundantes al domicilio buscado; me cercioré además por el dicho de los vecinos y, ante todo, me fue confirmado por la persona que me atiende en el lugar;</span></p>
+      <p><span class="f11 txt-negrita"><b>d)</b></span><span class="f11"> Una vez en el domicilio, solicité enseguida ser atendido por persona mayor de edad y con capacidad legal para atender esta visita, haciendo constar que me recibió y atendió la persona que dijo llamarse ______________________________________________________________________________________________ quien me manifestó estar autorizada o facultada para atender la visita de notificación, toda vez que me recibió con la calidad de _____________________________________.</span></p>
+      <p><span class="f11 txt-negrita"><b></b>e)</b></span><span class="f11"> Me identifiqué ante esta persona, exhibiendo mi credencial, misma que contiene la vigencia, mi nombre, fotografía, cargo, vigencia y firma. Documento oficial en el que además se me habilitan los días y horas inhábiles a los que se refiere el artículo 250 de la Ley de Hacienda Municipal del Estado de Jalisco, con fundamento en los artículos 20 primer párrafo, fracción III, 23 primer párrafo, fracciones III, incisos a) y c), VIII y XIII, de la Ley de Hacienda Municipal del Estado de Jalisco, aprobada el día 15 de marzo del 1984, publicada en el Periódico Oficial "El Estado de Jalisco" el día 03 de abril de 1984, vigente a partir del día 06 de abril del 1984.</span></p>
+      <p><span class="f11 txt-negrita"><b>f)</b></span><span class="f11"> Acto seguido, la persona que me atiende se identificó ante mí con una credencial vigente expedida por ______________________________________________, con folio o número _________________________________, misma que presumo su validez oficial por coincidir los datos y fotografía con el nombre y rasgos fisonómicos de quien me atiende.</span></p>
+    </div>
+  </div>
+
+  <!-- Rectángulo POR TODO LO ANTERIOR -->
+  <div class="rect rect-transp" style="left:15px;top:485px;width:770px;height:130px;border:var(--borde-naranja);"></div>
+  <div class="bloque-texto" style="left:24px;top:495px;width:754px;">
+    <div class="contenido">
+      <p><span class="f12 txt-negrita"><b>POR TODO LO ANTERIOR, PROCEDO A NOTIFICARLE LA RESOLUCIÓN DE LA DETERMINACIÓN DE UN CRÉDITO FISCAL POR ADEUDO DEL IMPUESTO DE LOS DERECHOS POR USO O APROVECHAMIENTO DE AGUA POTABLE, EN VIRTUD DE SER EL NOTIFICADO EL SUJETO OBLIGADO AL PAGO DEL MISMO EN RAZÓN DE LA CONDICIÓN O CALIDAD PARTICULAR EN QUE SE ENCUENTRE CONFORME A LOS ARTÍCULOS 29, 30 Y 31 DE LA LEY DE HACIENDA MUNICIPAL DEL ESTADO DE JALISCO, EN RELACIÓN AL PREDIO QUE SE SEÑALA EN LA PARTE SUPERIOR DE LA RESOLUCIÓN CITADA. HAGO SABER AL NOTIFICADO QUE SE CONCEDE UN TÉRMINO LEGAL DE 15 (QUINCE) DÍAS HÁBILES, CONTADOS A PARTIR DEL DÍA SIGUIENTE A AQUEL EN QUE SURTA EFECTOS LA NOTIFICACIÓN RESPECTIVA PARA EL CUMPLIMIENTO DE DICHA OBLIGACIÓN DE PAGO, CON FUNDAMENTO EN EL ARTÍCULO 43 FRACCIÓN I Y 103 DE LA LEY DE HACIENDA MUNICIPAL DEL ESTADO DE JALISCO, APERCIBIDO TAMBIÉN DE QUE EN EL CASO DE NO HACERLO SE SEGUIRÁ EN CONTRA DEL DEUDOR CON EL PROCEDIMIENTO ADMINISTRATIVO DE EJECUCIÓN.</b></span></p>
+    </div>
+  </div>
+
+  <!-- Enterada y consciente -->
+  <div class="bloque-texto" style="left:16px;top:620px;width:770px;">
+    <div class="contenido" style="text-align:justify; text-align-last:left;">
+      <p><span class="f11">Enterada y consciente de manera cabal y completa de los hechos y los alcances legales de este acto, la persona que me atiende manifestó lo siguiente:</span></p>
+      <div style="width:100%; border-bottom:1px solid #000; height:16px; margin-bottom:3px;"></div>
+      <div style="width:100%; border-bottom:1px solid #000; height:16px; margin-bottom:3px;"></div>
+      <p><span class="f11"> </span></p>
+      <p><span class="f11">Se expide la presente Acta como Constancia de las condiciones de modo, tiempo y lugar y demás circunstancias particulares en que se desarrolló la misma. Se concluye esta diligencia de Notificación y se cierra esta Acta en que se hace consta, siendo las __________ horas con ___________ minutos del día en que se actúa y se entrega a la persona que me atiende una copia de las actuaciones de este procedimiento, la que, una vez que fue leída por los presentes, la ratifican y firman quienes pudieron y quisieron hacerlo en la parte inferior de este apartado especial, sin que su negativa a firmar o recibirla sea causal de invalidez de este acto administrativo. <b>CONSTE.</b></span></p>
+    </div>
+  </div>
+
+  <!-- Firmas -->
+  <div class="abs flex-col" style="left:35px;top:780px;width:375px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Nombre y firma del Notificador y Ejecutor Fiscal</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Tesorería Municipal de Tlajomulco de Zúñiga, Jalisco</span></p>
+  </div>
+  <div class="abs flex-col" style="left:375px;top:780px;width:426px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">_________________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Nombre y firma del contribuyente, del sujeto obligado</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">o persona que atiende la diligencia</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Con apego al artículo 244 de la Ley de Hacienda Municipal</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">del Estado de Jalisco.</span></p>
+  </div>
+
+  <!-- Testigos -->
+  <div class="abs flex-col" style="left:75px;top:870px;width:300px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Testigo de Asistencia (en caso de haberlo)</span></p>
+  </div>
+  <div class="abs flex-col" style="left:425px;top:870px;width:300px;">
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">____________________________________________________</span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;">Testigo de Asistencia (en caso de haberlo)</span></p>
+  </div>
+
+  <!-- Fe de erratas -->
+  <div class="bloque-texto" style="left:15px;top:908px;width:811px;">
+    <div class="contenido">
+      <p><span class="f11"><b>EL SUSCRITO NOTIFICADOR Y EJECUTOR FISCAL HAGO CONSTAR LA SIGUIENTE FE DE ERRATAS:</b></span></p>
+      <p><span class="f11"><b>1.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p>
+      <p><span class="f11"><b>2.-Lo del paréntesis no aplica; lo correcto es: ____________________________________________________________________________________</b></span></p>
+    </div>
+  </div>
+
+  <!-- Aviso SI USTED YA REALIZÓ EL PAGO -->
+  <div class="rect rect-transp" style="left:17px;top:955px;width:773px;height:70px;border:var(--borde);"></div>
+  <div class="abs flex" style="left:24px;top:960px;width:756px;">
+    <div class="flex-col min-w">
+      <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:25px;">"SI USTED YA REALIZO EL PAGO DE DICHO ADEUDO, HAGA CASO OMISO A LA PRESENTE NOTIFICACIÓN"</span></p>
+    </div>
+  </div>
+
+  <!-- Reporte de datos -->
+  <div class="rect rect-transp" style="left:17px;top:1030px;width:583px;height:20px;border:var(--borde-naranja);"></div>
+  <div class="rect rect-transp" style="left:17px;top:1049px;width:583px;height:20px;border:var(--borde-naranja);"></div>
+  <div class="rect rect-transp" style="left:17px;top:1068px;width:583px;height:20px;border:var(--borde-naranja);"></div>
+  <div class="rect rect-transp" style="left:17px;top:1087px;width:583px;height:20px;border:var(--borde-naranja);"></div>
+
+  <div class="path" style="left:153px;top:1049px;width:1px;height:57px;border-left:1px solid var(--naranja);"></div>
+
+  <div class="abs flex" style="left:36px;top:1032px;height:17px;">
+    <span class="txt" style="font-size:14px;white-space:pre;"><b>REPORTE DE DATOS LEVANTADOS PARA CONTROL Y ACTUALIZACIÓN DEL PADRON FISCAL</b></span>
+  </div>
+
+  <div class="abs flex" style="left:19px;top:1051px;height:15px;">
+    <span class="txt" style="font-size:12px;white-space:pre;"><b>CALLE</b></span>
+  </div>
+  <div class="abs flex" style="left:19px;top:1070px;height:15px;">
+    <span class="txt" style="font-size:12px;white-space:pre;"><b>COLONIA O POBLACIÓN</b></span>
+  </div>
+  <div class="abs flex" style="left:19px;top:1089px;height:15px;">
+    <span class="txt" style="font-size:12px;white-space:pre;"><b>NÚMERO</b></span>
+  </div>
+
+  <div class="campo-rect" style="left:611px;top:1030px;width:179px;"></div>
+  <div class="campo-rect" style="left:611px;top:1120px;width:179px;"></div>
+  <div class="campo-rect" style="left:611px;top:1180px;width:179px;"></div>
+
+  <div class="abs flex" style="left:619px;top:1030px;height:17px;">
+    <span class="txt" style="font-size:14px;white-space:pre;">CLAVES DE IDENTIFICACION</span>
+  </div>
+  <div class="abs flex" style="left:645px;top:1120px;height:17px;">
+    <span class="txt" style="font-size:14px;white-space:pre;">NO DILIGENCIADOS</span>
+  </div>
+  <div class="abs flex" style="left:619px;top:1180px;height:17px;">
+    <span class="txt" style="font-size:14px;white-space:pre;">OBSERVACIONES GENERALES</span>
+  </div>
+
+  <!-- Checkboxes -->
+  <div class="abs flex-col" style="left:613px;top:1050px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ AD</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ CS</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ DA</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ CA</span></p>
+  </div>
+  <div class="abs flex-col" style="left:687px;top:1050px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ IA</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ ON</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ LT</span></p>
+  </div>
+  <div class="abs flex-col" style="left:755px;top:1050px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ AF</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ CMV</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ CN</span></p>
+  </div>
+  <div class="abs flex-col" style="left:614px;top:1140px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ AS</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ SA</span></p>
+  </div>
+  <div class="abs flex-col" style="left:687px;top:1140px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ CV</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ DP</span></p>
+  </div>
+  <div class="abs flex" style="left:757px;top:1140px;height:14px;">
+    <span class="txt" style="font-size:11px;">□ PS</span>
+  </div>
+  
+  <!-- Tags -->
+  <div class="rect rect-tag" style="left:19px;top:1115px;width:105px;height:20px;"></div>
+  <div class="rect rect-tag" style="left:140px;top:1115px;width:105px;height:20px;"></div>
+  <div class="rect rect-tag" style="left:260px;top:1115px;width:105px;height:20px;"></div>
+  <div class="rect rect-tag" style="left:380px;top:1115px;width:105px;height:20px;"></div>
+  <div class="rect rect-tag" style="left:500px;top:1115px;width:100px;height:20px;"></div>
+
+  <div class="abs flex-col" style="left:42px;top:1115px;">
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">USO O GIRO DEL</span></p>
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">INMUEBLE</span></p>
+  </div>
+  <div class="abs flex" style="left:168px;top:1116px;height:20px;">
+    <div class="flex-col">
+      <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">ESTATUS DE LA</span></p>
+      <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">DILIGENCIA</span></p>
+    </div>
+  </div>
+  <div class="abs flex" style="left:285px;top:1120px;height:10px;">
+    <span class="txt txt-negrita" style="font-size:8px;white-space:pre;">IDENTIFICADORES</span>
+  </div>
+  <div class="abs flex-col" style="left:408px;top:1115px;">
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">DIFERENCIAS DE</span></p>
+    <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;white-space:pre;">ÁREA</span></p>
+  </div>
+  <div class="abs flex" style="left:505px;top:1120px;width:95px;">
+    <div class="flex-col min-w">
+      <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:8px;">DILIGENCIAS</span></p>
+    </div>
+  </div>
+
+  <!-- Datos Asignados -->
+  <div class="abs flex-col" style="left:21px;top:1138px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Habitacional</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Comercial</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">Nombre: __________</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">__________________</span></p>
+  </div>
+  <div class="abs flex-col" style="left:142px;top:1138px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Personal</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Instructivo</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Recibe un Tercero</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ No Diligenciado</span></p>
+  </div>
+  <div class="abs flex-col" style="left:262px;top:1138px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Plantas ________</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Puertas ________</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Color __________</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Medidor CFE: ___</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">_________________</span></p>
+  </div>
+  <div class="abs flex-col" style="left:382px;top:1138px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Terreno</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Construcción</span></p>
+  </div>
+  <div class="abs flex-col" style="left:502px;top:1138px;">
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Dom. Predio</span></p>
+    <p class="p-0"><span class="txt" style="font-size:11px;">□ Dom. Fiscal</span></p>
+  </div>
+
+  <!-- ============ MEDIA FILIACIÓN  ============ -->
+  <div class="media-filiacion-tabla">
+    <div class="media-filiacion-label">
+      <span>MEDIA FILIACION</span>
+    </div>
+    <div class="media-filiacion-contenido">
+      <!-- Fila 1: Genero, Tez color, Edad -->
+      <div class="media-filiacion-fila">
+        <span><b>Genero:</b></span>
+        <span>□ Hombre</span>
+        <span>□ Mujer</span>
+        <span style="margin-left:10px;"><b>Tez color:</b></span>
+        <span>□ Blanca</span>
+        <span>□ Morena</span>
+        <span>□ Negra</span>
+        <span style="margin-left:10px;"><b>Edad (aprox):</b></span>
+        <span class="mf-underline" style="min-width:60px;"></span>
+      </div>
+      <!-- Fila 2: Complexion, Estatura -->
+      <div class="media-filiacion-fila">
+        <span><b>Complexion:</b></span>
+        <span>□ Delgada</span>
+        <span>□ Media</span>
+        <span>□ Robusta</span>
+        <span>□ Rollizo</span>
+        <span style="margin-left:10px;"><b>Estatura (aprox):</b></span>
+        <span class="mf-underline" style="min-width:80px;"></span>
+      </div>
+      <!-- Fila 3: Color de ojos, Bigote -->
+      <div class="media-filiacion-fila">
+        <span><b>Color de ojos:</b></span>
+        <span>□ Negros</span>
+        <span>□ Cafés</span>
+        <span>□ Verdes</span>
+        <span>□ Azules</span>
+        <span style="margin-left:6px;"><b>Otros:</b></span>
+        <span class="mf-underline" style="min-width:45px;"></span>
+        <span style="margin-left:10px;"><b>Bigote:</b></span>
+        <span>□ Si</span>
+        <span>□ No</span>
+      </div>
+      <!-- Fila 4: Cabello -->
+      <div class="media-filiacion-fila" style="border-bottom:none;">
+        <span><b>Cabello:</b></span>
+        <span>□ Si</span>
+        <span>□ No</span>
+        <span style="margin-left:10px;"><b>Color de Cabello:</b></span>
+        <span>□ Negro</span>
+        <span>□ Castaño</span>
+        <span>□ Rubio</span>
+        <span style="margin-left:6px;"><b>Otro:</b></span>
+        <span class="mf-underline" style="min-width:50px;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Líneas de firma -->
+  <div class="path" style="left:615px;top:1215px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
+  <div class="path" style="left:615px;top:1232px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
+  <div class="path" style="left:615px;top:1249px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
+  <div class="path" style="left:615px;top:1266px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
+
+</div>
+
+</body>
+</html>

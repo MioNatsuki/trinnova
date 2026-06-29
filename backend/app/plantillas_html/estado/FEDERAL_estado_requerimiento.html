@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    /* FUENTE ARIAL - GLOBAL */
+    * {
+      font-family: Arial, sans-serif !important;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-weight: normal;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100vw;
+      min-height: 100vh;
+    }
+
+    /* Contenedor de página para impresión */
+    .pagina-container {
+      width: 816px;
+      margin: 0 auto 20px auto;
+      background: white;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    .pagina-container + .pagina-container {
+      page-break-before: always;
+      margin-top: 20px;
+    }
+
+    /* ============ ESTILOS COMPARTIDOS ============ */
+    .pagina {
+      position: relative;
+      width: 816px;
+      height: 1286px;
+      background: white;
+      overflow: hidden;
+    }
+
+    /* Líneas divisoras */
+    .linea-divisora {
+      position: absolute;
+      left: 53px;
+      height: 1px;
+      background-color: #000000;
+      width: 710px;
+    }
+
+    /* CONTENEDOR PRINCIPAL CON FONDO */
+    .liquidacio-0513028c18de {
+      position: relative;
+      width: 816px;
+      height: 1286px;
+      overflow: hidden;
+    }
+
+    /* Fondo con opacidad */
+    .liquidacio-0513028c18de::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: url('fondo.png');
+      background-repeat: no-repeat;
+      background-position: top center;
+      background-size: 100% 100%;
+      opacity: 0.30;
+      z-index: 0;
+    }
+
+    .liquidacio-0513028c18de > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* TABLA CON BORDES VISIBLES */
+    .board-0548ed92f5b1 {
+      position: absolute;
+      left: 62px;
+      top: 215px;
+      width: 700px;
+      min-height: 150px;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      table-layout: fixed;
+    }
+
+    .board-0548ed92f5b1 tr {
+      height: 16px;
+    }
+
+    .board-0548ed92f5b1 td {
+      border: 1px solid #000000;
+      padding: 2px 6px;
+      vertical-align: middle;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .board-0548ed92f5b1 td.label {
+      width: 110px;
+      text-align: right;
+      font-weight: 700;
+      padding-right: 6px;
+    }
+
+    .board-0548ed92f5b1 td.value {
+      text-align: left;
+      font-weight: 400;
+    }
+
+    .board-0548ed92f5b1 td.details {
+      padding: 2px 6px;
+    }
+
+    .tabla-actualizacion {
+      position: absolute;
+      left: 68px;
+      top: 615px;
+      width: 698px;
+      max-width: 698px;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      table-layout: auto;
+      font-size: 9px;
+      background: white;
+      z-index: 1;
+    }
+
+    .tabla-actualizacion td {
+      border: 1px solid #000000;
+      padding: 3px 4px;
+      text-align: center;
+      vertical-align: middle;
+      line-height: 1.05;
+      white-space: normal;
+      word-break: break-word;
+      hyphens: auto;
+    }
+
+    .tabla-actualizacion td.cabecera {
+      font-weight: 700;
+    }
+
+    .tabla-pago {
+      position: absolute;
+      left: 68px;
+      top: 280px;
+      width: 698px;
+      max-width: 698px;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      table-layout: fixed;
+      font-size: 9px;
+      background: white;
+      z-index: 1;
+    }
+
+    .tabla-pago td {
+      border: 1px solid #000000;
+      padding: 4px 6px;
+      text-align: left;
+      vertical-align: middle;
+      word-break: break-word;
+      white-space: normal;
+      line-height: 1.2;
+    }
+
+    .tabla-pago td.titulo {
+      font-weight: 700;
+      text-align: center;
+      background: #e4e4e4;
+    }
+
+    .tabla-pago td.derecha {
+      text-align: right;
+    }
+
+    .tabla-pago td.observaciones {
+      font-size: 8.8px;
+      line-height: 1.25;
+      text-align: left;
+    }
+
+    .tabla-pago td.cabecera-vertical {
+      width: 120px;
+      font-weight: 700;
+      background: #e4e4e4;
+    }
+
+    /* IMAGEN DE FIRMA */
+    .image-057476dfbc06 {
+      position: absolute;
+      left: 270px;
+      top: 785px;
+      width: 244px;
+      height: 257px;
+      background: url('./fimrma.png') no-repeat center center / contain;
+      z-index: 2;
+    }
+
+    /* CÓDIGO DE BARRAS */
+    .c-o-d-e-b-a-r-05214b39831f {
+      position: absolute;
+      left: 690px;
+      top: 75px;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: pre;
+    }
+
+    /* PO ORDEN ACRONIMO INICIAL */
+    .p-o-o-0521e3b8dce2 {
+      position: absolute;
+      left: 780px;
+      top: 250px;
+      font-size: 7px;
+      font-weight: 700;
+      color: #fd0000;
+      white-space: pre;
+      transform: rotate(270deg);
+      transform-origin: top left;
+      width: 9px;
+    }
+
+    /* DATOS SUPERIORES */
+    .datos-superiores {
+      position: absolute;
+      left: 450px;
+      top: 165px;
+      width: 310px;
+      text-align: right;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .datos-superiores .documento-numero {
+      color: #ff0000;
+    }
+
+    /* TEXTO INSTITUCIÓN */
+    .d-i-r-e-c-c-i-n-051fda888056 {
+      position: absolute;
+      top: 110px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: max-content;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    /* TEXTO COMPLETO */
+    .texto-completo {
+      position: absolute;
+      left: 65px;
+      top: 385px;
+      width: 692px;
+      font-family: Arial, sans-serif;
+      font-size: 10px;
+      font-weight: normal;
+      text-align: justify;
+      line-height: 1.5;
+    }
+
+    /* ATENTAMENTE */
+    .a-t-e-n-t-a-m-e-n-t-05741fa8eafc {
+      position: absolute;
+      left: 357px;
+      top: 850px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    /* FIRMA NOMBRE Y CARGO */
+    .f-i-r-m-a-05766d31452c {
+      position: absolute;
+      left: 361px;
+      top: 960px;
+      text-align: center;
+    }
+
+    .f-i-r-m-a-05766d31452c .firma-nombre {
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .f-i-r-m-a-05766d31452c .firma-cargo {
+      font-size: 9px;
+      font-weight: normal;
+      line-height: 1.2;
+    }
+
+    /* LÍNEA */
+    .path-05751db39541 {
+      position: absolute;
+      left: 180px;
+      top: 950px;
+      width: 450px;
+      height: 1px;
+      background: #000000;
+    }
+
+    /* PÁGINA */
+    .pgina-1-d-057920bf7146 {
+      position: absolute;
+      left: 672px;
+      top: 1239px;
+      text-align: right;
+      font-size: 10px;
+      font-style: italic;
+      font-weight: normal;
+    }
+  </style>
+</head>
+
+<body>
+<div class="pagina-container">
+    <div class="pagina" style="position: relative;">
+      <div class="frame liquidacio-0513028c18de">
+      
+      <!-- CÓDIGO DE BARRAS -->
+      <div class="c-o-d-e-b-a-r-05214b39831f">{{CODEBAR}}</div>
+
+      <!-- PO ORDEN ACRONIMO INICIAL -->
+      <div class="p-o-o-0521e3b8dce2">{{PO}} {{ORDEN}} {{ACRONIMO}} {{INICIAL}}</div>
+
+      <!-- TEXTO INSTITUCIÓN -->
+      <div class="d-i-r-e-c-c-i-n-051fda888056">
+        DIRECCIÓN GENERAL DE ORIENTACIÓN Y SERVICIOS<br>
+        DIRECCIÓN DE NOTIFICACIÓN Y EJECUCIÓN FISCAL
+      </div>
+
+      <!-- DATOS SUPERIORES -->
+      <div class="datos-superiores">
+        <span class="documento-numero" style="display:block; margin-bottom:8px;">
+          Número de Documento: {{NO_DOCUMENTO}}<br>
+        </span>
+        <span>ASUNTO: REQUERIMIENTO DE PAGO</span>
+      </div>
+
+      <!-- TABLA -->
+      <table class="board-0548ed92f5b1">
+        <tr>
+          <td class="label">MULTA:</td>
+          <td class="value details">
+            <div><strong>CRÉDITO:</strong> {{CREDITO}}</div>
+            <div><strong>FECHA:</strong> {{FECHA_DOCUMENTO_DETERMINANTE}}</div>
+            <div><strong>AUTORIDAD IMPOSITORA:</strong> {{AUTORIDAD_DETERMINANTE}}</div>
+          </td>
+        </tr>
+        <tr>
+          <td class="label">NOMBRE:</td>
+          <td class="value">{{NOMBRE_RAZON_SOCIAL}}</td>
+        </tr>
+        <tr>
+          <td class="label">DOMICILIO:</td>
+          <td class="value">{{CALLE_NUMERO}}, COLONIA: {{COLONIA}}, C.P. {{CODIGO_POSTAL}}, MUNICIPIO: {{MUNICIPIO}}</td>
+        </tr>
+        <tr>
+          <td class="label">RFC:</td>
+          <td class="value">{{RFC}}</td>
+        </tr>
+        <tr>
+          <td class="label">IMPORTE<br>HISTÓRICO:</td>
+          <td class="value">${{IMPORTE_HISTORICO_DETERMINADO}}</td>
+        </tr>
+      </table>
+
+      <!-- TABLA DE ACTUALIZACIÓN -->
+      <table class="tabla-actualizacion">
+        <tr>
+          <td class="cabecera">Importe histórico</td>
+          <td class="cabecera" colspan="2">I.N.P.C. al mes anterior más reciente</td>
+          <td class="cabecera" colspan="2">I.N.P.C. al mes anterior más antiguo</td>
+          <td class="cabecera">Factor de actualización</td>
+          <td class="cabecera">Importe de la actualización</td>
+        </tr>
+        <tr>
+          <td>${{IMPORTE_HISTORICO_DETERMINADO}}</td>
+          <td>{{MES}}/{{AÑO}}</td>
+          <td>{{INPC_APLICABLE_C}}</td>
+          <td>{{MES_DEF}}/{{AÑO_DEF}}</td>
+          <td>{{INPC_APLICABLE_B}}</td>
+          <td>{{FACTOR_DE_ACTUALIZACIÓN}}</td>
+          <td>${{Importe_actualizacion}}</td>
+        </tr>
+      </table>
+
+      <!-- TODO EL TEXTO EN UN SOLO DIV -->
+      <div class="texto-completo">
+        En atención al oficio presentado por <b>{{AUTORIDAD_DETERMINANTE}}</b>, el día <b>{{FECHA_DEL_DOCUMENTO_DETERMINANTE}}</b> recibido ante la Dirección General de Orientación y Servicios, registrado con el número de crédito <b>{{CREDITO}}</b> y turnado a esta Dirección de Notificación y Ejecución Fiscal para su control y ejecución, esta autoridad le informa que fue impuesto a su cargo una multa y/o infracción por parte de la autoridad previamente mencionada, por la cantidad histórica de $<b>{{IMPORTE_HISTORICO_DETERMINADO}}</b>. Notificada el <b>{{FECHA_DE_NOTIFICACION}}</b>.
+        <br><br>
+        En ese sentido, dando seguimiento a la solicitud de cobro, el Servicio Estatal Tributario, órgano desconcentrado de la Secretaria de Hacienda Pública del Estado de Jalisco, por su conducto y/o por medio de la Dirección General de Orientación y Servicios y/o de la Dirección de Notificación y Ejecución Fiscal, son autoridades fiscales de conformidad con el artículo 22, fracciones, IX, XI y XXI del Código Fiscal del Estado de Jalisco, quienes cuentan con sus facultades de ejecución y cobranza consagrados en el artículo 32 y demás aplicables del código fiscal en referencia, así como en atención al artículo 21, fracciones, I y IV, incisos b); artículo 22 fracciones XVIII, XLV, XXXVIII, XXXIX, LXVIII, LXXIII, LXXIV, LXXVIII y LXXXII; artículo 26 fracción XIV, artículo 27, artículo 36, fracciones, XXIV, XXV, XXXI, XXXII, LII, LIV, LIX, último párrafo, numeral 2 y artículo 37, numeral 2, todos estos del Reglamento Interno del Servicio Estatal Tributario del Estado de Jalisco, ejecuta en este acto el presente “Requerimiento de Pago”, en contra de <b>{{NOMBRE_O_RAZON_SOCIAL}}</b> por la cantidad histórica $<b>{{IMPORTE_HISTORICO_DETERMINADO}}</b> (<b>{{IMPORTE_EN_LETRA_HISTORICO_DETERMINADO}}</b>), más su actualización que asciende a la cantidad de $<b>{{Importe_actualizacion}}</b> (<b>{{IMPORTE_EN_LETRA_ACTUALIZACION}}</b>) de conformidad al artículo 68 del Código Fiscal del Estado de Jalisco:
+        <br><br>
+      </div>
+
+      <div class="texto-completo" style="position:absolute; top:690px; font-family: Arial, sans-serif; font-size: 11px; font-weight: normal; text-align: justify; line-height: 1.5;">
+        Se hace de su conocimiento, que por la presente diligencia deberá cubrir, además, los gastos de ejecución el artículo 96 último párrafo del Código Fiscal del Estado de Jalisco, equivalentes a seis veces el valor diario de la Unidad de Medida y Actualización, que corresponde a la cantidad de $703.86 (SETECIENTOS TRES PESOS 86/100 M.N.), acorde a lo previsto en el artículo 156, primer párrafo fracción I, del referido ordenamiento legal. Se reitera que la cuantificación anterior se realiza, tomando en consideración el valor de la Unidad de Medida y Actualización publicada en el Diario Oficial de la Federación con fecha 08 de enero de 2026, por el monto de $117.31 (CIENTO DIECISIETE PESOS 31/100 M.N.).<br><br>
+        Por lo que, el <b>IMPORTE TOTAL A PAGAR</b> corresponde a la cantidad de $<b>{{TOTAL_DE_LA_MULTA_ACTUALIZADA}} ({{IMPORTE_EN_LETRA}})</b><br><br>
+        Se hace de su conocimiento que de conformidad con el artículo 66, fracción I del Código Fiscal del Estado de Jalisco, deberá cubrir el pago total de la cantidad requerida dentro de los 15 días siguientes a la notificación del presente Requerimiento de Pago.<br><br>
+        Dicho pago deberá ser efectuado en las Oficinas de Recaudación Fiscal, y una vez hecho lo anterior, deberá presentar dicho pago en esta Dirección de Notificación y Ejecución Fiscal, ubicada en Av. Fray Antonio Alcalde 1351 A, planta alta, Col. Observatorio, C.P. 44266, en Guadalajara, Jal.; o remitir vía digital el comprobante del pago al correo electrónico dnotificacionyejecucion.shp@jalisco.gob.mx, para su correspondiente control y archivo.<br><br>
+        Por ende, de conformidad con las facultades de ejecución y cobranza expuestas en el presente documento, esta autoridad fiscal estatal consigna las acciones de notificación del presente Requerimiento de Pago en el domicilio ubicado en <b>{{CALLE_Y_NUMERO}}</b>, COLONIA: <b>{{COLONIA}}</b>, C.P. <b>{{CODIGO_POSTAL}}</b>, MUNICIPIO: <b>{{MUNICIPIO}}</b> a los C.C. <b>Aida Elizabeth Ascencio Delgado, Aide Josefina Santillán Medina, Arturo De Jesús Mejía Álvarez, David de Jesús Martínez Urdiano, Edgar Alejandro Lara Rito, Enrique Christopher Zambrano Valenzuela, Eva Citlally Torres Méndez, Gustavo Francisco Castillo Pérez, Javier Alejandro Padilla Báñales, Jesús Alejandro Rodríguez Vélez, Johana Alejandra Fraire López, Leobardo Jesús Delgado Hernández, Luis Ricardo Mejía Álvarez, Marcela Janette Maldonado Ramos, María Jeovanny Cervantes Puentes, Karen Guadalupe Santoyo Guzmán, José Gerardo Hernández Torres, Yanet Marisol Ventura de la Rosa, Heriberto Pinto Piñón, Sergio Arturo Olvera Rubio, Dulce María del Carmen Muñoz González, Andrea Viridiana Peguero Murillo, Elba Carolina Carrillo Estrada, Humberto Peguero Guzmán, Alan Kevin Márquez</b>
+      </div>
+
+      <!-- PÁGINA -->
+      <div class="pgina-1-d-057920bf7146">
+        Página 1 de 2
+      </div>
+
+      </div>
+    </div>
+  </div>
+
+<div class="pagina-container">
+  <div class="pagina" style="position: relative;">
+    <div class="frame liquidacio-0513028c18de">
+      
+    <!-- TODO EL TEXTO EN UN SOLO DIV -->
+    <div class="texto-completo" style="position:absolute; top:100px; font-family: Arial, sans-serif; font-size: 11px; font-weight: normal; text-align: justify; line-height: 1.5;">
+        <strong>Zavalza, Carlos Rigoberto Ramos Gutiérrez,  Bacilio Alberto Hernández Bobadilla, Hugo Benítez Martínez, Jessica Alejandra Prado Avalos, Antonio Córdova Gómez, Carolina Guadalupe Prado Muñiz, Cynthia Concepción Ponce Márquez, Alexis David Hernández Aceves, Oscar Osvaldo Muñoz Landeros, Valeria Isabel Hernández González y Edgar Damián López González</strong> para que procedan a las diligencias a que haya lugar de manera conjunta o por separada sin perjuicio de su legalidad.
+        <br><br>
+        Por último, debe precisarse que en caso de incumplimiento al Requerimiento de Pago efectuado, esta autoridad fiscal estatal procederá a instaurar en su contra el <strong>Procedimiento Administrativo de Ejecución</strong>, para efecto de obtener el cobro del Crédito Fiscal más los accesorios que correspondan de conformidad con los artículos 129, 131, 134 y 137 del Código Fiscal del Estado de Jalisco, y de cuyas acciones se desprende el embargo de dinero, cuentas o depósitos bancarios, vehículos, bienes muebles en general, así como bienes inmuebles. Por lo que se le insta a atender positivamente el crédito fiscal en cita y realizar su correspondiente liquidación.
+      </div>
+
+      <!-- TABLA DE PAGO -->
+      <table class="tabla-pago">
+        <colgroup>
+          <col style="width: 600px;">
+          <col style="width: 98px;">
+        </colgroup>
+        <tr>
+          <td class="titulo" colspan="2">CONCEPTO DE PAGO PARA LA OFICINA RECAUDADORA</td>
+        </tr>
+        <tr>
+          <td style="text-align:center;"><strong> MULTA – TIPO DE INGRESO 049/ CONCEPTO 39044</strong></td>
+          <td class="derecha">${{IMPORTE__HISTORICO_DETERMINADO}}</td>
+        </tr>
+        <tr>
+          <td style="text-align:center;"><strong>ACTUALIZACION – TIPO DE INGRESO 049/ CONCEPTO 39020</strong></td>
+          <td class="derecha">${{Importe_de_la_actualización}}
+        </tr>
+        <tr>
+          <td style="text-align:center;"><strong>GASTOS DE EJECUCION – TIPO DE INGRESO 049/ CONCEPTO 18203</strong></td>
+          <td class="derecha">${{Gastos_de_Ejecución}}</td>
+        </tr>
+        <tr>
+          <td class="titulo" style="text-align:center;"><strong>IMPORTE TOTAL A PAGAR</strong></td>
+          <td class="derecha">${{TOTAL_DE_LA_MULTA_ACTUALIZADA}}</td>
+        </tr>
+      </table>
+      
+      <table style="position:absolute; left:68px; top:442px; width:698px; border-collapse:collapse; border:1px solid #000; font-size:9px;">
+        <tr>
+          <td style="width:200px; font-weight:bold; border:1px solid #000; padding:4px;">
+            OBSERVACIONES
+          </td>
+
+          <td style="width:498px; border:1px solid #000; padding:4px; font-size:8.8px; line-height:1.25;">
+            <b>CREDITO:</b> «CREDITO»<br>
+            <b>FECHA:</b> «FECHA DEL DOCUMENTO DETERMINANTE»<br>
+            <b>EXPEDIENTE DE PROCEDENCIA:</b> «EXPEDIENTE_DE_PROCEDENCIA»<br>
+            <b>AUTORIDAD IMPOSITORA:</b> «AUTORIDAD_DETERMINANTE»<br><br>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: center;"><i>El monto aquí señalado permanecerá vigente hasta el día {{PROXIMO_INPC}}. Posterior a esa fecha, el importe será actualizado conforme a la legislación fiscal aplicable.</i></td>
+        </tr>
+      </table>
+
+      <div class="texto-completo" style="position:absolute; top:700px; font-family: Arial, sans-serif; font-size: 11px; font-weight: normal; text-align: justify; line-height: 1.5;">Sin otro particular.</div>
+      <!-- PÁGINA -->
+      <div class="pgina-1-d-057920bf7146">
+        Página 2 de 2
+      </div>
+
+      </div>
+    </div>
+  </div>
+</body>
+</html>

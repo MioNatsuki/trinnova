@@ -132,24 +132,20 @@ export default function Proyectos() {
                 )}
 
                 {/* PLANTILLAS */}
-                {isAnalista && (
-                  <div className="proyecto-section">
-                    <div className="proyecto-section-label">
-                      <Icon {...ICONS.template} size={13} />
-                      Plantillas
-                    </div>
-                    <div className="proyecto-section-actions">
-                      <button onClick={() => irA(proyecto.slug, '/plantillas')} className="proyecto-action-btn">
-                        <Icon {...ICONS.template} size={14} />
-                        Dashboard Plantillas
-                      </button>
-                      <button onClick={() => irA(proyecto.slug, '/plantillas/crear')} className="proyecto-action-btn">
-                        <Icon {...ICONS.plus} size={14} />
-                        Subir / Crear
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  {isAnalista && (
+                      <div className="proyecto-section">
+                          <div className="proyecto-section-label">
+                              <Icon {...ICONS.template} size={13} />
+                              Plantillas
+                          </div>
+                          <div className="proyecto-section-actions">
+                              <button onClick={() => irA(proyecto.slug, '/plantillas')} className="proyecto-action-btn">
+                                  <Icon {...ICONS.template} size={14} />
+                                  Dashboard Plantillas
+                              </button>
+                          </div>
+                      </div>
+                  )}
 
                 {/* EMISIÓN */}
                 {canEmision && (

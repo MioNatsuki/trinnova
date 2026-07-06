@@ -496,8 +496,8 @@ body {
 <div class="pagina" id="pagina1">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -513,7 +513,7 @@ body {
 
   <!-- Código de barras -->
   <div class="abs flex" style="left:695px;top:112px;height:11px;">
-    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{CODEBAR}}</span>
+    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{codebar}}</span>
   </div>
 
   <!-- Rectángulos de datos del predio -->
@@ -548,7 +548,7 @@ body {
         <td>{{cta}}</td>
         <td>{{cve_cuenta}}</td>
         <td>{{cve_catastral}}</td>
-        <td>{{fecha_emision}}</td>
+        <td>{{_fecha_actual}}</td>
         <td>{{zona}}</td>
         <td>{{subzona}}</td>
         <td>{{manzana}}</td>
@@ -556,7 +556,7 @@ body {
     <tr><td colspan="9" class="texto-izquierda"><b>NOMBRE(S) DEL(OS) CONTRIBUYENTE(S):</b> {{propietario}}</td></tr>
     <tr><td colspan="9" class="texto-izquierda"><b>DOMICILIO DEL CONTRIBUYENTE:</b> Municipio: {{municipio}} Calle: {{domicilio}} Núm. Ext: {{no_ext}} Núm. Int: {{no_int}}</td></tr>
     <tr><td colspan="9" class="texto-izquierda"><b>UBICACIÓN DEL PREDIO:</b> Col: {{ubic_colonia}} Calle: {{ubicacion}} Núm. Ext: {{ubic_no_ext}} Núm. Int: {{ubic_no_int}}</td></tr>
-    <tr><td colspan="9" class="texto-izquierda"><b>OBSERVACIONES:</b> {{calle_encontrado}} {{no_ext_3}} {{no_int_3}} {{colonia_3}} {{colonia}} {{calle}} {{numero}} {{obs}} {{OBS_CLAVE_ABREVIADO}}</td></tr>
+    <tr><td colspan="9" class="texto-izquierda"><b>OBSERVACIONES:</b> {{calle_encontrado}} {{no_ext_3}} {{no_int_3}} {{colonia_3}} {{colonia}} {{calle}} {{numero}} {{obs}} {{obs_clave_abreviado}}</td></tr>
 </table>
 
   <!-- Guía vertical -->
@@ -670,7 +670,7 @@ body {
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">1</span><span> de </span><span class="txt-negrita">3</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -680,8 +680,8 @@ body {
 <div class="pagina" id="pagina2">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -722,7 +722,7 @@ body {
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">2 </span><span>de </span><span class="txt-negrita">3</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -732,8 +732,8 @@ body {
 <div class="pagina" id="pagina3">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -762,11 +762,11 @@ body {
   <div class="abs flex-col" style="left:250px;top:520px;width:315px;">
     <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>Atentamente</b></span></p>
     <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>Guadalajara, Jalisco</b></span></p>
-    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>“2026, año para cuidar Guadalajara entre todas y todos”</b></span></p>
+    <p class="p-0 txt-centro"><span class="txt" style="font-size:11px;"><b>"2026, año para cuidar Guadalajara entre todas y todos"</b></span></p>
   </div>
 
   <!-- Firma -->
-  <div style="position:absolute;left:328px;top:530px;width:160px;height:133px;background:url('./irlanda.png') no-repeat center/contain;"></div>
+  <div style="position:absolute;left:328px;top:530px;width:160px;height:133px;background:url('./img/irlanda.png') no-repeat center/contain;"></div>
 
   <!-- Línea de firma -->
   <div class="path" style="left:283px;top:610px;width:238px;height:1px;border-top:2px solid var(--negro);"></div>
@@ -778,11 +778,11 @@ body {
   </div>
 
   <!-- QR -->
-  <div class="qr-code" style="left:618px;top:1020px;width:160px;height:240px;background-image:url('./qrgdl.png');"></div>
+  <div class="qr-code" style="left:618px;top:1020px;width:160px;height:240px;background-image:url('./img/qrgdl.png');"></div>
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">3 </span><span>de </span><span class="txt-negrita">3</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -792,8 +792,8 @@ body {
 <div class="pagina" id="pagina4">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -809,7 +809,7 @@ body {
     <b>Cuenta Predial: <u>_______________{{cuenta}}</u></b>
   </span>
   <span class="txt" style="font-size:11px; white-space:nowrap;">
-    <b>Número de Folio: <u>__{{folio-req}}-{{axo-req}}</u></b>
+    <b>Número de Folio: <u>__{{folio_req}}-{{axo_req}}</u></b>
   </span>
 </div>
 
@@ -821,7 +821,7 @@ body {
   <!-- Texto EN... -->
   <div class="bloque-texto" style="left:16px;top:122px;width:760px;">
     <div class="contenido" style="text-align:justify;">
-      <p><span class="f11" style="line-height: 1.5;">En Guadalajara, Jalisco, siendo las _________ horas del día __________ del mes de ___________________ del año 2026, el(la) suscrito(a) Notificador(a) y Ejecutor(a) Fiscal de nombre ____________________________________________________________________________ en cumplimiento a la resolución cuyo folio se describe en la parte superior derecha del presente y con fundamento en los artículos 33, 242 y 244 de la Ley de Hacienda Municipal del Estado de Jalisco, me constituyo en el domicilio del(la) contribuyente <u>{{propietario}}</u> ubicado en <u>{{ubicación}}</u> número exterior <u>{{ubic_no_ext}}</u>, número interior <u>{{ubic_no_int}}</u>, Colonia <u>{{ubic_colonia}}</u> de esta ciudad, con el objeto de llevar a cabo la notificación de la Resolución Determinante del Crédito Fiscal por adeudo del Impuesto Predial, identificada con el número de folio precisado al rubro en la parte superior derecha de la presente acta y, cerciorado que es el domicilio correcto del(la) contribuyente citado(a), por haber constatado de la fachada el número de la finca y la nomenclatura de la calle o vía que corresponde al domicilio del(la) contribuyente, haciendo constar que para la notificación de cita _________________ precedió citatorio, por ____________ haberse encontrado al(la) contribuyente; en este momento sale del domicilio una persona de nombre _____________________________________________________________________ <p></p><p></p><p></p><p class="linea-firma"><span class="linea linea-completa"></span></p></span></p><span class="f11" style="line-height: 1.5;">
+      <p><span class="f11" style="line-height: 1.5;">En Guadalajara, Jalisco, siendo las _________ horas del día __________ del mes de ___________________ del año 2026, el(la) suscrito(a) Notificador(a) y Ejecutor(a) Fiscal de nombre ____________________________________________________________________________ en cumplimiento a la resolución cuyo folio se describe en la parte superior derecha del presente y con fundamento en los artículos 33, 242 y 244 de la Ley de Hacienda Municipal del Estado de Jalisco, me constituyo en el domicilio del(la) contribuyente <u>{{propietario}}</u> ubicado en <u>{{ubicacion}}</u> número exterior <u>{{ubic_no_ext}}</u>, número interior <u>{{ubic_no_int}}</u>, Colonia <u>{{ubic_colonia}}</u> de esta ciudad, con el objeto de llevar a cabo la notificación de la Resolución Determinante del Crédito Fiscal por adeudo del Impuesto Predial, identificada con el número de folio precisado al rubro en la parte superior derecha de la presente acta y, cerciorado que es el domicilio correcto del(la) contribuyente citado(a), por haber constatado de la fachada el número de la finca y la nomenclatura de la calle o vía que corresponde al domicilio del(la) contribuyente, haciendo constar que para la notificación de cita _________________ precedió citatorio, por ____________ haberse encontrado al(la) contribuyente; en este momento sale del domicilio una persona de nombre _____________________________________________________________________ <p></p><p></p><p></p><p class="linea-firma"><span class="linea linea-completa"></span></p></span></p><span class="f11" style="line-height: 1.5;">
       , ante quien me identifico con constancia de acreditación expedida por la Tesorera Municipal de Guadalajara, con vigencia del
       <u>03</u> de <u>MARZO</u> del año <u>2025</u> al <u>30</u> de <u>SEPTIEMBRE</u> del año <u>2027</u>, a quien informo el objeto de la presente diligencia y le requiero expresamente la presencia del(la) contribuyente y/o su representante legal, preguntando si éste se encuentra presente, quien contesta de manera expresa, que ___________ se encuentra presente, por lo tanto __________ le es posible atender esta diligencia, en virtud de que _________________________________________________________________________________________</span><span class="f11" style="line-height: 1.5;">____________________________________________________________________________________, por esta razón se procede a llevar a cabo la notificación con quien me atiende, quien tiene relación de ________________________________________________ del(la) contribuyente y se identifica con ______________________________________________, número _________________________________________________________ en la que aparece su fotografía y firma, siendo su media filiación: ____________________________________________________________________________________________, por lo que procedo ante él (ella) a notificar el documento señalado con anterioridad, entregando el original del mismo a la persona que atiende la diligencia, misma que se da por terminada, firmando al calce las personas que en ella intervinieron y quisieron hacerlo, sin que su negativa a firmar invalide su contenido y alcance legal.</span>
     </div>
@@ -939,6 +939,10 @@ body {
     Estatura(aproximada):</b> <span class="dlc-linea" style="width:110px;"></span>
   </div>
 
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
+  </div>
 </div>
 
 <!-- ========================================== -->
@@ -947,8 +951,8 @@ body {
 <div class="pagina" id="pagina5">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./teso_gdl.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/teso_gdl.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/cuida_gdl.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px; text-align: center;">
@@ -966,7 +970,7 @@ body {
 
   <div class="abs flex" style="left:630px;top:105px;">
     <span class="txt" style="font-size:12px;display:block;">
-        <b><u>{{folio-req}}-{{axo-req}}</u></b>
+        <b><u>{{folio_req}}-{{axo_req}}</u></b>
     </span>
   </div>
 
@@ -1013,8 +1017,10 @@ body {
     </div>
   </div>
 
-  
-
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
+  </div>
 </div>
 </body>
 </html>

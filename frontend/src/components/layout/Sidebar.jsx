@@ -112,10 +112,9 @@ export default function Sidebar() {
       )}
 
       {isAnalista && (
-        <Section label="Plantillas">
-          <SItem to="/plantillas"       iconKey="template" label="Dashboard Plantillas" sub exact />
-          <SItem to="/plantillas/crear" iconKey="plus"     label="Subir / Crear"        sub exact />
-        </Section>
+          <Section label="Plantillas">
+              <SItem to="/plantillas"       iconKey="template" label="Dashboard Plantillas" sub exact />
+          </Section>
       )}
 
       {canEmision && (

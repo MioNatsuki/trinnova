@@ -467,8 +467,8 @@ body {
 <div class="pagina" id="pagina1">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tlajo_Pre.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tlajo_Pre.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -484,7 +484,7 @@ body {
 
   <!-- Código de barras -->
   <div class="abs flex" style="left:695px;top:112px;height:11px;">
-    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{CODEBAR}}</span>
+    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{codebar}}</span>
   </div>
 
   <!-- Rectángulos de datos del predio -->
@@ -498,7 +498,7 @@ body {
         <col style="width:150px">
     </colgroup>
     <tr>
-        <td colspan="4" class="gris titulo-predial"><b>CUENTA PREDIAL: </b>{{cuenta_predial}}</td>
+        <td colspan="4" class="gris titulo-predial"><b>CUENTA PREDIAL: </b>{{cuenta}}</td>
         <td><b>SUPERFICIE DEL TERRENO:</b> {{superficie_terreno}}</td>
         <td><b>SUPERFICIE DE CONSTRUCCIÓN:</b> {{superficie_construccion}}</td>
     </tr>
@@ -516,7 +516,7 @@ body {
         <td>{{cuenta}}</td>
         <td>{{clave_catastral}}</td>
         <td>{{fecha_corte}}</td>
-        <td>{{fecha_emision}}</td>
+        <td>{{_fecha_actual}}</td>
     </tr>
     <tr><td colspan="6" class="texto-izquierda"><b>NOMBRE(S) DEL(OS) CONTRIBUYENTE(S) :</b> {{nombre_contribuyente}}</td></tr>
     <tr><td colspan="6" class="texto-izquierda"><b>DOMICILIO FISCAL :</b> {{domicilio_fiscal}}</td></tr>
@@ -600,7 +600,7 @@ body {
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">1</span><span> de </span><span class="txt-negrita">2</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -610,8 +610,8 @@ body {
 <div class="pagina" id="pagina2">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tlajo_Pre.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tlajo_Pre.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -647,7 +647,7 @@ body {
   </div>
 
   <!-- Firma -->
-  <div style="position:absolute;left:328px;top:750px;width:160px;height:133px;background:url('./firma_tlajo.png') no-repeat center/contain;"></div>
+  <div style="position:absolute;left:328px;top:750px;width:160px;height:133px;background:url('./img/firma_tlajo.png') no-repeat center/contain;"></div>
 
   <!-- Línea de firma -->
   <div class="path" style="left:283px;top:880px;width:238px;height:1px;border-top:2px solid var(--negro);"></div>
@@ -660,11 +660,11 @@ body {
   </div>
 
   <!-- QR -->
-  <div class="qr-code" style="left:618px;top:1020px;width:183px;height:240px;background-image:url('./escanea_aqui.png');"></div>
+  <div class="qr-code" style="left:618px;top:1020px;width:183px;height:240px;background-image:url('./img/escanea_aqui.png');"></div>
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">2 </span><span>de </span><span class="txt-negrita">2</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -674,8 +674,8 @@ body {
 <div class="pagina" id="pagina3">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tlajo_Pre.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tlajo_Pre.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tlajo_Predial.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Rectángulo pequeño -->
   <div class="rect" style="left:17px;top:1207px;width:31px;height:66px;background:#b1b2b5B7;border:var(--borde-naranja);"></div>
@@ -960,6 +960,10 @@ body {
   <div class="path" style="left:615px;top:1249px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
   <div class="path" style="left:615px;top:1266px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
 
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
+  </div>
 </div>
 
 </body>

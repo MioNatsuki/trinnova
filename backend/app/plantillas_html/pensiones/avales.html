@@ -173,7 +173,7 @@
     <div style="position: absolute; left: 662px; top: 105px; font-size: 6px; font-weight: 600;">CELULAR</div>
     <div style="position: absolute; left: 662px; top: 87px; font-size: 10px; font-weight: 600;">{{aval_celular}}</div>
     
-    <div style="position: absolute; left: 676px; top: 29px; font-size: 10px; font-weight: 600;">{{CODEBAR}}</div>
+    <div style="position: absolute; left: 676px; top: 29px; font-size: 10px; font-weight: 600;">{{codebar}}</div>
     
     <div style="position: absolute; left: 795px; top: 200px; font-size: 6px; font-weight: 600; transform: rotate(270deg); transform-origin: left top; white-space: nowrap;">{{pmo}} - {{orden}} - {{subestatus}} - AV</div>
     
@@ -189,7 +189,7 @@
     <div style="position: absolute; left: 53px; top: 188px; font-size: 10px; font-weight: 600;">{{aval_calle}} {{aval_exterior}} {{aval_interior}} COLONIA: {{aval_colonia}} MUNICIPIO: {{aval_municipio}}</div>
     
     <div style="position: absolute; left: 529px; top: 178px; font-size: 6px; font-weight: 600;">AFILIADO</div>
-    <div style="position: absolute; left: 529px; top: 160px; font-size: 10px; font-weight: 600;">{{numero_afiliado}}</div>
+    <div style="position: absolute; left: 529px; top: 160px; font-size: 10px; font-weight: 600;">{{afiliado}}</div>
     
     <div style="position: absolute; left: 662px; top: 178px; font-size: 6px; font-weight: 600;">NÚMERO DE PRÉSTAMO</div>
     <div style="position: absolute; left: 662px; top: 160px; font-size: 10px; font-weight: 600;">{{prestamo}}</div>
@@ -241,7 +241,7 @@
         Los siguientes saldos son para uso informativo del adeudo y están actualizados hasta la fecha de impresión de este documento.
     </p>
 
-    <div style="position: absolute; left: 628px; top: 352px; font-size: 12px; font-weight: 600;">{{fecha_emision}}</div>
+    <div style="position: absolute; left: 628px; top: 352px; font-size: 12px; font-weight: 600;">{{_fecha_actual}}</div>
 
     </div>
     
@@ -257,7 +257,7 @@
         <td style="width: 99px; padding: 4px 0; font-size: 11px; font-weight: 600;">TOTAL</td>
       </tr>
       <tr>
-        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{ultimo_abono_mod}}</td>
+        <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{ultimo_abono}}</td>
         <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{adeudo}}</td>
         <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{saldo_por_vencer}}</td>
         <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{moratorio}}</td>
@@ -278,6 +278,11 @@
     <!-- Rectángulos inferiores -->
     <div style="position: absolute; left: 0px; top: 1253px; width: 600px; height: 15px; background: #7f56c5;"></div>
     <div style="position: absolute; left: 600px; top: 1253px; width: 700px; height: 15px; background: #B1B2B5;"></div>
+    
+    <!-- Pie de página -->
+    <div style="position: absolute; left: 380px; top: 1265px; font-size: 10px; font-weight: 600;">
+      Página {{_numero_pagina}} de {{_total_paginas}}
+    </div>
     
   </div>
 </div>
@@ -389,6 +394,11 @@
         align-items: center;justify-content: center;text-align: center;font-size: 18px;font-weight: 900;padding: 10px;
         box-sizing: border-box;">
         "SI USTED YA REALIZÓ EL PAGO DE DICHO ADEUDO, HAGA CASO OMISO A LA PRESENTE NOTIFICACIÓN"
+    </div>
+    
+    <!-- Pie de página -->
+    <div style="position: absolute; left: 380px; top: 1265px; font-size: 10px; font-weight: 600;">
+      Página {{_numero_pagina}} de {{_total_paginas}}
     </div>
     
   </div>

@@ -489,8 +489,8 @@ body {
 <div class="pagina" id="pagina1">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 16px;"></div>
-  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 599px; width: 210px; height: 46px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tljo_1.png'); left: 16px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tljo_2.png'); left: 599px; width: 210px; height: 46px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -537,10 +537,10 @@ body {
   </div>
   <div class="abs flex-col" style="left:398px;top:140px;">
     <p class="p-0 txt-centro"><span class="txt txt-negrita" style="font-size:9px;white-space:pre;">FECHA DE EMISIÓN</span></p>
-    <p class="p-0 txt-centro"><span class="txt txt-medium" style="font-size:9px;white-space:pre;">{{fecha_emision}}</span></p>
+    <p class="p-0 txt-centro"><span class="txt txt-medium" style="font-size:9px;white-space:pre;">{{_fecha_actual}}</span></p>
   </div>
   <div class="abs flex" style="left:625px;top:130px;height:11px;">
-    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{CODEBAR}}</span>
+    <span class="txt txt-negrita" style="font-size:10px;white-space:pre;">{{codebar}}</span>
   </div>
 
   <!-- Guía vertical -->
@@ -708,7 +708,7 @@ body {
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">1</span><span> de </span><span class="txt-negrita">2</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -718,8 +718,8 @@ body {
 <div class="pagina" id="pagina2">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 7px;"></div>
-  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tljo_1.png'); left: 7px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
 
   <!-- Encabezado -->
   <div class="encabezado" style="left: 205px; width: 406px;">
@@ -742,7 +742,7 @@ body {
   <div class="bloque-texto bloque-separado" style="left:20px;top:118px;width:766px;">
     <div class="contenido">
       <p><span class="f14 txt-negrita"><b>LOS GASTOS DE NOTIFICACIÓN Y DE LOS GASTOS DE EJECUCIÓN</b></span><span class="f14">: Son causados por la práctica de la diligencia de notificación de requerimientos de pago de obligaciones no satisfechas dentro de los plazos legales y, en su caso, de embargo, previstas en el procedimiento administrativo de ejecución. Estos se harán efectivos conjuntamente con el crédito fiscal por considerarse, como ya se señaló, accesorios de este, en las cantidades y porcentajes que se establecen conforme a los artículos 193, fracción XII; 252; 254; y 280 de la Ley de Hacienda Municipal del Estado de Jalisco, y con apego a lo establecido en los numerales 78, fracción XII y 81 para el ejercicio fiscal de los años 2010 y 2011 de la Ley de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco; los artículos 83, fracción IV y 88 para el ejercicio fiscal 2012; numerales 79, fracción IV y 84 para el ejercicio fiscal del año 2013; los numerales 97, fracción IV y 102 para el ejercicio fiscal del año 2014; artículos 101, fracción IV y 106 para el ejercicio del año 2015; los artículos 104, fracción IV y 109 para el ejercicio fiscal 2016 y 2017; los artículos 107, fracción V y 113 para el ejercicio fiscal 2018 y 2019; los artículos 118, fracción V y 124 para el ejercicio fiscal 2020 y 2021; los artículos 125, fracción V y 131 para el ejercicio fiscal 2022; los artículos 133, fracción V y 139 para el ejercicio fiscal 2023; y los artículos 128, fracción V y 134 para el ejercicio fiscal 2024 y los artículos 129, fracción V, y 135 para el ejercicio fiscal 2025.</span></p>
-      <p><span class="f14 txt-negrita"><b>LA MULTA</b></span><span class="f14"> Con la finalidad de desincentivar el uso de prácticas que impliquen la omisión del pago de contribuciones, y basada en los criterios establecidos en el artículo 197 de la Ley de Hacienda Municipal del Estado de Jalisco, se impone una multa sobre el monto total de la obligación fiscal omitida, según corresponda al periodo legal applicable, por no cubrir la cuota de derechos por uso y aprovechamiento de agua potable. Esta sanción podrá ser progresiva en caso de hacer caso omiso a la presente determinación de crédito fiscal, teniendo como fundamento lo siguiente:</span></p>
+      <p><span class="f14 txt-negrita"><b>LA MULTA</b></span><span class="f14"> Con la finalidad de desincentivar el uso de prácticas que impliquen la omisión del pago de contribuciones, y basada en los criterios establecidos en el artículo 197 de la Ley de Hacienda Municipal del Estado de Jalisco, se impone una multa sobre el monto total de la obligación fiscal omitida, según corresponda al periodo legal aplicable, por no cubrir la cuota de derechos por uso y aprovechamiento de agua potable. Esta sanción podrá ser progresiva en caso de hacer caso omiso a la presente determinación de crédito fiscal, teniendo como fundamento lo siguiente:</span></p>
       <p><span class="f14">Las Leyes de Ingresos del Municipio de Tlajomulco de Zúñiga, Jalisco, aplicándose los artículos 78, fracción II y 82, fracción II, inciso c) para los ejercicios fiscales 2010 y 2011; para el ejercicio fiscal del año 2012, los artículos 83, fracción II y 85; para el ejercicio fiscal del año 2013, los numerales 79, fracción II y 81; para el ejercicio del año 2014, el artículo 97, fracción II y 99; para el ejercicio fiscal del año 2015, los artículos 101, fracción II y 103; para los ejercicios fiscales de los años 2016 y 2017, los artículos 104, fracción II y 106; para los ejercicios fiscales de los años 2018 y 2019, los artículos 107, fracción III y 109; los artículos 118, fracción III y 120 para el ejercicio fiscal 2020 y 2021; los artículos 125, fracción III y 127 para el ejercicio fiscal 2022; los artículos 133, fracción III y 135 para el ejercicio fiscal 2023; y los artículos 128, fracción III y 130 para el ejercicio fiscal 2024 los artículos 129, fracción III y 131 para el ejercicio fiscal 2025.</span></p>
       <p class="linea-firma"> <span class="f14"> Para la notificación del presente se designa a los C.C. </span><span class="linea"></span></p><p class="linea-firma"><span class="linea linea-completa"></span></p>
       <p><span class="f14">como autorizados para que practiquen en conjunto o por separado la presente diligencia; atentos a lo que disponen los artículos 33 fracciones I, incisos a) b) y c) y II incisos a) y b) y III, 242 y 244, de la Ley de Hacienda Municipal del Estado de Jalisco; acreditados mediante el oficio __________________________________________________________ deberán de identificarse al momento de la diligencia, en los términos legales, con los documentos en los que aparece su fotografía y firma. Asimismo, para la práctica de este acto administrativo, se resuelve habilitar los días y horas inhábiles necesarios para la realización de las diligencias encomendadas a los notificadores, sin que lo anterior altere el cálculo de los plazos, con fundamento en el artículo 250 de la Ley de Hacienda Municipal del Estado de Jalisco.</span></p>
@@ -752,7 +752,7 @@ body {
   </div>
 
   <!-- Firma -->
-  <div style="position:absolute;left:328px;top:750px;width:160px;height:133px;background:url('./firma_tlajo.png') no-repeat center/contain;"></div>
+  <div style="position:absolute;left:328px;top:750px;width:160px;height:133px;background:url('./img/firma_tlajo.png') no-repeat center/contain;"></div>
 
   <!-- Línea de firma -->
   <div class="path" style="left:283px;top:880px;width:238px;height:1px;border-top:2px solid var(--negro);"></div>
@@ -765,11 +765,11 @@ body {
   </div>
 
   <!-- QR -->
-  <div class="qr-code" style="left:618px;top:1020px;width:183px;height:240px;background-image:url('./escanea_aqui.png');"></div>
+  <div class="qr-code" style="left:618px;top:1020px;width:183px;height:240px;background-image:url('./img/escanea_aqui.png');"></div>
 
   <!-- Pie de página -->
   <div class="pagina-num" style="top:1265px;">
-    <span>Página </span><span class="txt-negrita">2 </span><span>de </span><span class="txt-negrita">2</span>
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
   </div>
 </div>
 
@@ -779,8 +779,8 @@ body {
 <div class="pagina" id="pagina3">
 
   <!-- Logos -->
-  <div class="logo-left" style="background-image: url('./Tljo_1.png'); left: 7px;"></div>
-  <div class="logo-right" style="background-image: url('./Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
+  <div class="logo-left" style="background-image: url('./img/Tljo_1.png'); left: 7px;"></div>
+  <div class="logo-right" style="background-image: url('./img/Tljo_2.png'); left: 590px; width: 210px; height: 47px;"></div>
 
   <!-- Rectángulo pequeño -->
   <div class="rect" style="left:17px;top:1207px;width:31px;height:66px;background:#b1b2b5B7;border:var(--borde-naranja);"></div>
@@ -1066,6 +1066,10 @@ body {
   <div class="path" style="left:615px;top:1249px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
   <div class="path" style="left:615px;top:1266px;width:168px;height:1px;border-top:2px solid var(--negro);"></div>
 
+  <!-- Pie de página -->
+  <div class="pagina-num" style="top:1265px;">
+    <span>Página </span><span class="txt-negrita">{{_numero_pagina}}</span><span> de </span><span class="txt-negrita">{{_total_paginas}}</span>
+  </div>
 </div>
 
 </body>

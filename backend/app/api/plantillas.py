@@ -24,7 +24,7 @@ from pydantic import BaseModel
 # ROUTER - DEBE ESTAR AL PRINCIPIO
 # ============================================
 router = APIRouter()
-
+<
 # ============================================
 # SCHEMAS
 # ============================================

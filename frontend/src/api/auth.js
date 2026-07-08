@@ -34,4 +34,9 @@ export const getMe = async () => {
   return response.data;
 };
 
+export const sincronizarPlantillas = async () => {
+  const response = await api.post('/plantillas/sincronizar');
+  return response.data;
+};
+
 export default api;

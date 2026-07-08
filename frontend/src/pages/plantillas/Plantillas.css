@@ -618,3 +618,70 @@
   margin: 8px 0;
   overflow-x: auto;
 }
+
+/* ── Botón sincronizar ──────────────────────────────────────── */
+.pl-btn--sync {
+  background: #7f56c5;
+  border-color: #7f56c5;
+  color: #fff;
+}
+.pl-btn--sync:hover:not(:disabled) {
+  background: #6d4bb5;
+  border-color: #6d4bb5;
+}
+.pl-btn--sync:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Nombre de archivo ──────────────────────────────────────── */
+.pl-filename {
+  font-size: 11px;
+  color: var(--clr-muted);
+  font-family: 'Courier New', monospace;
+  background: var(--clr-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ── Texto en vacío ─────────────────────────────────────────── */
+.pl-empty-hint {
+  font-size: 13px;
+  color: var(--clr-muted);
+  max-width: 400px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* ── Toolbar de preview ────────────────────────────────────── */
+.pl-btn--active {
+  background: var(--clr-accent-lt) !important;
+  border-color: var(--clr-accent) !important;
+  color: var(--clr-accent) !important;
+  font-weight: 600;
+}
+
+/* ── Modal de preview más ancho ────────────────────────────── */
+.pl-modal--wide {
+  max-width: 90vw;
+  width: 90vw;
+  max-height: 90vh;
+}
+
+/* ── Toolbar del modal de preview ──────────────────────────── */
+.pl-modal-toolbar {
+  flex-shrink: 0;
+}
+
+/* ── Ajustes para el visor PDF ─────────────────────────────── */
+.pl-modal-body embed {
+  display: block;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .pl-modal--wide {
+    max-width: 98vw;
+    width: 98vw;
+  }
+}

@@ -132,20 +132,21 @@ export default function PlantillasDashboard() {
     setPreviewLoading(true);
     
     try {
-      const res = await api.post(`/plantillas/${previewModal.id}/preview`, {
-        placeholders: nuevoEstado ? getDatosEjemplo(previewModal.proyecto_slug) : {},
-        preview_on: nuevoEstado
-      });
-      if (res.data.success && res.data.pdf_base64) {
-        setPreviewPdf(res.data.pdf_base64);
-        setPreviewOn(res.data.preview_on);
-      }
+        // Cuando preview_on es True, el backend usará datos de ejemplo
+        const res = await api.post(`/plantillas/${previewModal.id}/preview`, {
+            placeholders: {},
+            preview_on: nuevoEstado  // True = datos de ejemplo, False = placeholders resaltados
+        });
+        if (res.data.success && res.data.pdf_base64) {
+            setPreviewPdf(res.data.pdf_base64);
+            setPreviewOn(res.data.preview_on);
+        }
     } catch (err) {
-      showMsg('error', err.response?.data?.detail || 'Error cambiando modo preview.');
+        showMsg('error', err.response?.data?.detail || 'Error cambiando modo preview.');
     } finally {
-      setPreviewLoading(false);
+        setPreviewLoading(false);
     }
-  };
+};
 
   // Función auxiliar para datos de ejemplo según proyecto
   const getDatosEjemplo = (slug) => {

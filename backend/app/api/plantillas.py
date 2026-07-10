@@ -253,37 +253,31 @@ def preview_plantilla_pdf(
     db: Session = Depends(get_global_db),
 ):
     """
-    Genera un PDF de preview de la plantilla usando el nuevo motor de renderizado
+    Genera un PDF de preview de la plantilla
     
     - preview_on: False → muestra placeholders resaltados en amarillo
-    - preview_on: True → reemplaza placeholders con datos reales
+    - preview_on: True → reemplaza placeholders con datos de ejemplo
     """
-    # Obtener plantilla
     plantilla = _get_plantilla_or_404(db, plantilla_id)
     
-    # Verificar que tiene nombre_archivo
     if not plantilla.nombre_archivo:
         raise HTTPException(
             status_code=400,
             detail="La plantilla no tiene asociado un archivo HTML. Ejecuta la sincronización primero."
         )
     
-    # Obtener slug del proyecto
     proyecto_slug = _slug_from_proyecto_id(db, plantilla.id_proyecto)
-    
-    # Verificar acceso al proyecto
     check_project_access(proyecto_slug, current_user, db)
     
     try:
-        # Generar PDF usando el renderer
+        # Si preview_on es True, usamos datos de ejemplo
         pdf_bytes = generar_preview_pdf(
             proyecto_slug=proyecto_slug,
-            nombre_archivo=plantilla.nombre_archivo.split('/')[-1],  # Solo el nombre del archivo
+            nombre_archivo=plantilla.nombre_archivo.split('/')[-1],
             placeholders=body.placeholders if body.preview_on else {},
-            preview_mode=not body.preview_on  # Si preview_on=False, resaltar placeholders
+            preview_mode=body.preview_on  # True = usar datos de ejemplo
         )
         
-        # Convertir a base64 para enviar al frontend
         pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
         
         return {

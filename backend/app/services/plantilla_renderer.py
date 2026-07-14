@@ -1,58 +1,124 @@
 """
 Motor de renderizado de plantillas HTML → PDF
-Usa pdfkit + wkhtmltopdf (sin WeasyPrint)
+Usa Playwright con Chromium headless
 """
 
 import re
 import os
-import subprocess
+import base64
+import time
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 from datetime import datetime
-import pdfkit
+import asyncio
+from playwright.async_api import async_playwright
 
 # ============================================================
-# CONFIGURAR WKHTMLTOPDF
+# DATOS DE EJEMPLO POR PROYECTO
 # ============================================================
-def encontrar_wkhtmltopdf():
-    """Encuentra la ruta de wkhtmltopdf en el sistema"""
-    rutas_posibles = [
-        r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe",
-        r"C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe",
-        r"C:\Program Files\wkhtmltopdf\wkhtmltopdf.exe",
-        r"C:\wkhtmltopdf\bin\wkhtmltopdf.exe",
-        r"wkhtmltopdf",  # Si está en el PATH
-    ]
-    
-    for ruta in rutas_posibles:
-        if os.path.exists(ruta):
-            return ruta
-    
-    # Si no se encuentra, intentar con el PATH usando where
-    try:
-        result = subprocess.run(['where', 'wkhtmltopdf'], capture_output=True, text=True)
-        if result.stdout:
-            return result.stdout.strip().split('\n')[0]
-    except:
-        pass
-    
-    return None
+DATOS_EJEMPLO = {
+    'apa_tlajomulco': {
+        'clave_apa': 'APA-12345',
+        'propietario_nombre': 'JUAN PÉREZ GONZÁLEZ',
+        'domicilio': 'Calle Hidalgo 456, Col. Centro',
+        'saldo': '$12,345.67',
+        'adeudo_agua': '$8,900.00',
+        'recargos': '$250.00',
+        'actualizacion': '$150.00',
+        'total_adeudo': '$12,345.67',
+        'codebar': '1234567890',
+    },
+    'estado': {
+        'credito': 'CRED-2024-056',
+        'nombre_razon_social': 'EMPRESA EJEMPLO S.A. DE C.V.',
+        'importe_historico_determinado': '$156,789.00',
+        'calle_numero': 'Blvd. Principal 500',
+        'colonia': 'Empresarial',
+        'codigo_postal': '45010',
+        'municipio': 'Zapopan',
+        'rfc': 'EEJ900101ABC',
+        'no_documento': 'DOC-2024-001',
+        'codebar': '1234567890',
+    },
+    'pensiones': {
+        'nombre': 'JUAN PÉREZ GONZÁLEZ',
+        'prestamo': '12345',
+        'adeudo': '$45,678.90',
+        'ultimo_abono': '15/01/2025',
+        'aval_nombre': 'ROBERTO LÓPEZ MARTÍNEZ',
+        'codebar': '1234567890',
+    },
+    'predial_gdl': {
+        'propietario': 'ANA LAURA HERNÁNDEZ',
+        'cuenta': 'GDL-98765',
+        'saldo': '$15,200.00',
+        'folio_req': 'FOL-001',
+        'axo_req': '2025',
+        'codebar': '1234567890',
+    },
+    'predial_tlajomulco': {
+        'cuenta': 'PRED-00123',
+        'domicilio': 'Calle Independencia 789',
+        'total_adeudo': '$8,900.00',
+        'nombre_contribuyente': 'MARÍA GARCÍA LÓPEZ',
+        'codebar': '1234567890',
+    },
+}
 
-WKHTMLTOPDF_PATH = encontrar_wkhtmltopdf()
+# ============================================================
+# ALTURA POR PROYECTO Y PLANTILLA
+# ============================================================
+ALTURAS_ESPECIALES = {
+    'estado': {
+        'FEDERAL_estado_requerimiento.html': 1325,
+        'FE_CI_Liquidaciones_DGOS.html': 1286,
+        'FE_CI_Liquidaciones_DNEF.html': 1286,
+    },
+    'pensiones': {
+        'afiliados.html': 1300,
+        'avales.html': 1300,
+        'garantias.html': 1300,
+    },
+    'apa_tlajomulco': {
+        'apa_tlajomulco.html': 1286,
+    },
+    'predial_gdl': {
+        'predial_gdl.html': 1286,
+    },
+    'predial_tlajomulco': {
+        'predial_tlajomulco.html': 1286,
+    },
+}
 
-if WKHTMLTOPDF_PATH:
-    print(f"✅ wkhtmltopdf encontrado en: {WKHTMLTOPDF_PATH}")
-    config = pdfkit.configuration(wkhtmltopdf=WKHTMLTOPDF_PATH)
-else:
-    print("⚠️ wkhtmltopdf no encontrado. Usando fallback HTML.")
-    config = None
+# ============================================================
+# FUENTE DE CÓDIGO DE BARRAS (cargada una sola vez por proceso)
+# ============================================================
+_RUTA_FUENTE_CODEBAR = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
+_FUENTE_CODEBAR_B64: Optional[str] = None
+
+
+def _cargar_fuente_codebar_base64() -> Optional[str]:
+    """Carga la fuente IDAutomationHC39M y la cachea en memoria como base64."""
+    global _FUENTE_CODEBAR_B64
+    if _FUENTE_CODEBAR_B64 is not None:
+        return _FUENTE_CODEBAR_B64
+
+    if not _RUTA_FUENTE_CODEBAR.exists():
+        print(f"⚠️ Fuente de código de barras no encontrada en: {_RUTA_FUENTE_CODEBAR}")
+        return None
+
+    with open(_RUTA_FUENTE_CODEBAR, 'rb') as f:
+        _FUENTE_CODEBAR_B64 = base64.b64encode(f.read()).decode('utf-8')
+        print(f"✅ Fuente de código de barras cargada: {_RUTA_FUENTE_CODEBAR.name}")
+    return _FUENTE_CODEBAR_B64
+
 
 # ============================================================
 # CLASE PRINCIPAL
 # ============================================================
 class PlantillaRenderer:
     """
-    Renderer que usa pdfkit + wkhtmltopdf para generar PDFs
+    Renderer que usa Playwright + Chromium para generar PDFs
     """
 
     PAGE_WIDTH = 816
@@ -64,8 +130,6 @@ class PlantillaRenderer:
 
         if not self.base_path.exists():
             raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
-
-        self.config = config
 
     def _cargar_html(self, nombre_archivo: str) -> str:
         ruta_completa = self.base_path / nombre_archivo
@@ -96,24 +160,134 @@ class PlantillaRenderer:
 
     def _calcular_placeholders_especiales(self, pagina_actual: int = 1, total_paginas: int = 1) -> Dict[str, str]:
         ahora = datetime.now()
-        meses_es = {
-            'January': 'enero', 'February': 'febrero', 'March': 'marzo',
-            'April': 'abril', 'May': 'mayo', 'June': 'junio',
-            'July': 'julio', 'August': 'agosto', 'September': 'septiembre',
-            'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'
-        }
-        fecha_larga = ahora.strftime("%d de %B de %Y")
-        for en, es in meses_es.items():
-            fecha_larga = fecha_larga.replace(en, es)
-        
         return {
             '_fecha_actual': ahora.strftime("%d/%m/%Y"),
-            '_fecha_actual_larga': fecha_larga,
-            '_fecha_actual_extensa': ahora.strftime("%d del %B del %Y"),
             '_numero_pagina': str(pagina_actual),
             '_total_paginas': str(total_paginas),
             '_nombre_proyecto': self.proyecto_slug.replace('_', ' ').title(),
         }
+
+    def _obtener_datos_ejemplo(self) -> Dict[str, str]:
+        return DATOS_EJEMPLO.get(self.proyecto_slug, {})
+
+    def _obtener_altura(self, nombre_archivo: str) -> int:
+        proyecto_alturas = ALTURAS_ESPECIALES.get(self.proyecto_slug, {})
+        return proyecto_alturas.get(nombre_archivo, 1286)
+
+    def _generar_codigo_barras(self, datos: Dict[str, str]) -> str:
+        """Genera código de barras con formato Código 39 (*TEXTO*)"""
+        codebar = datos.get('codebar', '')
+        if not codebar:
+            timestamp = int(time.time() * 1000) % 10000000000
+            codebar = f"TRN{self.proyecto_slug[:4].upper()}{timestamp:010d}"
+        # Código 39 requiere asteriscos
+        return f"*{codebar.upper()}*"
+
+    def _estilo_codebar(self) -> str:
+        """
+        Bloque <style> con la fuente Code 39 embebida y una clase única
+        (.codebar-render) que se aplica al <span> que envuelve el código
+        de barras. Al declarar font-family / font-size / font-weight
+        directamente sobre ese span con !important, el resultado es
+        consistente sin importar si el placeholder {{codebar}} vive dentro
+        de un <span class="txt-negrita">, un <div style="font-weight:600">
+        o cualquier otro contenedor de la plantilla.
+        """
+        fuente_b64 = _cargar_fuente_codebar_base64()
+
+        font_face = ""
+        if fuente_b64:
+            font_face = f"""
+            @font-face {{
+                font-family: 'IDAutomationHC39M';
+                src: url('data:font/truetype;base64,{fuente_b64}') format('truetype');
+                font-weight: normal;
+                font-style: normal;
+            }}
+            """
+
+        return f"""
+        <style>
+            {font_face}
+            .codebar-render {{
+                font-family: 'IDAutomationHC39M', monospace !important;
+                font-size: 10px !important;
+                font-weight: normal !important;
+                letter-spacing: normal !important;
+                white-space: nowrap;
+            }}
+        </style>
+        """
+
+    def _convertir_imagenes_a_base64(self, html_content: str) -> str:
+        """Convierte imágenes a base64 para Playwright"""
+
+        print(f"\n🔍 [IMÁGENES] Procesando {self.proyecto_slug}...")
+        print(f"📁 Ruta base: {self.base_path}")
+
+        img_folder = self.base_path / "img"
+        if img_folder.exists():
+            imagenes_disponibles = list(img_folder.glob("*"))
+            print(f"📸 Imágenes disponibles ({len(imagenes_disponibles)}): {[f.name for f in imagenes_disponibles]}")
+        else:
+            print(f"❌ Carpeta img NO EXISTE en: {img_folder}")
+
+        # Background images
+        bg_pattern = r'url\([\'"]?\./img/([^\)\'\"]+)[\'"]?\)'
+        bg_matches = re.findall(bg_pattern, html_content)
+        if bg_matches:
+            print(f"🎯 Background images: {bg_matches}")
+
+        def reemplazar_bg(match):
+            nombre_imagen = match.group(1)
+            ruta_imagen = self.base_path / "img" / nombre_imagen
+            print(f"   🔎 Buscando bg: {nombre_imagen}")
+            if ruta_imagen.exists():
+                try:
+                    with open(ruta_imagen, 'rb') as f:
+                        img_data = base64.b64encode(f.read()).decode('utf-8')
+                        ext = ruta_imagen.suffix.lower()
+                        mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml'}.get(ext, 'image/png')
+                        print(f"   ✅ Convertida: {nombre_imagen}")
+                        return f'url("data:{mime};base64,{img_data}")'
+                except Exception as e:
+                    print(f"   ❌ Error: {e}")
+                    return match.group(0)
+            else:
+                print(f"   ❌ NO ENCONTRADA: {ruta_imagen}")
+                return match.group(0)
+
+        html_content = re.sub(bg_pattern, reemplazar_bg, html_content)
+
+        # <img> images
+        img_src_pattern = r'src=[\'"]\./img/([^\'"]+)[\'"]'
+        img_matches = re.findall(img_src_pattern, html_content)
+        if img_matches:
+            print(f"🎯 <img> images: {img_matches}")
+
+        def reemplazar_img(match):
+            nombre_imagen = match.group(1)
+            ruta_imagen = self.base_path / "img" / nombre_imagen
+            print(f"   🔎 Buscando img: {nombre_imagen}")
+            if ruta_imagen.exists():
+                try:
+                    with open(ruta_imagen, 'rb') as f:
+                        img_data = base64.b64encode(f.read()).decode('utf-8')
+                        ext = ruta_imagen.suffix.lower()
+                        mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml'}.get(ext, 'image/png')
+                        print(f"   ✅ Convertida img: {nombre_imagen}")
+                        return f'src="data:{mime};base64,{img_data}"'
+                except Exception as e:
+                    print(f"   ❌ Error: {e}")
+                    return match.group(0)
+            else:
+                print(f"   ❌ NO ENCONTRADA: {ruta_imagen}")
+                return match.group(0)
+
+        html_content = re.sub(img_src_pattern, reemplazar_img, html_content)
+
+        print(f"✅ [IMÁGENES] Procesamiento completado\n")
+        return html_content
 
     def renderizar_html(
         self,
@@ -121,84 +295,100 @@ class PlantillaRenderer:
         placeholders: Optional[Dict[str, str]] = None,
         preview_mode: bool = False,
         pagina_actual: int = 1,
-        total_paginas: int = 1
+        total_paginas: int = 1,
+        usar_datos_ejemplo: bool = False
     ) -> str:
         html_content = self._cargar_html(nombre_archivo)
         especiales = self._calcular_placeholders_especiales(pagina_actual, total_paginas)
-        
+
+        # Estilo + fuente para código de barras
+        html_content = html_content.replace('</head>', self._estilo_codebar() + '</head>')
+
+        if usar_datos_ejemplo or preview_mode:
+            datos = self._obtener_datos_ejemplo()
+            if 'codebar' not in datos:
+                datos['codebar'] = '1234567890'
+            placeholders = {**datos, **(placeholders or {})}
+
+        # ✅ Código de barras: SIEMPRE se procesa antes que el resto de
+        # placeholders, y se envuelve en un span propio para que la
+        # fuente/tamaño/peso queden garantizados sin importar el contenedor
+        # original ({{codebar}} puede venir dentro de span.txt-negrita,
+        # div.c-o-d-e-b-a-r-..., o un div con font-weight inline).
+        # Si esto se hiciera DESPUÉS del reemplazo genérico, y 'codebar'
+        # viniera dentro de placeholders (como pasa con "Datos de ejemplo"),
+        # el reemplazo genérico ya habría consumido {{codebar}} dejando
+        # texto plano sin formato de código de barras.
+        if '{{codebar}}' in html_content:
+            codebar = self._generar_codigo_barras(placeholders or {})
+            html_content = html_content.replace(
+                '{{codebar}}',
+                f'<span class="codebar-render">{codebar}</span>'
+            )
+            print(f"🔲 Código de barras generado: {codebar}")
+
         if placeholders:
-            todos_placeholders = {**placeholders, **especiales}
+            # Se excluye 'codebar' porque ya se procesó arriba con su propio
+            # formato; dejarlo aquí no tendría efecto (el token ya no existe)
+            # pero se quita por claridad y para evitar sorpresas futuras.
+            placeholders_sin_codebar = {k: v for k, v in placeholders.items() if k != 'codebar'}
+            todos_placeholders = {**placeholders_sin_codebar, **especiales}
             html_content = self._reemplazar_placeholders(html_content, todos_placeholders)
-        
-        if preview_mode:
+
+        if preview_mode and not usar_datos_ejemplo:
             html_content = self._resaltar_placeholders(html_content)
-        
+
+        # ✅ Imágenes a base64
+        html_content = self._convertir_imagenes_a_base64(html_content)
+
         return html_content
 
-    def generar_pdf(self, html_content: str, nombre_archivo: Optional[str] = None) -> bytes:
-        """Genera PDF usando pdfkit o fallback HTML"""
-        
-        # Si pdfkit está disponible y configurado
-        if self.config:
+    async def _generar_pdf_async(self, html_content: str, nombre_archivo: str = None) -> bytes:
+        altura = self._obtener_altura(nombre_archivo) if nombre_archivo else 1286
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=['--disable-gpu', '--no-sandbox'])
             try:
-                # Opciones para formato Oficio México
-                options = {
-                    'page-size': 'Letter',
-                    'margin-top': '15mm',
-                    'margin-bottom': '15mm',
-                    'margin-left': '15mm',
-                    'margin-right': '15mm',
-                    'encoding': 'UTF-8',
-                    'enable-local-file-access': None,
-                    'disable-smart-shrinking': None,
-                    'print-media-type': None,
-                    'javascript-delay': 500,  # Esperar a que carguen las imágenes
-                }
-                
-                # Generar PDF desde string HTML
-                pdf_bytes = pdfkit.from_string(
-                    html_content, 
-                    False,  # False = no guardar en archivo, retornar bytes
-                    options=options,
-                    configuration=self.config
+                context = await browser.new_context(viewport={'width': 816, 'height': altura})
+                page = await context.new_page()
+                await page.set_content(html_content, wait_until='networkidle')
+                await page.wait_for_timeout(1000)
+                pdf_bytes = await page.pdf(
+                    print_background=True,
+                    width=f'816px',
+                    height=f'{altura}px',
+                    margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
+                    prefer_css_page_size=True,
                 )
                 return pdf_bytes
-            except Exception as e:
-                print(f"⚠️ Error generando PDF con pdfkit: {e}")
-                # Si falla, usar fallback HTML
-        
-        # Fallback: retornar HTML envuelto
-        html_completo = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; padding: 20px; background: #f0f0f0; }}
-                .container {{ max-width: 816px; margin: 0 auto; background: white; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                .warning {{ background: #ff6b6b; color: white; padding: 12px; border-radius: 4px; margin-bottom: 16px; text-align: center; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="warning">⚠️ PDF no disponible - Vista previa HTML</div>
-                {html_content}
-            </div>
-        </body>
-        </html>
-        """
-        return html_completo.encode('utf-8')
+            finally:
+                await browser.close()
+
+    def generar_pdf(self, html_content: str, nombre_archivo: Optional[str] = None) -> bytes:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            pdf_bytes = loop.run_until_complete(self._generar_pdf_async(html_content, nombre_archivo))
+            loop.close()
+            return pdf_bytes
+        except Exception as e:
+            print(f"⚠️ Error generando PDF con Playwright: {e}")
+            import traceback
+            traceback.print_exc()
+            return html_content.encode('utf-8')
 
     def renderizar_pdf(
         self,
         nombre_archivo: str,
         placeholders: Optional[Dict[str, str]] = None,
-        preview_mode: bool = False
+        preview_mode: bool = False,
+        usar_datos_ejemplo: bool = False
     ) -> bytes:
         html_content = self.renderizar_html(
             nombre_archivo=nombre_archivo,
             placeholders=placeholders,
-            preview_mode=preview_mode
+            preview_mode=preview_mode,
+            usar_datos_ejemplo=usar_datos_ejemplo
         )
         return self.generar_pdf(html_content, nombre_archivo)
 
@@ -218,15 +408,18 @@ def generar_preview_pdf(
     preview_mode: bool = False
 ) -> bytes:
     renderer = PlantillaRenderer(proyecto_slug)
-    return renderer.renderizar_pdf(nombre_archivo, placeholders, preview_mode)
+    return renderer.renderizar_pdf(
+        nombre_archivo,
+        placeholders=placeholders,
+        preview_mode=preview_mode,
+        usar_datos_ejemplo=preview_mode
+    )
 
 
 def obtener_placeholders_especiales() -> Dict[str, str]:
     return {
-        '{{codebar}}': 'Código de barras (se genera automáticamente)',
+        '{{codebar}}': 'Código de barras (Código 39 con asteriscos)',
         '{{_fecha_actual}}': 'Fecha actual en formato dd/mm/aaaa',
-        '{{_fecha_actual_larga}}': 'Fecha actual en formato dd de mmmm de aaaa',
-        '{{_fecha_actual_extensa}}': 'Fecha actual en formato dd del mmmm del aaaa',
         '{{_numero_pagina}}': 'Número de página actual',
         '{{_total_paginas}}': 'Total de páginas del documento',
         '{{_nombre_proyecto}}': 'Nombre del proyecto',

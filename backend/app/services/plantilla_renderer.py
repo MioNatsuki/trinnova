@@ -1,3 +1,4 @@
+# backend/app/services/plantilla_renderer.py
 """
 Motor de renderizado de plantillas HTML → PDF
 Usa Playwright con Chromium headless
@@ -70,7 +71,7 @@ DATOS_EJEMPLO = {
 # ============================================================
 ALTURAS_ESPECIALES = {
     'estado': {
-        'FEDERAL_estado_requerimiento.html': 1325,
+        'FEDERAL_estado_requerimiento.html': 1300,
         'FE_CI_Liquidaciones_DGOS.html': 1286,
         'FE_CI_Liquidaciones_DNEF.html': 1286,
     },
@@ -91,7 +92,7 @@ ALTURAS_ESPECIALES = {
 }
 
 # ============================================================
-# FUENTE DE CÓDIGO DE BARRAS (cargada una sola vez por proceso)
+# FUENTE DE CÓDIGO DE BARRAS
 # ============================================================
 _RUTA_FUENTE_CODEBAR = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
 _FUENTE_CODEBAR_B64: Optional[str] = None
@@ -180,18 +181,12 @@ class PlantillaRenderer:
         if not codebar:
             timestamp = int(time.time() * 1000) % 10000000000
             codebar = f"TRN{self.proyecto_slug[:4].upper()}{timestamp:010d}"
-        # Código 39 requiere asteriscos
         return f"*{codebar.upper()}*"
 
     def _estilo_codebar(self) -> str:
         """
-        Bloque <style> con la fuente Code 39 embebida y una clase única
-        (.codebar-render) que se aplica al <span> que envuelve el código
-        de barras. Al declarar font-family / font-size / font-weight
-        directamente sobre ese span con !important, el resultado es
-        consistente sin importar si el placeholder {{codebar}} vive dentro
-        de un <span class="txt-negrita">, un <div style="font-weight:600">
-        o cualquier otro contenedor de la plantilla.
+        Bloque <style> con la fuente IDAutomationHC39M embebida
+        Tamaño 11px, sin negritas
         """
         fuente_b64 = _cargar_fuente_codebar_base64()
 
@@ -211,82 +206,137 @@ class PlantillaRenderer:
             {font_face}
             .codebar-render {{
                 font-family: 'IDAutomationHC39M', monospace !important;
-                font-size: 10px !important;
+                font-size: 11px !important;
                 font-weight: normal !important;
+                font-style: normal !important;
                 letter-spacing: normal !important;
-                white-space: nowrap;
+                white-space: nowrap !important;
+                display: inline !important;
+                line-height: 1 !important;
+                text-decoration: none !important;
+                background: transparent !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: none !important;
             }}
         </style>
         """
 
     def _convertir_imagenes_a_base64(self, html_content: str) -> str:
-        """Convierte imágenes a base64 para Playwright"""
-
+        """
+        Convierte imágenes a base64 para Playwright
+        SOLO CAMBIO: Ahora busca TODAS las variantes de url()
+        """
         print(f"\n🔍 [IMÁGENES] Procesando {self.proyecto_slug}...")
         print(f"📁 Ruta base: {self.base_path}")
 
         img_folder = self.base_path / "img"
-        if img_folder.exists():
-            imagenes_disponibles = list(img_folder.glob("*"))
-            print(f"📸 Imágenes disponibles ({len(imagenes_disponibles)}): {[f.name for f in imagenes_disponibles]}")
-        else:
-            print(f"❌ Carpeta img NO EXISTE en: {img_folder}")
+        if not img_folder.exists():
+            print(f"⚠️ Carpeta img NO EXISTE en: {img_folder}")
+            return html_content
 
-        # Background images
-        bg_pattern = r'url\([\'"]?\./img/([^\)\'\"]+)[\'"]?\)'
-        bg_matches = re.findall(bg_pattern, html_content)
-        if bg_matches:
-            print(f"🎯 Background images: {bg_matches}")
+        imagenes_disponibles = list(img_folder.glob("*"))
+        print(f"📸 Imágenes disponibles ({len(imagenes_disponibles)}): {[f.name for f in imagenes_disponibles]}")
 
-        def reemplazar_bg(match):
-            nombre_imagen = match.group(1)
-            ruta_imagen = self.base_path / "img" / nombre_imagen
-            print(f"   🔎 Buscando bg: {nombre_imagen}")
-            if ruta_imagen.exists():
-                try:
-                    with open(ruta_imagen, 'rb') as f:
-                        img_data = base64.b64encode(f.read()).decode('utf-8')
-                        ext = ruta_imagen.suffix.lower()
-                        mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml'}.get(ext, 'image/png')
-                        print(f"   ✅ Convertida: {nombre_imagen}")
-                        return f'url("data:{mime};base64,{img_data}")'
-                except Exception as e:
-                    print(f"   ❌ Error: {e}")
-                    return match.group(0)
-            else:
-                print(f"   ❌ NO ENCONTRADA: {ruta_imagen}")
-                return match.group(0)
+        # Cache de imágenes convertidas
+        cache_imagenes = {}
 
-        html_content = re.sub(bg_pattern, reemplazar_bg, html_content)
+        def obtener_imagen_base64(nombre_imagen: str) -> Optional[str]:
+            """Retorna el data:image base64 o None si no existe"""
+            nombre_limpio = nombre_imagen.split('?')[0].split('#')[0]
+            
+            if nombre_limpio in cache_imagenes:
+                return cache_imagenes[nombre_limpio]
+            
+            ruta_imagen = img_folder / nombre_limpio
+            print(f"   🔎 Buscando: {nombre_limpio}")
+            
+            if not ruta_imagen.exists():
+                # Intentar con minúsculas
+                nombre_minusculas = nombre_limpio.lower()
+                if nombre_minusculas != nombre_limpio:
+                    ruta_imagen_alt = img_folder / nombre_minusculas
+                    if ruta_imagen_alt.exists():
+                        ruta_imagen = ruta_imagen_alt
+                        nombre_limpio = nombre_minusculas
+                        print(f"   🔄 Encontrado como: {nombre_minusculas}")
+                    else:
+                        print(f"   ❌ NO ENCONTRADA: {nombre_limpio}")
+                        cache_imagenes[nombre_limpio] = None
+                        return None
+                else:
+                    print(f"   ❌ NO ENCONTRADA: {nombre_limpio}")
+                    cache_imagenes[nombre_limpio] = None
+                    return None
 
-        # <img> images
-        img_src_pattern = r'src=[\'"]\./img/([^\'"]+)[\'"]'
-        img_matches = re.findall(img_src_pattern, html_content)
-        if img_matches:
-            print(f"🎯 <img> images: {img_matches}")
+            try:
+                with open(ruta_imagen, 'rb') as f:
+                    img_data = base64.b64encode(f.read()).decode('utf-8')
+                    ext = ruta_imagen.suffix.lower()
+                    mime = {
+                        '.png': 'image/png', '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+                        '.svg': 'image/svg+xml', '.webp': 'image/webp'
+                    }.get(ext, 'image/png')
+                    result = f"data:{mime};base64,{img_data}"
+                    cache_imagenes[nombre_limpio] = result
+                    print(f"   ✅ Convertida: {nombre_limpio}")
+                    return result
+            except Exception as e:
+                print(f"   ❌ Error al leer {nombre_limpio}: {e}")
+                cache_imagenes[nombre_limpio] = None
+                return None
 
-        def reemplazar_img(match):
-            nombre_imagen = match.group(1)
-            ruta_imagen = self.base_path / "img" / nombre_imagen
-            print(f"   🔎 Buscando img: {nombre_imagen}")
-            if ruta_imagen.exists():
-                try:
-                    with open(ruta_imagen, 'rb') as f:
-                        img_data = base64.b64encode(f.read()).decode('utf-8')
-                        ext = ruta_imagen.suffix.lower()
-                        mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml'}.get(ext, 'image/png')
-                        print(f"   ✅ Convertida img: {nombre_imagen}")
-                        return f'src="data:{mime};base64,{img_data}"'
-                except Exception as e:
-                    print(f"   ❌ Error: {e}")
-                    return match.group(0)
-            else:
-                print(f"   ❌ NO ENCONTRADA: {ruta_imagen}")
-                return match.group(0)
+        # ============================================================
+        # CAMBIO IMPORTANTE: Buscar TODAS las variantes de url()
+        # ============================================================
+        
+        # 1. url('./img/archivo.png') - con ./img/
+        def reemplazar_url1(match):
+            ruta = match.group(1)
+            nombre = ruta.replace('./img/', '').replace('img/', '')
+            img_b64 = obtener_imagen_base64(nombre)
+            if img_b64:
+                return f'url("{img_b64}")'
+            return match.group(0)
+        
+        html_content = re.sub(
+            r'url\([\'"]?(\./img/[^\'")]+)[\'"]?\)',
+            reemplazar_url1,
+            html_content
+        )
 
-        html_content = re.sub(img_src_pattern, reemplazar_img, html_content)
+        # 2. url('img/archivo.png') - sin ./
+        def reemplazar_url2(match):
+            ruta = match.group(1)
+            nombre = ruta.replace('img/', '')
+            img_b64 = obtener_imagen_base64(nombre)
+            if img_b64:
+                return f'url("{img_b64}")'
+            return match.group(0)
+        
+        html_content = re.sub(
+            r'url\([\'"]?(img/[^\'")]+)[\'"]?\)',
+            reemplazar_url2,
+            html_content
+        )
 
-        print(f"✅ [IMÁGENES] Procesamiento completado\n")
+        # 3. url('archivo.png') - solo el nombre (asumiendo que está en img/)
+        def reemplazar_url3(match):
+            nombre = match.group(1).strip()
+            # Verificar si existe en la carpeta img
+            if (img_folder / nombre).exists() or (img_folder / nombre.lower()).exists():
+                img_b64 = obtener_imagen_base64(nombre)
+                if img_b64:
+                    return f'url("{img_b64}")'
+            return match.group(0)
+        
+        html_content = re.sub(
+            r'url\([\'"]?([^/\'")]+\.[a-zA-Z0-9]+)[\'"]?\)',
+            reemplazar_url3,
+            html_content
+        )
+
         return html_content
 
     def renderizar_html(
@@ -301,24 +351,17 @@ class PlantillaRenderer:
         html_content = self._cargar_html(nombre_archivo)
         especiales = self._calcular_placeholders_especiales(pagina_actual, total_paginas)
 
-        # Estilo + fuente para código de barras
+        # === 1. INYECTAR ESTILO DE CÓDIGO DE BARRAS ===
         html_content = html_content.replace('</head>', self._estilo_codebar() + '</head>')
 
+        # === 2. PREPARAR DATOS ===
         if usar_datos_ejemplo or preview_mode:
             datos = self._obtener_datos_ejemplo()
             if 'codebar' not in datos:
                 datos['codebar'] = '1234567890'
             placeholders = {**datos, **(placeholders or {})}
 
-        # ✅ Código de barras: SIEMPRE se procesa antes que el resto de
-        # placeholders, y se envuelve en un span propio para que la
-        # fuente/tamaño/peso queden garantizados sin importar el contenedor
-        # original ({{codebar}} puede venir dentro de span.txt-negrita,
-        # div.c-o-d-e-b-a-r-..., o un div con font-weight inline).
-        # Si esto se hiciera DESPUÉS del reemplazo genérico, y 'codebar'
-        # viniera dentro de placeholders (como pasa con "Datos de ejemplo"),
-        # el reemplazo genérico ya habría consumido {{codebar}} dejando
-        # texto plano sin formato de código de barras.
+        # === 3. PROCESAR CÓDIGO DE BARRAS ===
         if '{{codebar}}' in html_content:
             codebar = self._generar_codigo_barras(placeholders or {})
             html_content = html_content.replace(
@@ -327,18 +370,17 @@ class PlantillaRenderer:
             )
             print(f"🔲 Código de barras generado: {codebar}")
 
+        # === 4. PROCESAR RESTO DE PLACEHOLDERS ===
         if placeholders:
-            # Se excluye 'codebar' porque ya se procesó arriba con su propio
-            # formato; dejarlo aquí no tendría efecto (el token ya no existe)
-            # pero se quita por claridad y para evitar sorpresas futuras.
             placeholders_sin_codebar = {k: v for k, v in placeholders.items() if k != 'codebar'}
             todos_placeholders = {**placeholders_sin_codebar, **especiales}
             html_content = self._reemplazar_placeholders(html_content, todos_placeholders)
 
+        # === 5. MODO PREVIEW ===
         if preview_mode and not usar_datos_ejemplo:
             html_content = self._resaltar_placeholders(html_content)
 
-        # ✅ Imágenes a base64
+        # === 6. CONVERTIR IMÁGENES A BASE64 ===
         html_content = self._convertir_imagenes_a_base64(html_content)
 
         return html_content
@@ -347,12 +389,23 @@ class PlantillaRenderer:
         altura = self._obtener_altura(nombre_archivo) if nombre_archivo else 1286
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=['--disable-gpu', '--no-sandbox'])
+            browser = await p.chromium.launch(
+                headless=True, 
+                args=[
+                    '--disable-gpu', 
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-web-security',
+                    '--disable-features=IsolateOrigins,site-per-process'
+                ]
+            )
             try:
                 context = await browser.new_context(viewport={'width': 816, 'height': altura})
                 page = await context.new_page()
+                
                 await page.set_content(html_content, wait_until='networkidle')
                 await page.wait_for_timeout(1000)
+                
                 pdf_bytes = await page.pdf(
                     print_background=True,
                     width=f'816px',

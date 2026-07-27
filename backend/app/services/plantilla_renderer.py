@@ -297,7 +297,7 @@ class PlantillaRenderer:
             nombre = ruta.replace('./img/', '').replace('img/', '')
             img_b64 = obtener_imagen_base64(nombre)
             if img_b64:
-                return f'url("{img_b64}")'
+                return f"url('{img_b64}')"
             return match.group(0)
         
         html_content = re.sub(
@@ -312,7 +312,7 @@ class PlantillaRenderer:
             nombre = ruta.replace('img/', '')
             img_b64 = obtener_imagen_base64(nombre)
             if img_b64:
-                return f'url("{img_b64}")'
+                return f"url('{img_b64}')"
             return match.group(0)
         
         html_content = re.sub(
@@ -328,7 +328,7 @@ class PlantillaRenderer:
             if (img_folder / nombre).exists() or (img_folder / nombre.lower()).exists():
                 img_b64 = obtener_imagen_base64(nombre)
                 if img_b64:
-                    return f'url("{img_b64}")'
+                    return f"url('{img_b64}')"
             return match.group(0)
         
         html_content = re.sub(

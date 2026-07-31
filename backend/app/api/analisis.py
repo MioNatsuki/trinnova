@@ -1330,13 +1330,13 @@ def actualizar_analisis_celdas(
 @router.get("/{proyecto_slug}/analisis")
 def get_analisis(
     proyecto_slug: str,
-    viabilidad: Optional[str] = Query(None),
-    busqueda: Optional[str] = None,
-    programa: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
-    sort_col: Optional[str] = Query(None),
-    sort_dir: Optional[str] = Query("asc"),
+    viabilidad: Optional[str] = Query(None, description="Filtrar por viabilidad"),
+    busqueda: Optional[str] = Query(None, description="Búsqueda general"),  # <-- AGREGAR Query()
+    programa: Optional[str] = Query(None, description="Filtrar por programa"),
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(50, ge=1, le=50, description="Registros por página"),
+    sort_col: Optional[str] = Query(None, description="Columna para ordenar"),
+    sort_dir: Optional[str] = Query("asc", description="Dirección de ordenamiento (asc/desc)"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -1462,3 +1462,375 @@ def actualizar_analisis_celdas_PATCH(
 
     db_proyecto.commit()
     return {"success": True, "message": f"{actualizados} registro(s) actualizados."}
+
+@router.get("/{proyecto_slug}/dinamica")
+def get_tabla_dinamica(
+    proyecto_slug: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=5000),
+    search: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Obtiene los datos de tabla_analisis para mostrar en la pantalla de Cálculos.
+    Los resultados calculados se guardarán en tabla_dinamica.
+    """
+    from sqlalchemy import text
+    
+    # Verificar acceso al proyecto
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    
+    # Obtener conexión a la base de datos del proyecto
+    db_proyecto = next(get_project_db(proyecto_slug))
+    
+    # Determinar la PK según el proyecto
+    pks = {
+        "apa_tlajomulco": "clave_APA",
+        "predial_tlajomulco": "cuenta",
+        "licencias_gdl": "licencia",
+        "predial_gdl": "cuenta_n",
+        "estado": "credito",
+        "pensiones": "prestamo",
+    }
+    pk = pks.get(proyecto_slug, "id")
+    
+    # Verificar que tabla_analisis existe
+    try:
+        db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
+    except Exception as e:
+        return {
+            "rows": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+            "error": "La tabla_analisis aún no existe. Genera el análisis primero."
+        }
+    
+    # Construir condiciones de búsqueda
+    conditions = []
+    params = {}
+    
+    if search:
+        conditions.append(f"CAST(`{pk}` AS CHAR) LIKE :search")
+        params["search"] = f"%{search}%"
+    
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    
+    # Contar total
+    count_query = f"SELECT COUNT(*) AS total FROM tabla_analisis {where_clause}"
+    total = db_proyecto.execute(text(count_query), params).first().total
+    
+    # Calcular offset
+    offset = (page - 1) * limit
+    
+    # Obtener datos de tabla_analisis
+    data_query = f"SELECT * FROM tabla_analisis {where_clause} LIMIT {limit} OFFSET {offset}"
+    rows = db_proyecto.execute(text(data_query), params).fetchall()
+    
+    # Convertir a diccionarios
+    result_rows = []
+    for row in rows:
+        row_dict = dict(row._mapping)
+        result_rows.append(row_dict)
+    
+    return {
+        "rows": result_rows,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pk": pk
+    }
+
+@router.post("/{proyecto_slug}/calcular-todas")
+def calcular_todas_filas(
+    proyecto_slug: str,
+    fecha_emision: Optional[str] = Query(None, description="Fecha de emisión (YYYY-MM-DD)"),
+    visita: Optional[str] = Query(None, description="Última visita"),
+    pmo: Optional[str] = Query(None, description="Último PMO"),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Calcula todas las filas:
+    - LEE de tabla_analisis
+    - GUARDA resultados en tabla_dinamica
+    """
+    from sqlalchemy import text
+    from app.services.inpc_service import INPCService
+    from app.services.numero_a_letras import numero_a_letras
+    
+    # Verificar acceso al proyecto
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    
+    # Obtener conexión a la base de datos del proyecto
+    db_proyecto = next(get_project_db(proyecto_slug))
+    
+    # Verificar que tabla_analisis existe
+    try:
+        db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "La tabla_analisis aún no existe. Genera el análisis primero."
+        }
+    
+    # Determinar la PK según el proyecto
+    pks = {
+        "apa_tlajomulco": "clave_APA",
+        "predial_tlajomulco": "cuenta",
+        "licencias_gdl": "licencia",
+        "predial_gdl": "cuenta_n",
+        "estado": "credito",
+        "pensiones": "prestamo",
+    }
+    pk_name = pks.get(proyecto_slug, "id")
+    
+    # Obtener fecha de emisión
+    if fecha_emision:
+        try:
+            fecha_emision_dt = datetime.strptime(fecha_emision, '%Y-%m-%d')
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Formato de fecha inválido: {fecha_emision}"
+            }
+    else:
+        fecha_emision_dt = datetime.now()
+    
+    # OBTENER TODAS LAS FILAS DE tabla_analisis (NO de tabla_dinamica)
+    rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
+    
+    if not rows:
+        return {
+            "success": False,
+            "error": "No hay datos en tabla_analisis"
+        }
+    
+    # Asegurar que tabla_dinamica existe
+    try:
+        db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
+    except Exception:
+        # Crear tabla_dinamica a partir de tabla_analisis
+        db_proyecto.execute(text(f"CREATE TABLE tabla_dinamica LIKE tabla_analisis"))
+        db_proyecto.commit()
+        
+        # Agregar columnas de cálculo
+        columnas_extra = [
+            "proximo_inpc VARCHAR(7) DEFAULT NULL",
+            "inpc_notificacion DECIMAL(10,4) DEFAULT NULL",
+            "inpc_requerimiento DECIMAL(10,4) DEFAULT NULL",
+            "periodo_notificacion VARCHAR(7) DEFAULT NULL",
+            "periodo_requerimiento VARCHAR(7) DEFAULT NULL",
+            "factor_actualizacion DECIMAL(12,6) DEFAULT NULL",
+            "importe_actualizacion DECIMAL(15,2) DEFAULT NULL",
+            "total_multa_actualizada DECIMAL(15,2) DEFAULT NULL",
+            "importe_letra VARCHAR(500) DEFAULT NULL",
+            "codebar VARCHAR(100) DEFAULT NULL",
+            "fecha_emision DATE DEFAULT NULL",
+            "visita VARCHAR(50) DEFAULT NULL",
+            "pmo VARCHAR(50) DEFAULT NULL",
+            "id_documento INT DEFAULT NULL",
+            "id_notificador INT DEFAULT NULL"
+        ]
+        
+        for col in columnas_extra:
+            try:
+                db_proyecto.execute(text(f"ALTER TABLE tabla_dinamica ADD COLUMN {col}"))
+            except Exception:
+                pass  # Columna ya existe
+        db_proyecto.commit()
+    
+    procesados = 0
+    errores = []
+    
+    for row in rows:
+        row_dict = dict(row._mapping)
+        pk_value = row_dict.get(pk_name)
+        
+        if not pk_value:
+            errores.append(f"Fila sin PK: {row_dict}")
+            continue
+        
+        try:
+            if proyecto_slug == "estado":
+                # Obtener fecha de notificación
+                fecha_notificacion = row_dict.get('fecha_notificacion')
+                
+                if not fecha_notificacion:
+                    errores.append(f"Fila {pk_value}: Falta fecha_notificacion - SALTEADA")
+                    continue
+                
+                # Si es string, convertirlo a datetime
+                if isinstance(fecha_notificacion, str):
+                    try:
+                        fecha_notificacion = datetime.strptime(fecha_notificacion, '%Y-%m-%d')
+                    except ValueError:
+                        errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SALTEADA")
+                        continue
+                # Si es date, convertirlo a datetime
+                elif hasattr(fecha_notificacion, 'year') and not isinstance(fecha_notificacion, datetime):
+                    try:
+                        fecha_notificacion = datetime.combine(fecha_notificacion, datetime.min.time())
+                    except Exception:
+                        errores.append(f"Fila {pk_value}: fecha_notificacion no es fecha válida - SALTEADA")
+                        continue
+                # Si no es string ni date, verificar que sea datetime
+                elif not isinstance(fecha_notificacion, datetime):
+                    errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido: {type(fecha_notificacion)} - SALTEADA")
+                    continue
+                
+                # Obtener importe histórico
+                importe_historico = row_dict.get('importe_historico_determinado', 0)
+                try:
+                    importe_historico = float(importe_historico)
+                except (ValueError, TypeError):
+                    importe_historico = 0
+                
+                # Calcular INPC usando fecha_notificacion y fecha_emision
+                calculo = INPCService.calcular_actualizacion_multas_v2(
+                    db_global,
+                    importe_historico,
+                    fecha_notificacion,
+                    fecha_emision_dt
+                )
+                
+                if not calculo["success"]:
+                    errores.append(f"Fila {pk_value}: {calculo['error']} - SALTEADA")
+                    continue
+                
+                data = calculo["data"]
+                
+                # Convertir a letras
+                importe_letra = numero_a_letras(float(data["total_actualizado"]))
+                
+                # Generar código de barras
+                codebar = f"*{str(pk_value)[:10]}{fecha_emision_dt.strftime('%Y%m%d%H%M%S')}*"
+                
+                # Obtener último INPC para próximo_inpc
+                ultimo_inpc = INPCService.obtener_ultimo_registro(db_global)
+                
+                # Verificar si la fila ya existe en tabla_dinamica
+                existe = db_proyecto.execute(
+                    text(f"SELECT 1 FROM tabla_dinamica WHERE `{pk_name}` = :pk LIMIT 1"),
+                    {"pk": pk_value}
+                ).first()
+                
+                if existe:
+                    update_query = text(f"""
+                        UPDATE tabla_dinamica 
+                        SET 
+                            proximo_inpc = :proximo_inpc,
+                            fecha_inpc_a = :fecha_inpc_a,
+                            periodo_a = :periodo_a,
+                            inpc_a = :inpc_a,
+                            fecha_inpc_b = :fecha_inpc_b,
+                            periodo_b = :periodo_b,
+                            inpc_b = :inpc_b,
+                            factor_actualizacion = :factor_actualizacion,
+                            importe_actualizacion = :importe_actualizacion,
+                            total_multa_actualizada = :total_multa_actualizada,
+                            importe_letra = :importe_letra,
+                            codebar = :codebar,
+                            fecha_emision = :fecha_emision,
+                            visita = :visita,
+                            pmo = :pmo
+                        WHERE `{pk_name}` = :pk
+                    """)
+                    
+                    db_proyecto.execute(update_query, {
+                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
+                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
+                        "periodo_a": data["periodo_a"],
+                        "inpc_a": float(data["inpc_a"]),
+                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
+                        "periodo_b": data["periodo_b"],
+                        "inpc_b": float(data["inpc_b"]),
+                        "factor_actualizacion": float(data["factor_actualizacion"]),
+                        "importe_actualizacion": float(data["importe_actualizacion"]),
+                        "total_multa_actualizada": float(data["total_actualizado"]),
+                        "importe_letra": importe_letra,
+                        "codebar": codebar,
+                        "fecha_emision": fecha_emision_dt.date(),
+                        "visita": visita,
+                        "pmo": pmo,
+                        "pk": pk_value
+                    })
+                else:
+                    # INSERT
+                    # Obtener columnas de tabla_analisis
+                    cols_analisis = _get_tabla_cols(db_proyecto, "tabla_analisis")
+                    
+                    # Construir INSERT con todas las columnas
+                    cols_insert = [f"`{c}`" for c in cols_analisis] + [
+                        "proximo_inpc", "fecha_inpc_a", "periodo_a", "inpc_a",
+                        "fecha_inpc_b", "periodo_b", "inpc_b",
+                        "factor_actualizacion", "importe_actualizacion",
+                        "total_multa_actualizada", "importe_letra", "codebar",
+                        "fecha_emision", "visita", "pmo"
+                    ]
+                    vals_insert = [f":{c}" for c in cols_analisis] + [
+                        ":proximo_inpc", ":fecha_inpc_a", ":periodo_a", ":inpc_a",
+                        ":fecha_inpc_b", ":periodo_b", ":inpc_b",
+                        ":factor_actualizacion", ":importe_actualizacion",
+                        ":total_multa_actualizada", ":importe_letra", ":codebar",
+                        ":fecha_emision", ":visita", ":pmo"
+                    ]
+                    
+                    insert_params = {c: row_dict.get(c) for c in cols_analisis}
+                    insert_params.update({
+                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
+                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
+                        "periodo_a": data["periodo_a"],
+                        "inpc_a": float(data["inpc_a"]),
+                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
+                        "periodo_b": data["periodo_b"],
+                        "inpc_b": float(data["inpc_b"]),
+                        "factor_actualizacion": float(data["factor_actualizacion"]),
+                        "importe_actualizacion": float(data["importe_actualizacion"]),
+                        "total_multa_actualizada": float(data["total_actualizado"]),
+                        "importe_letra": importe_letra,
+                        "codebar": codebar,
+                        "fecha_emision": fecha_emision_dt.date(),
+                        "visita": visita,
+                        "pmo": pmo
+                    })
+                    
+                    insert_query = text(f"""
+                        INSERT INTO tabla_dinamica 
+                        ({', '.join(cols_insert)})
+                        VALUES ({', '.join(vals_insert)})
+                    """)
+                    
+                    db_proyecto.execute(insert_query, insert_params)
+                
+                procesados += 1
+            
+            # Commit cada 100 registros
+            if procesados % 100 == 0:
+                db_proyecto.commit()
+                
+        except Exception as e:
+            errores.append(f"Fila {pk_value}: {str(e)}")
+            db_proyecto.rollback()
+    
+    # Commit final
+    db_proyecto.commit()
+    
+    # Registrar log
+    registrar_log(
+        db_global,
+        current_user.id,
+        "calcular_todas_filas",
+        f"Cálculo masivo en {proyecto_slug}: {procesados} filas, {len(errores)} errores",
+        proyecto.id
+    )
+    
+    return {
+        "success": procesados > 0,
+        "procesados": procesados,
+        "errores": errores[:50],
+        "total_errores": len(errores),
+        "mensaje": f"{procesados} filas calculadas, {len(errores)} errores"
+    }

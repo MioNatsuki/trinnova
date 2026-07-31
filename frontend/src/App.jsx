@@ -11,6 +11,7 @@ import CargarPadron from './pages/analisis/CargarPadron';
 import Complementar from './pages/analisis/Complementar';
 import LimpiezaAnalisis from './pages/analisis/LimpiezaAnalisis';
 import PlantillasDashboard from './pages/plantillas/PlantillasDashboard';
+import Calculos from './pages/analisis/Calculos';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -49,7 +50,7 @@ function AppRoutes() {
               <Route path="analisis/cargar"       element={<CargarPadron />} />
               <Route path="analisis/complementar" element={<Complementar />} />
               <Route path="analisis/limpieza"     element={<LimpiezaAnalisis />} />
-              <Route path="analisis/calculos"     element={<div style={{ padding: 24 }}><h2>Cálculos</h2><p>Módulo en desarrollo — Fase 5</p></div>} />
+              <Route path="analisis/calculos"     element={<Calculos />} />
             </>
           )}
 

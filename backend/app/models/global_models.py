@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
 import enum
+from sqlalchemy import DECIMAL
 
 
 class RolNombre(str, enum.Enum):
@@ -156,3 +157,14 @@ class Programa(Base):
     updated_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     proyecto = relationship("Proyecto")
+
+class InpcHistorico(Base):
+    __tablename__ = "inpc_historico"
+
+    id = Column(Integer, primary_key=True, index=True)
+    periodo = Column(String(7), nullable=False, unique=True, comment="Período en formato YYYY-MM")
+    valor = Column(DECIMAL(10, 4), nullable=False, comment="Valor del INPC")
+    fecha_actualizacion = Column(DateTime, server_default=func.now(), comment="Fecha de última actualización")
+
+    def __repr__(self):
+        return f"<InpcHistorico periodo={self.periodo} valor={self.valor}>"

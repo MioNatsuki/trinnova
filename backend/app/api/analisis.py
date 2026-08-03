@@ -1599,7 +1599,7 @@ def calcular_todas_filas(
     else:
         fecha_emision_dt = datetime.now()
     
-    # OBTENER TODAS LAS FILAS DE tabla_analisis (NO de tabla_dinamica)
+    # OBTENER TODAS LAS FILAS DE tabla_analisis
     rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
     
     if not rows:
@@ -1612,34 +1612,39 @@ def calcular_todas_filas(
     try:
         db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
     except Exception:
-        # Crear tabla_dinamica a partir de tabla_analisis
-        db_proyecto.execute(text(f"CREATE TABLE tabla_dinamica LIKE tabla_analisis"))
-        db_proyecto.commit()
-        
-        # Agregar columnas de cálculo
-        columnas_extra = [
-            "proximo_inpc VARCHAR(7) DEFAULT NULL",
-            "inpc_notificacion DECIMAL(10,4) DEFAULT NULL",
-            "inpc_requerimiento DECIMAL(10,4) DEFAULT NULL",
-            "periodo_notificacion VARCHAR(7) DEFAULT NULL",
-            "periodo_requerimiento VARCHAR(7) DEFAULT NULL",
-            "factor_actualizacion DECIMAL(12,6) DEFAULT NULL",
-            "importe_actualizacion DECIMAL(15,2) DEFAULT NULL",
-            "total_multa_actualizada DECIMAL(15,2) DEFAULT NULL",
-            "importe_letra VARCHAR(500) DEFAULT NULL",
-            "codebar VARCHAR(100) DEFAULT NULL",
-            "fecha_emision DATE DEFAULT NULL",
-            "visita VARCHAR(50) DEFAULT NULL",
-            "pmo VARCHAR(50) DEFAULT NULL",
-            "id_documento INT DEFAULT NULL",
-            "id_notificador INT DEFAULT NULL"
-        ]
-        
-        for col in columnas_extra:
-            try:
-                db_proyecto.execute(text(f"ALTER TABLE tabla_dinamica ADD COLUMN {col}"))
-            except Exception:
-                pass  # Columna ya existe
+        # Crear tabla_dinamica si no existe con estructura específica
+        create_query = text("""
+            CREATE TABLE IF NOT EXISTS tabla_dinamica (
+                codebar VARCHAR(100) PRIMARY KEY,
+                credito VARCHAR(255),
+                id_documento INT,
+                visita VARCHAR(10),
+                po VARCHAR(10),
+                fecha_emision DATE,
+                status_captura VARCHAR(50),
+                id_notificador INT,
+                no_documento VARCHAR(255),
+                importe_letra LONGTEXT,
+                proximo_inpc VARCHAR(7),
+                inpc_notificacion DECIMAL(10,4),
+                inpc_requerimiento DECIMAL(10,4),
+                periodo_notificacion VARCHAR(7),
+                periodo_requerimiento VARCHAR(7),
+                factor_actualizacion DECIMAL(12,6),
+                importe_actualizacion DECIMAL(15,2),
+                total_multa_actualizada DECIMAL(15,2),
+                pmo VARCHAR(50),
+                fecha_inpc_a DATE,
+                periodo_a VARCHAR(7),
+                inpc_a DECIMAL(10,4),
+                fecha_inpc_b DATE,
+                periodo_b VARCHAR(7),
+                inpc_b DECIMAL(10,4),
+                INDEX idx_credito (credito),
+                INDEX idx_fecha_emision (fecha_emision)
+            )
+        """)
+        db_proyecto.execute(create_query)
         db_proyecto.commit()
     
     procesados = 0
@@ -1654,6 +1659,12 @@ def calcular_todas_filas(
             continue
         
         try:
+            # Verificar si ya existe en tabla_dinamica
+            existe = db_proyecto.execute(
+                text(f"SELECT codebar FROM tabla_dinamica WHERE `{pk_name}` = :pk LIMIT 1"),
+                {"pk": pk_value}
+            ).first()
+            
             if proyecto_slug == "estado":
                 # Obtener fecha de notificación
                 fecha_notificacion = row_dict.get('fecha_notificacion')
@@ -1669,16 +1680,10 @@ def calcular_todas_filas(
                     except ValueError:
                         errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SALTEADA")
                         continue
-                # Si es date, convertirlo a datetime
-                elif hasattr(fecha_notificacion, 'year') and not isinstance(fecha_notificacion, datetime):
-                    try:
-                        fecha_notificacion = datetime.combine(fecha_notificacion, datetime.min.time())
-                    except Exception:
-                        errores.append(f"Fila {pk_value}: fecha_notificacion no es fecha válida - SALTEADA")
-                        continue
-                # Si no es string ni date, verificar que sea datetime
-                elif not isinstance(fecha_notificacion, datetime):
-                    errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido: {type(fecha_notificacion)} - SALTEADA")
+                elif isinstance(fecha_notificacion, datetime):
+                    pass
+                else:
+                    errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SALTEADA")
                     continue
                 
                 # Obtener importe histórico
@@ -1688,7 +1693,7 @@ def calcular_todas_filas(
                 except (ValueError, TypeError):
                     importe_historico = 0
                 
-                # Calcular INPC usando fecha_notificacion y fecha_emision
+                # Calcular INPC
                 calculo = INPCService.calcular_actualizacion_multas_v2(
                     db_global,
                     importe_historico,
@@ -1711,16 +1716,17 @@ def calcular_todas_filas(
                 # Obtener último INPC para próximo_inpc
                 ultimo_inpc = INPCService.obtener_ultimo_registro(db_global)
                 
-                # Verificar si la fila ya existe en tabla_dinamica
-                existe = db_proyecto.execute(
-                    text(f"SELECT 1 FROM tabla_dinamica WHERE `{pk_name}` = :pk LIMIT 1"),
-                    {"pk": pk_value}
-                ).first()
-                
                 if existe:
-                    update_query = text(f"""
+                    # UPDATE en tabla_dinamica
+                    update_query = text("""
                         UPDATE tabla_dinamica 
                         SET 
+                            codebar = :codebar,
+                            credito = :credito,
+                            fecha_emision = :fecha_emision,
+                            visita = :visita,
+                            pmo = :pmo,
+                            importe_letra = :importe_letra,
                             proximo_inpc = :proximo_inpc,
                             fecha_inpc_a = :fecha_inpc_a,
                             periodo_a = :periodo_a,
@@ -1730,16 +1736,17 @@ def calcular_todas_filas(
                             inpc_b = :inpc_b,
                             factor_actualizacion = :factor_actualizacion,
                             importe_actualizacion = :importe_actualizacion,
-                            total_multa_actualizada = :total_multa_actualizada,
-                            importe_letra = :importe_letra,
-                            codebar = :codebar,
-                            fecha_emision = :fecha_emision,
-                            visita = :visita,
-                            pmo = :pmo
+                            total_multa_actualizada = :total_multa_actualizada
                         WHERE `{pk_name}` = :pk
                     """)
                     
                     db_proyecto.execute(update_query, {
+                        "codebar": codebar,
+                        "credito": pk_value,
+                        "fecha_emision": fecha_emision_dt.date(),
+                        "visita": visita,
+                        "pmo": pmo,
+                        "importe_letra": importe_letra,
                         "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
                         "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
                         "periodo_a": data["periodo_a"],
@@ -1750,7 +1757,62 @@ def calcular_todas_filas(
                         "factor_actualizacion": float(data["factor_actualizacion"]),
                         "importe_actualizacion": float(data["importe_actualizacion"]),
                         "total_multa_actualizada": float(data["total_actualizado"]),
+                        "pk": pk_value
+                    })
+                else:
+                    # INSERT en tabla_dinamica
+                    insert_query = text("""
+                        INSERT INTO tabla_dinamica (
+                            codebar, credito, fecha_emision, visita, pmo,
+                            importe_letra, proximo_inpc,
+                            fecha_inpc_a, periodo_a, inpc_a,
+                            fecha_inpc_b, periodo_b, inpc_b,
+                            factor_actualizacion, importe_actualizacion,
+                            total_multa_actualizada
+                        ) VALUES (
+                            :codebar, :credito, :fecha_emision, :visita, :pmo,
+                            :importe_letra, :proximo_inpc,
+                            :fecha_inpc_a, :periodo_a, :inpc_a,
+                            :fecha_inpc_b, :periodo_b, :inpc_b,
+                            :factor_actualizacion, :importe_actualizacion,
+                            :total_multa_actualizada
+                        )
+                    """)
+                    
+                    db_proyecto.execute(insert_query, {
+                        "codebar": codebar,
+                        "credito": pk_value,
+                        "fecha_emision": fecha_emision_dt.date(),
+                        "visita": visita,
+                        "pmo": pmo,
                         "importe_letra": importe_letra,
+                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
+                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
+                        "periodo_a": data["periodo_a"],
+                        "inpc_a": float(data["inpc_a"]),
+                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
+                        "periodo_b": data["periodo_b"],
+                        "inpc_b": float(data["inpc_b"]),
+                        "factor_actualizacion": float(data["factor_actualizacion"]),
+                        "importe_actualizacion": float(data["importe_actualizacion"]),
+                        "total_multa_actualizada": float(data["total_actualizado"])
+                    })
+                
+            else:
+                # Otros proyectos: solo guardar codebar básico
+                codebar = f"*{str(pk_value)[:10]}{fecha_emision_dt.strftime('%Y%m%d%H%M%S')}*"
+                
+                if existe:
+                    update_query = text(f"""
+                        UPDATE tabla_dinamica 
+                        SET 
+                            codebar = :codebar,
+                            fecha_emision = :fecha_emision,
+                            visita = :visita,
+                            pmo = :pmo
+                        WHERE `{pk_name}` = :pk
+                    """)
+                    db_proyecto.execute(update_query, {
                         "codebar": codebar,
                         "fecha_emision": fecha_emision_dt.date(),
                         "visita": visita,
@@ -1758,57 +1820,25 @@ def calcular_todas_filas(
                         "pk": pk_value
                     })
                 else:
-                    # INSERT
-                    # Obtener columnas de tabla_analisis
-                    cols_analisis = _get_tabla_cols(db_proyecto, "tabla_analisis")
-                    
-                    # Construir INSERT con todas las columnas
-                    cols_insert = [f"`{c}`" for c in cols_analisis] + [
-                        "proximo_inpc", "fecha_inpc_a", "periodo_a", "inpc_a",
-                        "fecha_inpc_b", "periodo_b", "inpc_b",
-                        "factor_actualizacion", "importe_actualizacion",
-                        "total_multa_actualizada", "importe_letra", "codebar",
-                        "fecha_emision", "visita", "pmo"
-                    ]
-                    vals_insert = [f":{c}" for c in cols_analisis] + [
-                        ":proximo_inpc", ":fecha_inpc_a", ":periodo_a", ":inpc_a",
-                        ":fecha_inpc_b", ":periodo_b", ":inpc_b",
-                        ":factor_actualizacion", ":importe_actualizacion",
-                        ":total_multa_actualizada", ":importe_letra", ":codebar",
-                        ":fecha_emision", ":visita", ":pmo"
-                    ]
-                    
-                    insert_params = {c: row_dict.get(c) for c in cols_analisis}
-                    insert_params.update({
-                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
-                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
-                        "periodo_a": data["periodo_a"],
-                        "inpc_a": float(data["inpc_a"]),
-                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
-                        "periodo_b": data["periodo_b"],
-                        "inpc_b": float(data["inpc_b"]),
-                        "factor_actualizacion": float(data["factor_actualizacion"]),
-                        "importe_actualizacion": float(data["importe_actualizacion"]),
-                        "total_multa_actualizada": float(data["total_actualizado"]),
-                        "importe_letra": importe_letra,
+                    insert_query = text(f"""
+                        INSERT INTO tabla_dinamica (
+                            codebar, credito, fecha_emision, visita, pmo
+                        ) VALUES (
+                            :codebar, :credito, :fecha_emision, :visita, :pmo
+                        )
+                    """)
+                    db_proyecto.execute(insert_query, {
                         "codebar": codebar,
+                        "credito": pk_value,
                         "fecha_emision": fecha_emision_dt.date(),
                         "visita": visita,
                         "pmo": pmo
                     })
-                    
-                    insert_query = text(f"""
-                        INSERT INTO tabla_dinamica 
-                        ({', '.join(cols_insert)})
-                        VALUES ({', '.join(vals_insert)})
-                    """)
-                    
-                    db_proyecto.execute(insert_query, insert_params)
-                
-                procesados += 1
             
-            # Commit cada 100 registros
-            if procesados % 100 == 0:
+            procesados += 1
+            
+            # Commit cada 50 registros
+            if procesados % 50 == 0:
                 db_proyecto.commit()
                 
         except Exception as e:

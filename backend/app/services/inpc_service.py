@@ -50,14 +50,24 @@ class INPCService:
                 if not periodo or not valor_str:
                     continue
                 
-                # Convertir "2026-06" a "2026-06-01" (primer día del mes)
-                periodo_con_dia = f"{periodo}-01"
+                # ============================================================
+                # CONVERTIR "2026-06" a "2026-06-01" (primer día del mes)
+                # ESTO ES LO QUE FALTA EN TU CÓDIGO
+                # ============================================================
+                # Si tiene formato YYYY-MM (con guion)
+                if '-' in periodo and len(periodo) == 7:
+                    periodo_con_dia = f"{periodo}-01"
+                # Si tiene formato YYYY/MM (con slash)
+                elif '/' in periodo and len(periodo) == 7:
+                    periodo_con_dia = f"{periodo.replace('/', '-')}-01"
+                else:
+                    periodo_con_dia = periodo
                 
                 try:
                     valor = float(valor_str)
                     if not pd.isna(valor):
                         registros.append({
-                            "periodo": periodo_con_dia,  # Guardamos con día 1
+                            "periodo": periodo_con_dia,
                             "valor": Decimal(str(valor))
                         })
                 except (ValueError, TypeError):
@@ -174,42 +184,59 @@ class INPCService:
     @staticmethod
     def obtener_inpc_mas_cercano_anterior(db: Session, fecha: datetime) -> Optional[Dict[str, Any]]:
         """
-        Busca el INPC aplicable para una fecha dada.
-        El periodo está guardado como 'YYYY-MM-DD' (primer día del mes)
+        Busca el INPC más cercano por fecha que sea <= a la fecha dada.
+        Calcula la diferencia de días y toma el que tenga la menor diferencia positiva.
         """
         from sqlalchemy import text
         
-        # Determinar qué INPC está disponible para esa fecha
-        dia = fecha.day
-        if dia <= 9:
-            # Mes anterior
-            fecha_inpc = fecha.replace(day=1) - timedelta(days=1)
-            if fecha_inpc.month == 0:
-                fecha_inpc = fecha_inpc.replace(year=fecha_inpc.year - 1, month=12)
-        else:
-            # Mismo mes
-            fecha_inpc = fecha.replace(day=1)
+        print(f"🔍 Buscando INPC para fecha: {fecha.strftime('%d/%m/%Y')}")
         
-        # Buscar el INPC para ese mes (primer día del mes)
-        periodo_buscar = fecha_inpc.strftime('%Y-%m-01')
-        
+        # Obtener TODOS los INPC disponibles (ordenados de más reciente a más antiguo)
         query = """
             SELECT periodo, valor 
             FROM inpc_historico 
-            WHERE periodo = :periodo
-            LIMIT 1
+            ORDER BY periodo DESC
         """
         
-        result = db.execute(text(query), {"periodo": periodo_buscar}).first()
+        results = db.execute(text(query)).fetchall()
         
-        if not result:
+        if not results:
+            print("❌ No hay datos en inpc_historico")
             return None
         
-        return {
-            "periodo": result.periodo,
-            "valor": Decimal(str(result.valor)),
-            "fecha": datetime.strptime(result.periodo, '%Y-%m-%d')
-        }
+        mejor_inpc = None
+        mejor_diferencia = None
+        
+        for result in results:
+            # Convertir periodo a fecha
+            periodo_valor = result.periodo
+            if hasattr(periodo_valor, 'strftime'):
+                fecha_inpc = datetime(periodo_valor.year, periodo_valor.month, periodo_valor.day)
+            else:
+                fecha_inpc = datetime.strptime(str(periodo_valor), '%Y-%m-%d')
+            
+            # Calcular diferencia de días (fecha_evento - fecha_inpc)
+            diferencia = (fecha - fecha_inpc).days
+            
+            # Solo considerar si la fecha del INPC es <= fecha_evento (diferencia >= 0)
+            if diferencia >= 0:
+                # Si es la primera o tiene menor diferencia, es la mejor
+                if mejor_diferencia is None or diferencia < mejor_diferencia:
+                    mejor_diferencia = diferencia
+                    mejor_inpc = {
+                        "periodo": result.periodo if isinstance(result.periodo, str) else result.periodo.strftime('%Y-%m-%d'),
+                        "valor": Decimal(str(result.valor)),
+                        "fecha": fecha_inpc,
+                        "diferencia_dias": diferencia
+                    }
+        
+        if mejor_inpc:
+            print(f"✅ INPC seleccionado: {mejor_inpc['periodo']} (diferencia: {mejor_inpc['diferencia_dias']} días)")
+            return mejor_inpc
+        
+        print(f"❌ No se encontró INPC para la fecha: {fecha.strftime('%d/%m/%Y')}")
+        return None
+
 
     @staticmethod
     def calcular_actualizacion_multas_v2(

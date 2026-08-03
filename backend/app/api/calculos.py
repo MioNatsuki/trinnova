@@ -63,11 +63,13 @@ def _generar_codebar(
     visita: Optional[str] = None
 ) -> str:
     """
-    Genera el código de barras con formato: *PK+YYYYMMDDHHMMSS+IDDOC+VISITA*
+    Genera el código de barras con formato: *PK+SERIAL DATE+IDDOC+VISITA*
     """
-    # Obtener solo los primeros 20 caracteres del PK para no hacerlo muy largo
-    pk_short = str(pk_value)[:20]
-    fecha_str = fecha_emision.strftime("%Y%m%d%H%M%S")
+
+    fecha_base_excel = datetime.datetime(1899, 12, 30)
+
+    pk_short = str(pk_value)
+    fecha_str = (fecha_emision - fecha_base_excel).days
     doc_str = f"DOC{id_documento:03d}" if id_documento else ""
     visita_str = f"V{visita[:2]}" if visita else ""
     
@@ -529,4 +531,55 @@ def obtener_ultimo_inpc(
             "periodo": ultimo["periodo"],
             "valor": float(ultimo["valor"])
         }
+    }
+
+@router.get("/{proyecto_slug}/tabla-dinamica")
+def get_tabla_dinamica(
+    proyecto_slug: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Obtiene los datos de tabla_dinamica para la pantalla de Cálculos"""
+    from sqlalchemy import text
+    
+    check_project_access(proyecto_slug, current_user, db_global)
+    db_proyecto = next(get_project_db(proyecto_slug))
+    
+    # Determinar la PK
+    pks = {
+        "apa_tlajomulco": "clave_APA",
+        "predial_tlajomulco": "cuenta",
+        "licencias_gdl": "licencia",
+        "predial_gdl": "cuenta_n",
+        "estado": "credito",
+        "pensiones": "prestamo",
+    }
+    pk = pks.get(proyecto_slug, "id")
+    
+    try:
+        db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
+    except Exception:
+        return {
+            "rows": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+            "error": "No hay datos calculados. Ejecuta 'Calcular Todas' primero."
+        }
+    
+    offset = (page - 1) * limit
+    total = db_proyecto.execute(text("SELECT COUNT(*) AS total FROM tabla_dinamica")).first().total
+    rows = db_proyecto.execute(
+        text(f"SELECT * FROM tabla_dinamica LIMIT {limit} OFFSET {offset}")
+    ).fetchall()
+    
+    return {
+        "rows": [dict(r._mapping) for r in rows],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pk": pk
     }

@@ -370,6 +370,47 @@
   }
 }
 
+.filtro-select {
+  width: 100%;
+  padding: 7px 14px;
+  border: 1px solid var(--clr-border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  background: var(--clr-white);
+  color: var(--clr-text);
+  outline: none;
+  transition: border-color .2s;
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.filtro-select:focus {
+  border-color: var(--clr-accent);
+}
+
+.filtro-input {
+  width: 100%;
+  padding: 7px 14px;
+  border: 1px solid var(--clr-border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: 'Outfit', sans-serif;
+  background: var(--clr-white);
+  color: var(--clr-text);
+  outline: none;
+  transition: border-color .2s;
+  min-width: 180px;
+}
+
+.filtro-input:focus {
+  border-color: var(--clr-accent);
+}
+
+.filtro-input::placeholder {
+  color: #b0b8c4;
+}
+
 @media (max-width: 480px) {
   .filtros-grid {
     grid-template-columns: 1fr;

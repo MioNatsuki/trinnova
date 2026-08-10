@@ -1,9 +1,11 @@
+# backend/app/api/calculos.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
+from decimal import Decimal
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
@@ -60,20 +62,41 @@ def _generar_codebar(
     pk_value: str,
     fecha_emision: datetime,
     id_documento: Optional[int] = None,
-    visita: Optional[str] = None
+    visita: Optional[str] = None,
+    identificador_documento: Optional[str] = None
 ) -> str:
     """
-    Genera el código de barras con formato: *PK+SERIAL DATE+IDDOC+VISITA*
+    Genera el código de barras con formato: *PK+FECHA+IDENTIFICADOR+VISITA*
+    - PK: COMPLETA (no se trunca)
+    - IDENTIFICADOR: del documento (ej: N, R, A)
+    - VISTA: número de visita (ej: 3)
     """
-
-    fecha_base_excel = datetime.datetime(1899, 12, 30)
-
-    pk_short = str(pk_value)
-    fecha_str = (fecha_emision - fecha_base_excel).days
-    doc_str = f"DOC{id_documento:03d}" if id_documento else ""
-    visita_str = f"V{visita[:2]}" if visita else ""
+    from datetime import datetime as dt
     
-    codigo = f"{pk_short}{fecha_str}{doc_str}{visita_str}"
+    fecha_base_excel = dt(1899, 12, 30)
+    
+    # PK COMPLETA - NO TRUNCADA
+    pk_completa = str(pk_value)
+    
+    # Fecha serial
+    fecha_str = str((fecha_emision - fecha_base_excel).days)
+    
+    # Identificador del documento + visita
+    ident_str = ""
+    if identificador_documento:
+        ident_str = str(identificador_documento).upper()
+    
+    visita_str = ""
+    if visita:
+        visita_str = str(visita).strip()
+    
+    # Combinar identificador + visita (ej: N3, R1, A2)
+    combo_str = f"{ident_str}{visita_str}" if ident_str or visita_str else ""
+    
+    # Construir código completo
+    codigo = f"{pk_completa}{fecha_str}{combo_str}"
+    
+    # Código 39 con asteriscos
     return f"*{codigo.upper()}*"
 
 def _calcular_campos_estado(
@@ -81,7 +104,8 @@ def _calcular_campos_estado(
     fila: Dict[str, Any],
     fecha_emision: datetime,
     visita: Optional[str],
-    pmo: Optional[str]
+    pmo: Optional[str],
+    identificador_documento: Optional[str] = None
 ) -> Dict[str, Any]:
     """Calcula todos los campos específicos para el proyecto Estado"""
     result = {}
@@ -135,7 +159,8 @@ def _calcular_campos_estado(
         pk_value,
         fecha_emision,
         id_documento=fila.get('id_documento'),
-        visita=visita
+        visita=visita,
+        identificador_documento=identificador_documento 
     )
     
     # Obtener próximo INPC (el más reciente disponible)
@@ -464,6 +489,7 @@ def calcular_fila(
             success=False,
             error=f"Error al calcular: {str(e)}"
         )
+
 @router.post("/inpc/sincronizar")
 def sincronizar_inpc(
     historico: bool = Query(True, description="True: sincroniza todo el histórico, False: solo el último"),
@@ -515,7 +541,7 @@ def obtener_ultimo_inpc(
     db: Session = Depends(get_global_db),
 ):
     """
-    Obtiene el último valor del INPC registrado
+    Obtiene el último valor del INPC registrado y el anterior
     """
     ultimo = INPCService.obtener_ultimo_registro(db)
     
@@ -525,11 +551,25 @@ def obtener_ultimo_inpc(
             "error": "No hay datos de INPC disponibles. Ejecuta la sincronización primero."
         }
     
+    from sqlalchemy import text
+    anterior = db.execute(
+        text("""
+            SELECT periodo, valor 
+            FROM inpc_historico 
+            ORDER BY periodo DESC 
+            LIMIT 1 OFFSET 1
+        """)
+    ).first()
+    
     return {
         "success": True,
         "data": {
             "periodo": ultimo["periodo"],
             "valor": float(ultimo["valor"])
+        },
+        "anterior": {
+            "periodo": anterior.periodo if anterior else None,
+            "valor": float(anterior.valor) if anterior else None
         }
     }
 
@@ -583,3 +623,95 @@ def get_tabla_dinamica(
         "limit": limit,
         "pk": pk
     }
+
+@router.get("/{proyecto_slug}/catalogo/documentos")
+def get_catalogo_documentos(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Obtiene el catálogo de documentos para el proyecto
+    Muestra: nombre_documento, guarda: id_documento
+    """
+    from sqlalchemy import text
+    
+    check_project_access(proyecto_slug, current_user, db_global)
+    
+    proyecto = db_global.execute(
+        text("SELECT id FROM proyectos WHERE slug = :slug"),
+        {"slug": proyecto_slug}
+    ).first()
+    
+    if not proyecto:
+        return []
+    
+    try:
+        # 🔥 ELIMINAR "AND activo = 1" - NO EXISTE ESA COLUMNA
+        rows = db_global.execute(
+            text("""
+                SELECT id_documento, nombre_documento, identificador_documento
+                FROM catalogo_documento 
+                WHERE id_proyecto = :pid
+                ORDER BY nombre_documento
+            """),
+            {"pid": proyecto.id}
+        ).fetchall()
+        
+        return [
+            {
+                "id": r.id_documento,
+                "nombre": r.nombre_documento,
+                "identificador": r.identificador_documento
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Error cargando documentos: {e}")
+        return []
+
+
+@router.get("/{proyecto_slug}/catalogo/notificadores")
+def get_catalogo_notificadores(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Obtiene el catálogo de notificadores para el proyecto
+    Muestra: nombre, guarda: id_notificador
+    """
+    from sqlalchemy import text
+    
+    check_project_access(proyecto_slug, current_user, db_global)
+    
+    proyecto = db_global.execute(
+        text("SELECT id FROM proyectos WHERE slug = :slug"),
+        {"slug": proyecto_slug}
+    ).first()
+    
+    if not proyecto:
+        return []
+    
+    try:
+        rows = db_global.execute(
+            text("""
+                SELECT id_notificador, nombre, acronimo
+                FROM catalogo_notificadores 
+                WHERE id_proyecto = :pid
+                ORDER BY nombre
+            """),
+            {"pid": proyecto.id}
+        ).fetchall()
+        
+        return [
+            {
+                "id": r.id_notificador,
+                "nombre": r.nombre,
+                "acronimo": r.acronimo
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Error cargando notificadores: {e}")
+        return []

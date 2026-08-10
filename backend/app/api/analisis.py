@@ -22,13 +22,15 @@ import pandas as pd
 import io
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
 from app.models.global_models import Usuario, PadronVersion
 from app.db.router import get_project_db
 from app.services.log_service import registrar_log
+from app.services.inpc_service import INPCService
+from app.services.numero_a_letras import numero_a_letras
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -223,7 +225,6 @@ _COL_ALIAS: Dict[str, Dict[str, str]] = {
     },
 
     "estado": {
-        # Exactos normalizados que difieren del nombre BD
         "nombre_o_razon_social":                   "nombre_razon_social",
         "nombre_razon_social_2":                   "nombre_razon_social",
         "calle_y_numero":                          "calle_numero",
@@ -239,7 +240,6 @@ _COL_ALIAS: Dict[str, Dict[str, str]] = {
         "fecha_de_notificacion":                   "fecha_notificacion",
         "tipo_de_credito":                         "tipo_credito",
         "tipo_cartera_2":                          "tipo_cartera",
-        # Alias adicionales para variantes comunes del Excel
         "id":                                      "id",
         "rfc":                                     "rfc",
         "credito":                                 "credito",
@@ -279,10 +279,8 @@ def _info(slug: str) -> Dict:
 
 
 def _normalizar_col(nombre: str) -> str:
-    """Quita tildes, convierte a minúsculas, reemplaza espacios/guiones por _"""
     txt = unicodedata.normalize("NFKD", nombre).encode("ASCII", "ignore").decode()
     txt = re.sub(r"[\s\-/]+", "_", txt.lower().strip())
-    # Quitar caracteres que no sean letras, números o guión bajo
     txt = re.sub(r"[^\w]", "", txt)
     return txt
 
@@ -295,20 +293,16 @@ def _mapear_columnas(slug: str, df_cols: List[str]) -> Dict[str, str]:
     mapeo: Dict[str, str] = {}
     for csv_col in df_cols:
         norm = _normalizar_col(csv_col)
-        # 1. Exacto
         if norm in bd_idx:
             mapeo[csv_col] = bd_idx[norm]
             continue
-        # 2. Alias explícito
         if norm in alias:
             mapeo[csv_col] = alias[norm]
             continue
-        # 3. Parcial
         matched = None
         best_len = 0
         for bd_norm, bd_real in bd_idx.items():
             if bd_norm in norm or norm in bd_norm:
-                # Preferir el match más largo para evitar falsos positivos
                 match_len = max(len(bd_norm), len(norm))
                 if match_len > best_len:
                     best_len = match_len
@@ -359,9 +353,6 @@ def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
 
 
 def _normalizar_viabilidad(raw: str) -> Optional[str]:
-    """Normaliza variantes de texto a los valores aceptados por el ENUM.
-    Acepta: viable, no_viable, no viable, noviable, pendiente.
-    """
     if not raw:
         return None
     key = raw.strip().lower().replace("-", "_").replace(" ", "_")
@@ -408,6 +399,95 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) 
         f"LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`\n"
     )
 
+# ============================================================
+# FUNCIÓN AUXILIAR PARA CÓDIGO DE BARRAS (MODIFICADA)
+# ============================================================
+
+def _generar_codebar_completo(
+    pk_value: str,
+    fecha_emision: datetime,
+    id_documento: Optional[int] = None,
+    visita: Optional[str] = None,
+    identificador_documento: Optional[str] = None
+) -> str:
+    """
+    Genera código de barras con formato: *PK+FECHA+IDENTIFICADOR+VISTA*
+    - PK: COMPLETA (no se trunca)
+    - IDENTIFICADOR: del documento (ej: N, R, A)
+    - VISTA: número de visita (ej: 3)
+    """
+    from datetime import datetime as dt
+    
+    fecha_base_excel = dt(1899, 12, 30)
+    
+    # PK COMPLETA - NO TRUNCADA
+    pk_completa = str(pk_value)
+    
+    # Fecha serial
+    fecha_str = str((fecha_emision - fecha_base_excel).days)
+    
+    # Identificador del documento + visita
+    ident_str = ""
+    if identificador_documento:
+        ident_str = str(identificador_documento).upper()
+    
+    visita_str = ""
+    if visita:
+        # Si visita es un número, lo dejamos como está
+        visita_str = str(visita).strip()
+    
+    # Combinar identificador + visita (ej: N3, R1, A2)
+    combo_str = f"{ident_str}{visita_str}" if ident_str or visita_str else ""
+    
+    # Construir código completo
+    codigo = f"{pk_completa}{fecha_str}{combo_str}"
+    
+    # Código 39 con asteriscos
+    return f"*{codigo.upper()}*"
+
+
+def _upsert_tabla_dinamica(
+    db_proyecto,
+    pk_name: str,
+    pk_value: Any,
+    data: Dict[str, Any],
+    cols_existentes: set
+):
+    """
+    Inserta o actualiza un registro en tabla_dinamica
+    Solo usa columnas que existen en la tabla
+    """
+    from sqlalchemy import text
+    
+    data_filtrada = {}
+    for key, value in data.items():
+        if key == "pk":
+            continue
+        if key in cols_existentes:
+            data_filtrada[key] = value
+    
+    if not data_filtrada:
+        print(f"⚠️ No hay columnas válidas para guardar {pk_name}={pk_value}")
+        return
+    
+    columns = list(data_filtrada.keys())
+    placeholders = [f":{col}" for col in columns]
+    updates = [f"`{col}` = VALUES(`{col}`)" for col in columns]
+    
+    query_str = f"""
+        INSERT INTO tabla_dinamica (`{pk_name}`, {', '.join([f'`{col}`' for col in columns])})
+        VALUES (:pk, {', '.join(placeholders)})
+        ON DUPLICATE KEY UPDATE
+            {', '.join(updates)}
+    """
+    
+    db_proyecto.execute(text(query_str), {"pk": pk_value, **data_filtrada})
+
+
+# ============================================================
+# ENDPOINTS
+# ============================================================
+
 # PROGRAMAS — GET
 
 @router.get("/{proyecto_slug}/programas")
@@ -420,7 +500,6 @@ def get_programas(
 
     check_project_access(proyecto_slug, current_user, db_global)
 
-    # Intentar desde db_global.programas
     try:
         proyecto = db_global.execute(
             text("SELECT id FROM proyectos WHERE slug = :s AND activo = 1"),
@@ -439,9 +518,8 @@ def get_programas(
             if rows:
                 return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
     except Exception:
-        pass  # tabla programas aún no existe en db_global → fallback a local
+        pass
 
-    # Fallback: tabla_programas local del proyecto
     try:
         db_proyecto = next(get_project_db(proyecto_slug))
         rows = db_proyecto.execute(
@@ -589,7 +667,6 @@ async def cargar_viabilidad_csv(
                         {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
                          "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
                     )
-                # Actualizar tabla_analisis también con estatus_pago
                 db_proyecto.execute(
                     text(f"UPDATE tabla_analisis SET estatus_pago = :ep WHERE `{pk}` = :pk"),
                     {"ep": estatus_pago, "pk": pk_val},
@@ -597,7 +674,6 @@ async def cargar_viabilidad_csv(
 
             if prog_col and not pd.isna(row.get(prog_col, float('nan'))):
                 prog_val = str(row[prog_col]).strip()
-                # Actualizar programa en tabla_analisis y tabla_padron
                 db_proyecto.execute(
                     text(f"UPDATE tabla_analisis SET programa = :prog WHERE `{pk}` = :pk"),
                     {"prog": prog_val, "pk": pk_val},
@@ -748,7 +824,6 @@ async def cargar_padron(
         f"Padrón {proyecto_slug}: {insertados} nuevos, {actualizados} actualizados. Archivo: {file.filename}",
         proyecto.id)
 
-    # Preview: primeras 5 filas del DataFrame mapeado
     preview_cols = list(df_mapped.columns[:12])
     preview = [
         {k: str(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else ""
@@ -855,12 +930,6 @@ def guardar_complemento(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """
-    Guarda campos complementarios:
-    - Si el campo existe en tabla_padron   → UPDATE tabla_padron
-    - Si el campo existe en tabla_complementaria → UPDATE/INSERT tabla_complementaria
-    "programa" vive en tabla_padron, así que se actualiza ahí.
-    """
     from app.db.router import get_project_db
     from app.services.log_service import registrar_log
     from sqlalchemy import text
@@ -871,7 +940,6 @@ def guardar_complemento(
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Columnas reales de cada tabla
     cols_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
     cols_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
 
@@ -882,11 +950,9 @@ def guardar_complemento(
         all_campos = {k: v for k, v in fila.campos_complementarios.items()
                       if v is not None and v != ""}
 
-        # Separar campos según tabla destino
         campos_padron = {k: v for k, v in all_campos.items() if k in cols_padron and k != pk}
         campos_comp   = {k: v for k, v in all_campos.items() if k in cols_comp   and k != pk and k not in campos_padron}
 
-        # UPDATE tabla_padron (programa y cualquier otro que viva ahí)
         if campos_padron:
             set_parts = [f"`{k}` = :{k}" for k in campos_padron]
             db_proyecto.execute(
@@ -894,7 +960,6 @@ def guardar_complemento(
                 {**campos_padron, "pk_val": pk_val},
             )
 
-        # UPDATE/INSERT tabla_complementaria
         if campos_comp:
             existe = db_proyecto.execute(
                 text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
@@ -1150,10 +1215,6 @@ async def cargar_complemento_csv(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """Actualiza tabla_complementaria de forma masiva desde un CSV/Excel.
-    El archivo debe tener la PK del proyecto + las columnas complementarias a actualizar.
-    Columna 'programa' también es aceptada.
-    """
     from sqlalchemy import text
 
     if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
@@ -1180,12 +1241,10 @@ async def cargar_complemento_csv(
     if df.empty:
         raise HTTPException(status_code=400, detail="El archivo está vacío.")
 
-    # Normalizar columnas
     df.columns = [_normalizar_col(c) for c in df.columns]
 
     pk_norm = _normalizar_col(pk)
     if pk_norm not in df.columns:
-        # intentar alias comunes
         for candidate in ["cuenta", "pk", "prestamo", "licencia", "credito", "cuenta_n", "clave_apa"]:
             if candidate in df.columns:
                 pk_norm = candidate
@@ -1206,7 +1265,6 @@ async def cargar_complemento_csv(
                 continue
             pk_val = int(pk_val_raw) if info["pk_type"] == "int" else str(pk_val_raw).strip()
 
-            # Filtrar solo columnas permitidas que existen en el CSV
             campos: Dict[str, Any] = {}
             for col in df.columns:
                 if col == pk_norm:
@@ -1289,7 +1347,6 @@ def actualizar_analisis_celdas(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """Actualiza celdas individuales en tabla_analisis (edición inline desde UI)."""
     from sqlalchemy import text
 
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
@@ -1297,13 +1354,11 @@ def actualizar_analisis_celdas(
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Obtener columnas reales de tabla_analisis para evitar SQL injection
     cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
     actualizados = 0
 
     for cambio in cambios:
         pk_val = cambio.pk_value
-        # Filtrar solo columnas existentes y no la PK
         campos = {
             k: v for k, v in cambio.campos.items()
             if k in cols_validas and k != pk
@@ -1331,7 +1386,7 @@ def actualizar_analisis_celdas(
 def get_analisis(
     proyecto_slug: str,
     viabilidad: Optional[str] = Query(None, description="Filtrar por viabilidad"),
-    busqueda: Optional[str] = Query(None, description="Búsqueda general"),  # <-- AGREGAR Query()
+    busqueda: Optional[str] = Query(None, description="Búsqueda general"),
     programa: Optional[str] = Query(None, description="Filtrar por programa"),
     page: int = Query(1, ge=1, description="Número de página"),
     limit: int = Query(50, ge=1, le=50, description="Registros por página"),
@@ -1365,9 +1420,8 @@ def get_analisis(
     where = " AND ".join(conditions) if conditions else "1=1"
     db_proyecto = next(get_project_db(proyecto_slug))
 
-    # Validar sort_col contra columnas reales para evitar SQL injection
     cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-    order_col = pk  # default
+    order_col = pk
     if sort_col and sort_col in cols_validas:
         order_col = sort_col
     order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
@@ -1410,12 +1464,11 @@ def get_analisis(
 
     return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
 
-# CONVERSION DE FECHA
+# ============================================================
+# FUNCIONES AUXILIARES PARA CÁLCULOS
+# ============================================================
 
 def _safe_value_v2(val: Any, col_name: str = "", slug: str = "") -> Any:
-    """Convierte valores a tipos seguros para MySQL.
-    Para columnas de fecha: parsea desde cualquier formato a datetime python.
-    """
     if val is None:
         return None
     try:
@@ -1429,119 +1482,10 @@ def _safe_value_v2(val: Any, col_name: str = "", slug: str = "") -> Any:
         return _parse_fecha(val)
     return val
 
-def actualizar_analisis_celdas_PATCH(
-    proyecto_slug: str,
-    cambios,   # List[ActualizarAnalisisRequest]
-    current_user,
-    db_global,
-):
-    """
-    POST /{slug}/actualizar-analisis
-    Actualiza celdas individuales en tabla_analisis (edición inline).
-    """
-    from app.db.router import get_project_db
-    from app.services.log_service import registrar_log
-    from sqlalchemy import text
 
-    info = _INFO[proyecto_slug]
-    pk = info["pk"]
-    db_proyecto = next(get_project_db(proyecto_slug))
-    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-    actualizados = 0
-
-    for cambio in cambios:
-        pk_val = cambio.pk_value
-        campos = {k: v for k, v in cambio.campos.items() if k in cols_validas and k != pk}
-        if not campos: continue
-        set_parts = [f"`{k}` = :{k}" for k in campos]
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-            {**campos, "pk_val": pk_val},
-        )
-        actualizados += 1
-
-    db_proyecto.commit()
-    return {"success": True, "message": f"{actualizados} registro(s) actualizados."}
-
-@router.get("/{proyecto_slug}/dinamica")
-def get_tabla_dinamica(
-    proyecto_slug: str,
-    page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=5000),
-    search: Optional[str] = None,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """
-    Obtiene los datos de tabla_analisis para mostrar en la pantalla de Cálculos.
-    Los resultados calculados se guardarán en tabla_dinamica.
-    """
-    from sqlalchemy import text
-    
-    # Verificar acceso al proyecto
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
-    # Obtener conexión a la base de datos del proyecto
-    db_proyecto = next(get_project_db(proyecto_slug))
-    
-    # Determinar la PK según el proyecto
-    pks = {
-        "apa_tlajomulco": "clave_APA",
-        "predial_tlajomulco": "cuenta",
-        "licencias_gdl": "licencia",
-        "predial_gdl": "cuenta_n",
-        "estado": "credito",
-        "pensiones": "prestamo",
-    }
-    pk = pks.get(proyecto_slug, "id")
-    
-    # Verificar que tabla_analisis existe
-    try:
-        db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
-    except Exception as e:
-        return {
-            "rows": [],
-            "total": 0,
-            "page": page,
-            "limit": limit,
-            "pk": pk,
-            "error": "La tabla_analisis aún no existe. Genera el análisis primero."
-        }
-    
-    # Construir condiciones de búsqueda
-    conditions = []
-    params = {}
-    
-    if search:
-        conditions.append(f"CAST(`{pk}` AS CHAR) LIKE :search")
-        params["search"] = f"%{search}%"
-    
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    
-    # Contar total
-    count_query = f"SELECT COUNT(*) AS total FROM tabla_analisis {where_clause}"
-    total = db_proyecto.execute(text(count_query), params).first().total
-    
-    # Calcular offset
-    offset = (page - 1) * limit
-    
-    # Obtener datos de tabla_analisis
-    data_query = f"SELECT * FROM tabla_analisis {where_clause} LIMIT {limit} OFFSET {offset}"
-    rows = db_proyecto.execute(text(data_query), params).fetchall()
-    
-    # Convertir a diccionarios
-    result_rows = []
-    for row in rows:
-        row_dict = dict(row._mapping)
-        result_rows.append(row_dict)
-    
-    return {
-        "rows": result_rows,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "pk": pk
-    }
+# ============================================================
+# ENDPOINT: CALCULAR TODAS LAS FILAS
+# ============================================================
 
 @router.post("/{proyecto_slug}/calcular-todas")
 def calcular_todas_filas(
@@ -1549,25 +1493,20 @@ def calcular_todas_filas(
     fecha_emision: Optional[str] = Query(None, description="Fecha de emisión (YYYY-MM-DD)"),
     visita: Optional[str] = Query(None, description="Última visita"),
     pmo: Optional[str] = Query(None, description="Último PMO"),
+    id_documento: Optional[int] = Query(None, description="ID del documento del catálogo"),
+    id_notificador: Optional[int] = Query(None, description="ID del notificador del catálogo"),
+    modo_inpc: Optional[str] = Query("actual", description="actual | anterior", 
+                                      regex="^(actual|anterior)$"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """
-    Calcula todas las filas:
-    - LEE de tabla_analisis
-    - GUARDA resultados en tabla_dinamica
-    """
     from sqlalchemy import text
     from app.services.inpc_service import INPCService
     from app.services.numero_a_letras import numero_a_letras
     
-    # Verificar acceso al proyecto
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
-    # Obtener conexión a la base de datos del proyecto
     db_proyecto = next(get_project_db(proyecto_slug))
     
-    # Verificar que tabla_analisis existe
     try:
         db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
     except Exception as e:
@@ -1576,7 +1515,6 @@ def calcular_todas_filas(
             "error": "La tabla_analisis aún no existe. Genera el análisis primero."
         }
     
-    # Determinar la PK según el proyecto
     pks = {
         "apa_tlajomulco": "clave_APA",
         "predial_tlajomulco": "cuenta",
@@ -1587,40 +1525,57 @@ def calcular_todas_filas(
     }
     pk_name = pks.get(proyecto_slug, "id")
     
-    # Obtener fecha de emisión
     if fecha_emision:
         try:
             fecha_emision_dt = datetime.strptime(fecha_emision, '%Y-%m-%d')
         except ValueError:
-            return {
-                "success": False,
-                "error": f"Formato de fecha inválido: {fecha_emision}"
-            }
+            return {"success": False, "error": f"Formato de fecha inválido: {fecha_emision}"}
     else:
         fecha_emision_dt = datetime.now()
     
-    # OBTENER TODAS LAS FILAS DE tabla_analisis
+    # Ajustar fecha para INPC según modo
+    if modo_inpc == "anterior":
+        fecha_emision_ajustada = fecha_emision_dt.replace(day=1) - timedelta(days=1)
+        fecha_emision_ajustada = fecha_emision_ajustada.replace(day=1)
+    else:
+        fecha_emision_ajustada = fecha_emision_dt
+    
+    # Obtener información del documento y notificador
+    nombre_documento = None
+    identificador_documento = None
+    
+    if id_documento:
+        try:
+            doc = db_global.execute(
+                text("""
+                    SELECT nombre_documento, identificador_documento 
+                    FROM catalogo_documento 
+                    WHERE id_documento = :id
+                """),
+                {"id": id_documento}
+            ).first()
+            if doc:
+                nombre_documento = doc.nombre_documento
+                identificador_documento = doc.identificador_documento
+        except Exception:
+            pass
+    
     rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
     
     if not rows:
-        return {
-            "success": False,
-            "error": "No hay datos en tabla_analisis"
-        }
+        return {"success": False, "error": "No hay datos en tabla_analisis"}
     
-    # Asegurar que tabla_dinamica existe
+    # Asegurar tabla_dinamica
     try:
         db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
     except Exception:
-        # Crear tabla_dinamica si no existe con estructura específica
         create_query = text("""
             CREATE TABLE IF NOT EXISTS tabla_dinamica (
                 codebar VARCHAR(100) PRIMARY KEY,
-                credito VARCHAR(255),
                 id_documento INT,
                 visita VARCHAR(10),
-                po VARCHAR(10),
-                fecha_emision DATE,
+                pmo VARCHAR(50),
+                fecha_emision DATETIME,
                 status_captura VARCHAR(50),
                 id_notificador INT,
                 no_documento VARCHAR(255),
@@ -1633,227 +1588,173 @@ def calcular_todas_filas(
                 factor_actualizacion DECIMAL(12,6),
                 importe_actualizacion DECIMAL(15,2),
                 total_multa_actualizada DECIMAL(15,2),
-                pmo VARCHAR(50),
                 fecha_inpc_a DATE,
                 periodo_a VARCHAR(7),
                 inpc_a DECIMAL(10,4),
                 fecha_inpc_b DATE,
                 periodo_b VARCHAR(7),
                 inpc_b DECIMAL(10,4),
-                INDEX idx_credito (credito),
+                INDEX idx_codebar (codebar),
                 INDEX idx_fecha_emision (fecha_emision)
             )
         """)
         db_proyecto.execute(create_query)
         db_proyecto.commit()
     
+    cols_dinamica = set()
+    try:
+        cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_dinamica")).fetchall()
+        cols_dinamica = {r[0] for r in cols_result}
+    except Exception:
+        pass
+    
     procesados = 0
     errores = []
+    batch_size = 100
     
-    for row in rows:
+    for idx, row in enumerate(rows):
         row_dict = dict(row._mapping)
         pk_value = row_dict.get(pk_name)
         
         if not pk_value:
-            errores.append(f"Fila sin PK: {row_dict}")
+            errores.append(f"Fila {idx}: Sin PK - SKIP")
             continue
         
         try:
-            # Verificar si ya existe en tabla_dinamica
-            existe = db_proyecto.execute(
-                text(f"SELECT codebar FROM tabla_dinamica WHERE `{pk_name}` = :pk LIMIT 1"),
-                {"pk": pk_value}
-            ).first()
-            
             if proyecto_slug == "estado":
-                # Obtener fecha de notificación
                 fecha_notificacion = row_dict.get('fecha_notificacion')
                 
                 if not fecha_notificacion:
-                    errores.append(f"Fila {pk_value}: Falta fecha_notificacion - SALTEADA")
+                    errores.append(f"Fila {pk_value}: Falta fecha_notificacion - SKIP")
                     continue
                 
-                # Si es string, convertirlo a datetime
                 if isinstance(fecha_notificacion, str):
                     try:
                         fecha_notificacion = datetime.strptime(fecha_notificacion, '%Y-%m-%d')
                     except ValueError:
-                        errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SALTEADA")
+                        errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SKIP")
                         continue
                 elif isinstance(fecha_notificacion, datetime):
                     pass
                 else:
-                    errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SALTEADA")
-                    continue
+                    try:
+                        fecha_notificacion = datetime.combine(fecha_notificacion, datetime.min.time())
+                    except Exception:
+                        errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SKIP")
+                        continue
                 
-                # Obtener importe histórico
                 importe_historico = row_dict.get('importe_historico_determinado', 0)
                 try:
                     importe_historico = float(importe_historico)
                 except (ValueError, TypeError):
                     importe_historico = 0
                 
-                # Calcular INPC
                 calculo = INPCService.calcular_actualizacion_multas_v2(
                     db_global,
                     importe_historico,
                     fecha_notificacion,
-                    fecha_emision_dt
+                    fecha_emision_ajustada
                 )
                 
                 if not calculo["success"]:
-                    errores.append(f"Fila {pk_value}: {calculo['error']} - SALTEADA")
+                    errores.append(f"Fila {pk_value}: {calculo['error']} - SKIP")
                     continue
                 
                 data = calculo["data"]
+                total_actualizado = float(data["total_actualizado"])
+                importe_letra = numero_a_letras(total_actualizado)
+                po_valor = pmo or ''
                 
-                # Convertir a letras
-                importe_letra = numero_a_letras(float(data["total_actualizado"]))
+                # Usar _generar_codebar_completo (definida arriba)
+                codebar = _generar_codebar_completo(
+                    pk_value=str(pk_value),
+                    fecha_emision=fecha_emision_dt,
+                    id_documento=id_documento,
+                    visita=visita,
+                    identificador_documento=identificador_documento
+                )
                 
-                # Generar código de barras
-                codebar = f"*{str(pk_value)[:10]}{fecha_emision_dt.strftime('%Y%m%d%H%M%S')}*"
-                
-                # Obtener último INPC para próximo_inpc
                 ultimo_inpc = INPCService.obtener_ultimo_registro(db_global)
                 
-                if existe:
-                    # UPDATE en tabla_dinamica
-                    update_query = text("""
-                        UPDATE tabla_dinamica 
-                        SET 
-                            codebar = :codebar,
-                            credito = :credito,
-                            fecha_emision = :fecha_emision,
-                            visita = :visita,
-                            pmo = :pmo,
-                            importe_letra = :importe_letra,
-                            proximo_inpc = :proximo_inpc,
-                            fecha_inpc_a = :fecha_inpc_a,
-                            periodo_a = :periodo_a,
-                            inpc_a = :inpc_a,
-                            fecha_inpc_b = :fecha_inpc_b,
-                            periodo_b = :periodo_b,
-                            inpc_b = :inpc_b,
-                            factor_actualizacion = :factor_actualizacion,
-                            importe_actualizacion = :importe_actualizacion,
-                            total_multa_actualizada = :total_multa_actualizada
-                        WHERE `{pk_name}` = :pk
-                    """)
-                    
-                    db_proyecto.execute(update_query, {
-                        "codebar": codebar,
-                        "credito": pk_value,
-                        "fecha_emision": fecha_emision_dt.date(),
-                        "visita": visita,
-                        "pmo": pmo,
-                        "importe_letra": importe_letra,
-                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
-                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
-                        "periodo_a": data["periodo_a"],
-                        "inpc_a": float(data["inpc_a"]),
-                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
-                        "periodo_b": data["periodo_b"],
-                        "inpc_b": float(data["inpc_b"]),
-                        "factor_actualizacion": float(data["factor_actualizacion"]),
-                        "importe_actualizacion": float(data["importe_actualizacion"]),
-                        "total_multa_actualizada": float(data["total_actualizado"]),
-                        "pk": pk_value
-                    })
-                else:
-                    # INSERT en tabla_dinamica
-                    insert_query = text("""
-                        INSERT INTO tabla_dinamica (
-                            codebar, credito, fecha_emision, visita, pmo,
-                            importe_letra, proximo_inpc,
-                            fecha_inpc_a, periodo_a, inpc_a,
-                            fecha_inpc_b, periodo_b, inpc_b,
-                            factor_actualizacion, importe_actualizacion,
-                            total_multa_actualizada
-                        ) VALUES (
-                            :codebar, :credito, :fecha_emision, :visita, :pmo,
-                            :importe_letra, :proximo_inpc,
-                            :fecha_inpc_a, :periodo_a, :inpc_a,
-                            :fecha_inpc_b, :periodo_b, :inpc_b,
-                            :factor_actualizacion, :importe_actualizacion,
-                            :total_multa_actualizada
-                        )
-                    """)
-                    
-                    db_proyecto.execute(insert_query, {
-                        "codebar": codebar,
-                        "credito": pk_value,
-                        "fecha_emision": fecha_emision_dt.date(),
-                        "visita": visita,
-                        "pmo": pmo,
-                        "importe_letra": importe_letra,
-                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
-                        "fecha_inpc_a": data["fecha_a"].date() if hasattr(data["fecha_a"], 'date') else data["fecha_a"],
-                        "periodo_a": data["periodo_a"],
-                        "inpc_a": float(data["inpc_a"]),
-                        "fecha_inpc_b": data["fecha_b"].date() if hasattr(data["fecha_b"], 'date') else data["fecha_b"],
-                        "periodo_b": data["periodo_b"],
-                        "inpc_b": float(data["inpc_b"]),
-                        "factor_actualizacion": float(data["factor_actualizacion"]),
-                        "importe_actualizacion": float(data["importe_actualizacion"]),
-                        "total_multa_actualizada": float(data["total_actualizado"])
-                    })
+                data_dict = {
+                    "codebar": codebar,
+                    "id_documento": id_documento,
+                    "visita": visita,
+                    "pmo": pmo,
+                    "po": pmo,
+                    "fecha_emision": fecha_emision_dt,
+                    "id_notificador": id_notificador,
+                    "no_documento": nombre_documento,
+                    "importe_letra": importe_letra,
+                    "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
+                    "inpc_notificacion": float(data["inpc_a"]),
+                    "inpc_requerimiento": float(data["inpc_b"]),
+                    "periodo_notificacion": data["periodo_a"],
+                    "periodo_requerimiento": data["periodo_b"],
+                    "factor_actualizacion": float(data["factor_actualizacion"]),
+                    "importe_actualizacion": float(data["importe_actualizacion"]),
+                    "total_multa_actualizada": total_actualizado,
+                    "fecha_inpc_a": data["fecha_a"].date(),
+                    "periodo_a": data["periodo_a"],
+                    "inpc_a": float(data["inpc_a"]),
+                    "fecha_inpc_b": data["fecha_b"].date(),
+                    "periodo_b": data["periodo_b"],
+                    "inpc_b": float(data["inpc_b"]),
+                    "pk": pk_value
+                }
+                
+                _upsert_tabla_dinamica(
+                    db_proyecto, 
+                    pk_name, 
+                    pk_value, 
+                    data_dict,
+                    cols_dinamica
+                )
+                procesados += 1
                 
             else:
-                # Otros proyectos: solo guardar codebar básico
-                codebar = f"*{str(pk_value)[:10]}{fecha_emision_dt.strftime('%Y%m%d%H%M%S')}*"
+                codebar = _generar_codebar_completo(
+                    pk_value=str(pk_value),
+                    fecha_emision=fecha_emision_dt,
+                    id_documento=id_documento,
+                    visita=visita,
+                    identificador_documento=identificador_documento
+                )
                 
-                if existe:
-                    update_query = text(f"""
-                        UPDATE tabla_dinamica 
-                        SET 
-                            codebar = :codebar,
-                            fecha_emision = :fecha_emision,
-                            visita = :visita,
-                            pmo = :pmo
-                        WHERE `{pk_name}` = :pk
-                    """)
-                    db_proyecto.execute(update_query, {
-                        "codebar": codebar,
-                        "fecha_emision": fecha_emision_dt.date(),
-                        "visita": visita,
-                        "pmo": pmo,
-                        "pk": pk_value
-                    })
-                else:
-                    insert_query = text(f"""
-                        INSERT INTO tabla_dinamica (
-                            codebar, credito, fecha_emision, visita, pmo
-                        ) VALUES (
-                            :codebar, :credito, :fecha_emision, :visita, :pmo
-                        )
-                    """)
-                    db_proyecto.execute(insert_query, {
-                        "codebar": codebar,
-                        "credito": pk_value,
-                        "fecha_emision": fecha_emision_dt.date(),
-                        "visita": visita,
-                        "pmo": pmo
-                    })
+                data_dict = {
+                    "codebar": codebar,
+                    "id_documento": id_documento,
+                    "visita": visita,
+                    "pmo": pmo,
+                    "fecha_emision": fecha_emision_dt,
+                    "id_notificador": id_notificador,
+                    "no_documento": nombre_documento,
+                    "pk": pk_value
+                }
+                
+                _upsert_tabla_dinamica(
+                    db_proyecto,
+                    pk_name,
+                    pk_value,
+                    data_dict,
+                    cols_dinamica
+                )
+                procesados += 1
             
-            procesados += 1
-            
-            # Commit cada 50 registros
-            if procesados % 50 == 0:
+            if procesados % batch_size == 0:
                 db_proyecto.commit()
                 
         except Exception as e:
-            errores.append(f"Fila {pk_value}: {str(e)}")
+            errores.append(f"Fila {pk_value}: {str(e)[:100]}")
             db_proyecto.rollback()
     
-    # Commit final
     db_proyecto.commit()
     
-    # Registrar log
     registrar_log(
         db_global,
         current_user.id,
         "calcular_todas_filas",
-        f"Cálculo masivo en {proyecto_slug}: {procesados} filas, {len(errores)} errores",
+        f"Cálculo masivo en {proyecto_slug}: {procesados} filas, {len(errores)} errores. Modo INPC: {modo_inpc}",
         proyecto.id
     )
     
@@ -1862,5 +1763,94 @@ def calcular_todas_filas(
         "procesados": procesados,
         "errores": errores[:50],
         "total_errores": len(errores),
+        "modo_inpc": modo_inpc,
         "mensaje": f"{procesados} filas calculadas, {len(errores)} errores"
     }
+
+
+# ============================================================
+# ENDPOINTS DE CATÁLOGOS
+# ============================================================
+
+@router.get("/{proyecto_slug}/catalogo/documentos")
+def get_catalogo_documentos(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    from sqlalchemy import text
+    
+    check_project_access(proyecto_slug, current_user, db_global)
+    
+    proyecto = db_global.execute(
+        text("SELECT id FROM proyectos WHERE slug = :slug"),
+        {"slug": proyecto_slug}
+    ).first()
+    
+    if not proyecto:
+        return []
+    
+    try:
+        rows = db_global.execute(
+            text("""
+                SELECT id_documento, nombre_documento, identificador_documento
+                FROM catalogo_documento 
+                WHERE id_proyecto = :pid AND activo = 1
+                ORDER BY nombre_documento
+            """),
+            {"pid": proyecto.id}
+        ).fetchall()
+        
+        return [
+            {
+                "id": r.id_documento,
+                "nombre": r.nombre_documento,
+                "identificador": r.identificador_documento
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Error cargando documentos: {e}")
+        return []
+
+
+@router.get("/{proyecto_slug}/catalogo/notificadores")
+def get_catalogo_notificadores(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    from sqlalchemy import text
+    
+    check_project_access(proyecto_slug, current_user, db_global)
+    
+    proyecto = db_global.execute(
+        text("SELECT id FROM proyectos WHERE slug = :slug"),
+        {"slug": proyecto_slug}
+    ).first()
+    
+    if not proyecto:
+        return []
+    
+    try:
+        rows = db_global.execute(
+            text("""
+                SELECT id_notificador, nombre, acronimo
+                FROM catalogo_notificadores 
+                WHERE id_proyecto = :pid AND activo = 1
+                ORDER BY nombre
+            """),
+            {"pid": proyecto.id}
+        ).fetchall()
+        
+        return [
+            {
+                "id": r.id_notificador,
+                "nombre": r.nombre,
+                "acronimo": r.acronimo
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"Error cargando notificadores: {e}")
+        return []

@@ -20,15 +20,32 @@ export default function Calculos() {
   const [limit, setLimit] = useState(50);
   const [totalRegistros, setTotalRegistros] = useState(0);
   
+  // Catálogos
+  const [documentos, setDocumentos] = useState([]);
+  const [notificadores, setNotificadores] = useState([]);
+  const [selectedDoc, setSelectedDoc] = useState('');
+  const [selectedNotif, setSelectedNotif] = useState('');
+  const [modoInpc, setModoInpc] = useState('actual');
+  
   const esEstado = proyectoSlug === 'estado';
   
   const [filtros, setFiltros] = useState({
     fecha_emision: new Date().toISOString().split('T')[0],
     visita: '',
     pmo: '',
-    id_documento: '',
-    id_notificador: ''
   });
+
+  // ============================================================
+  // FUNCIONES AUXILIARES
+  // ============================================================
+
+  const calcularFechaAnterior = () => {
+    const fecha = filtros.fecha_emision 
+      ? new Date(filtros.fecha_emision) 
+      : new Date();
+    const fechaAnterior = new Date(fecha.getFullYear(), fecha.getMonth() - 1, 1);
+    return fechaAnterior.toISOString().split('T')[0];
+  };
 
   // ============================================================
   // Cargar datos de tabla_analisis CON PAGINACIÓN
@@ -54,6 +71,29 @@ export default function Calculos() {
   }, [proyectoSlug, page, limit]);
 
   // ============================================================
+  // Cargar tabla_dinamica para mostrar cálculos
+  // ============================================================
+  const loadTablaDinamica = useCallback(async () => {
+    if (!proyectoSlug) return;
+    try {
+      const res = await api.get(`/calculos/${proyectoSlug}/tabla-dinamica`, {
+        params: { page: 1, limit: 100 }
+      });
+      if (res.data.rows && res.data.rows.length > 0) {
+        // Si hay datos en tabla_dinamica, los mostramos
+        setData(prev => ({
+          ...prev,
+          rows: res.data.rows,
+          total: res.data.total
+        }));
+        setTotalRegistros(res.data.total || 0);
+      }
+    } catch (err) {
+      console.error('Error cargando tabla_dinamica:', err);
+    }
+  }, [proyectoSlug]);
+
+  // ============================================================
   // Cargar último INPC (solo para Estado)
   // ============================================================
   const loadUltimoInpc = useCallback(async () => {
@@ -64,7 +104,12 @@ export default function Calculos() {
     try {
       const res = await api.get('/calculos/inpc/ultimo');
       if (res.data.success) {
-        setInpcInfo(res.data.data);
+        setInpcInfo({
+          periodo: res.data.data.periodo,
+          valor: res.data.data.valor,
+          periodo_anterior: res.data.anterior?.periodo,
+          valor_anterior: res.data.anterior?.valor
+        });
       } else {
         setInpcInfo(null);
       }
@@ -73,6 +118,23 @@ export default function Calculos() {
       setInpcInfo(null);
     }
   }, [esEstado]);
+
+  // ============================================================
+  // Cargar catálogos
+  // ============================================================
+  const loadCatalogos = useCallback(async () => {
+    if (!proyectoSlug) return;
+    try {
+      const [docRes, notifRes] = await Promise.all([
+        api.get(`/calculos/${proyectoSlug}/catalogo/documentos`),
+        api.get(`/calculos/${proyectoSlug}/catalogo/notificadores`),
+      ]);
+      setDocumentos(docRes.data || []);
+      setNotificadores(notifRes.data || []);
+    } catch (err) {
+      console.error('Error cargando catálogos:', err);
+    }
+  }, [proyectoSlug]);
 
   // ============================================================
   // Sincronizar INPC (solo para Estado)
@@ -102,52 +164,10 @@ export default function Calculos() {
     } finally {
         setSincronizando(false);
     }
-};
-
-  // ============================================================
-  // Calcular UNA fila específica
-  // ============================================================
-  const calcularFila = async (pkValue, row) => {
-    setCalculando(true);
-    setMessage(null);
-    try {
-      const payload = {
-        pk_value: pkValue,
-        campos: row,
-        fecha_emision: filtros.fecha_emision || new Date().toISOString().split('T')[0],
-        visita: filtros.visita || row.visita || '',
-        pmo: filtros.pmo || row.pmo || ''
-      };
-
-      // Usar el endpoint de analisis (está en analisis.py)
-      const res = await api.post(`/analisis/${proyectoSlug}/calcular-fila`, payload);
-      
-      if (res.data.success) {
-        // Actualizar la fila en el estado
-        setData(prev => ({
-          ...prev,
-          rows: prev.rows.map(r => 
-            String(r[prev.pk]) === String(pkValue) 
-              ? { ...r, ...res.data.data }
-              : r
-          )
-        }));
-        showMessage('success', `✅ Fila ${pkValue} calculada correctamente`);
-        // Recargar para actualizar todo
-        await loadData();
-      } else {
-        showMessage('error', res.data.error || 'Error al calcular');
-      }
-    } catch (err) {
-      console.error('Error al calcular fila:', err);
-      showMessage('error', err.response?.data?.detail || 'Error al calcular');
-    } finally {
-      setCalculando(false);
-    }
   };
 
   // ============================================================
-  // Calcular TODAS las filas (sin importar la página)
+  // Calcular TODAS las filas (está en analisis.py)
   // ============================================================
   const calcularTodas = async () => {
     if (totalRegistros === 0) {
@@ -155,25 +175,49 @@ export default function Calculos() {
       return;
     }
     
-    if (!window.confirm(`¿Calcular todas las ${totalRegistros} filas? Esto puede tomar varios segundos.`)) return;
+    const modoTexto = modoInpc === 'actual' ? 'Actual' : 'Anterior';
+    const fechaTexto = filtros.fecha_emision || new Date().toISOString().split('T')[0];
+    const fechaAnterior = calcularFechaAnterior();
+    const docNombre = documentos.find(d => d.id === parseInt(selectedDoc))?.nombre || 'No seleccionado';
+    const notifNombre = notificadores.find(n => n.id === parseInt(selectedNotif))?.nombre || 'No seleccionado';
+    const identDoc = documentos.find(d => d.id === parseInt(selectedDoc))?.identificador || '';
+    
+    const fechaMostrar = modoInpc === 'anterior' ? fechaAnterior : fechaTexto;
+    
+    if (!window.confirm(
+      `📊 CALCULAR TODAS LAS FILAS\n\n` +
+      `📅 Fecha de emisión: ${fechaTexto}\n` +
+      `📈 Modo INPC: ${modoTexto} (${fechaMostrar})\n` +
+      `${modoInpc === 'anterior' ? '⚠️ Usa el INPC del mes anterior\n' : ''}` +
+      `📄 Documento: ${docNombre} ${identDoc ? `(${identDoc})` : ''}\n` +
+      `👤 Notificador: ${notifNombre}\n\n` +
+      `Total: ${totalRegistros.toLocaleString()} registros\n\n` +
+      `¿Continuar?`
+    )) return;
     
     setCalculando(true);
     setMessage(null);
     
     try {
-      // Este endpoint trabaja sobre TODA la tabla_analisis
-      const res = await api.post(`/analisis/${proyectoSlug}/calcular-todas`, null, {
-        params: {
-          fecha_emision: filtros.fecha_emision || new Date().toISOString().split('T')[0],
-          visita: filtros.visita || '',
-          pmo: filtros.pmo || ''
-        }
-      });
+      const params = {
+        fecha_emision: filtros.fecha_emision || new Date().toISOString().split('T')[0],
+        visita: filtros.visita || '',
+        pmo: filtros.pmo || '',
+        modo_inpc: modoInpc,
+      };
+      
+      if (selectedDoc) params.id_documento = parseInt(selectedDoc);
+      if (selectedNotif) params.id_notificador = parseInt(selectedNotif);
+      
+      // El endpoint está en analisis.py
+      const res = await api.post(`/analisis/${proyectoSlug}/calcular-todas`, null, { params });
       
       if (res.data.success) {
         showMessage('success', `✅ ${res.data.mensaje}`);
-        // Recargar datos para mostrar los cambios
+        // 🔥 RECARGAR DATOS PARA MOSTRAR LOS CÁLCULOS ACTUALIZADOS
         await loadData();
+        // 🔥 También recargar tabla_dinamica si existe
+        await loadTablaDinamica();
       } else {
         showMessage('error', res.data.error || 'Error al calcular');
       }
@@ -200,8 +244,10 @@ export default function Calculos() {
     if (proyectoSlug) {
       loadData();
       loadUltimoInpc();
+      loadCatalogos();
+      loadTablaDinamica();
     }
-  }, [proyectoSlug, page, limit, loadData, loadUltimoInpc]);
+  }, [proyectoSlug, page, limit, loadData, loadUltimoInpc, loadCatalogos, loadTablaDinamica]);
 
   // ============================================================
   // Renderizado de columnas según proyecto
@@ -308,52 +354,100 @@ export default function Calculos() {
         />
         
         <div className="filtros-grid">
+          {/* ===== FECHA EMISIÓN ===== */}
           <div className="filtro-group">
             <label>Fecha Emisión:</label>
             <input 
               type="date" 
+              className="filtro-input"
               value={filtros.fecha_emision}
               onChange={e => setFiltros(prev => ({...prev, fecha_emision: e.target.value}))}
             />
           </div>
+          
+          {/* ===== VISITA ===== */}
           <div className="filtro-group">
             <label>Visita:</label>
             <input 
               type="text" 
+              className="filtro-input"
               value={filtros.visita}
               onChange={e => setFiltros(prev => ({...prev, visita: e.target.value.toUpperCase()}))}
               placeholder="Última visita"
               maxLength={10}
             />
           </div>
+          
+          {/* ===== PMO ===== */}
           <div className="filtro-group">
             <label>PMO:</label>
             <input 
               type="text" 
+              className="filtro-input"
               value={filtros.pmo}
               onChange={e => setFiltros(prev => ({...prev, pmo: e.target.value.toUpperCase()}))}
               placeholder="Último PMO"
               maxLength={10}
             />
           </div>
+          
+          {/* ===== DROPDOWN DOCUMENTOS ===== */}
           <div className="filtro-group">
-            <label>ID Documento:</label>
-            <input 
-              type="number" 
-              value={filtros.id_documento}
-              onChange={e => setFiltros(prev => ({...prev, id_documento: e.target.value}))}
-              placeholder="Catálogo documentos"
-            />
+            <label>Documento:</label>
+            <select 
+              className="filtro-select"
+              value={selectedDoc}
+              onChange={e => setSelectedDoc(e.target.value)}
+            >
+              <option value="">Sin documento</option>
+              {documentos.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.nombre} {d.identificador ? `(${d.identificador})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {/* ===== DROPDOWN NOTIFICADORES ===== */}
           <div className="filtro-group">
-            <label>ID Notificador:</label>
-            <input 
-              type="number" 
-              value={filtros.id_notificador}
-              onChange={e => setFiltros(prev => ({...prev, id_notificador: e.target.value}))}
-              placeholder="Catálogo notificadores"
-            />
+            <label>Notificador:</label>
+            <select 
+              className="filtro-select"
+              value={selectedNotif}
+              onChange={e => setSelectedNotif(e.target.value)}
+            >
+              <option value="">Sin notificador</option>
+              {notificadores.map(n => (
+                <option key={n.id} value={n.id}>
+                  {n.nombre} {n.acronimo ? `(${n.acronimo})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {/* ===== MODO INPC con fechas ===== */}
+          {esEstado && (
+            <div className="filtro-group">
+              <label>INPC para fecha de emisión:</label>
+              <select 
+                className="filtro-select"
+                value={modoInpc}
+                onChange={e => setModoInpc(e.target.value)}
+              >
+                <option value="actual">
+                  Actual ({inpcInfo?.periodo || 'sin datos'})
+                </option>
+                <option value="anterior">
+                  Anterior ({inpcInfo?.periodo_anterior || 'sin datos'})
+                </option>
+              </select>
+              {modoInpc === 'anterior' && (
+                <span style={{ fontSize: 11, color: '#c05621', marginTop: 4, display: 'block' }}>
+                  ⚠️ Usa el INPC del mes anterior
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -376,13 +470,12 @@ export default function Calculos() {
                   {renderColumnas.map(col => (
                     <th key={col.key}>{col.label}</th>
                   ))}
-                  <th className="col-acciones">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={renderColumnas.length + 1} className="calculos-empty">
+                    <td colSpan={renderColumnas.length} className="calculos-empty">
                       {proyectoSlug 
                         ? 'No hay datos en la tabla de análisis. Genera el análisis primero.'
                         : 'Selecciona un proyecto para ver los datos.'}
@@ -390,7 +483,6 @@ export default function Calculos() {
                   </tr>
                 ) : (
                   data.rows.map((row, idx) => {
-                    const pkValue = row[data.pk];
                     return (
                       <tr key={idx}>
                         {renderColumnas.map(col => {
@@ -402,9 +494,16 @@ export default function Calculos() {
                             });
                           }
                           if (col.key === 'codebar' && value) {
+                            // 🔥 Mostrar el código de barras completo
                             return (
                               <td key={col.key} className="col-codebar">
-                                <span className="codebar-text">{value}</span>
+                                <span className="codebar-text" style={{ 
+                                  fontFamily: 'IDAutomationHC39M, monospace',
+                                  fontSize: '11px',
+                                  letterSpacing: '1px'
+                                }}>
+                                  {value}
+                                </span>
                               </td>
                             );
                           }
@@ -417,16 +516,6 @@ export default function Calculos() {
                           }
                           return <td key={col.key}>{value || '—'}</td>;
                         })}
-                        <td className="col-acciones">
-                          <button 
-                            className="btn-calc-fila"
-                            onClick={() => calcularFila(pkValue, row)}
-                            disabled={calculando}
-                            title="Calcular esta fila"
-                          >
-                            🔄
-                          </button>
-                        </td>
                       </tr>
                     );
                   })

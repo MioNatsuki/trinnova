@@ -1,12 +1,12 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Text,
-    ForeignKey, Enum, UniqueConstraint
+    ForeignKey, Enum, UniqueConstraint, JSON,  
+    DECIMAL
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
 import enum
-from sqlalchemy import DECIMAL
 
 
 class RolNombre(str, enum.Enum):
@@ -168,3 +168,84 @@ class InpcHistorico(Base):
 
     def __repr__(self):
         return f"<InpcHistorico periodo={self.periodo} valor={self.valor}>"
+
+class EmisionJob(Base):
+    """
+    Tabla: emision_jobs (en db_global)
+    Almacena los trabajos de emisión masiva de documentos
+    """
+    __tablename__ = "emision_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    id_plantilla = Column(Integer, ForeignKey("plantillas.id"), nullable=False)
+    id_usuario = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    
+    # Datos del job
+    nombre_job = Column(String(200), nullable=True)
+    modo = Column(Enum("lotes", "paquetes"), default="lotes")
+    cuentas_por_lote = Column(Integer, default=50)
+    orden_impresion_inicial = Column(Integer, default=1)
+    
+    # Estado y progreso
+    status = Column(Enum("pending", "processing", "completed", "failed", "cancelled"), default="pending")
+    total_registros = Column(Integer, default=0)
+    procesados = Column(Integer, default=0)
+    ultimo_pk_procesado = Column(String(100), nullable=True)
+    ultimo_orden_procesado = Column(Integer, nullable=True)
+    checkpoint_data = Column(JSON, nullable=True)
+    
+    # Filtros (JSON)
+    filtros = Column(JSON, nullable=True)
+    
+    # Resultados
+    ruta_zip = Column(String(500), nullable=True)
+    ruta_temporal = Column(String(500), nullable=True)
+    
+    # Errores
+    error_msg = Column(Text, nullable=True)
+    
+    # Fechas
+    created_at = Column(DateTime, server_default=func.now())
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)  # 24h después de completado
+    
+    # Quién lo creó
+    created_by = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    
+    # Relaciones
+    proyecto = relationship("Proyecto", foreign_keys=[id_proyecto])
+    plantilla = relationship("Plantilla", foreign_keys=[id_plantilla])
+    usuario = relationship("Usuario", foreign_keys=[id_usuario])
+    detalles = relationship("EmisionDetalle", back_populates="job", cascade="all, delete-orphan")
+
+
+class EmisionDetalle(Base):
+    """
+    Tabla: emision_detalle (en db_global)
+    Almacena el detalle de cada registro procesado en un job
+    """
+    __tablename__ = "emision_detalle"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_job = Column(Integer, ForeignKey("emision_jobs.id", ondelete="CASCADE"), nullable=False)
+    
+    # Datos del registro
+    pk_value = Column(String(100), nullable=False)  # PK del registro en su proyecto
+    orden_impresion = Column(Integer, nullable=False)
+    codebar = Column(String(100), nullable=True)
+    
+    # Estado
+    status = Column(Enum("pending", "processing", "completed", "failed"), default="pending")
+    error_msg = Column(Text, nullable=True)
+    
+    # Ruta del PDF
+    ruta_pdf = Column(String(500), nullable=True)
+    
+    # Fechas
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relaciones
+    job = relationship("EmisionJob", back_populates="detalles")

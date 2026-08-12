@@ -154,7 +154,7 @@ export default function Calculos() {
             params: { historico: true }
         });
         if (res.data.success) {
-            showMessage('success', `✅ ${res.data.mensaje}`);
+            showMessage('success', `${res.data.mensaje}`);
             await loadUltimoInpc();
         } else {
             showMessage('error', res.data.mensaje || 'Error al sincronizar');
@@ -185,12 +185,12 @@ export default function Calculos() {
     const fechaMostrar = modoInpc === 'anterior' ? fechaAnterior : fechaTexto;
     
     if (!window.confirm(
-      `📊 CALCULAR TODAS LAS FILAS\n\n` +
-      `📅 Fecha de emisión: ${fechaTexto}\n` +
-      `📈 Modo INPC: ${modoTexto} (${fechaMostrar})\n` +
-      `${modoInpc === 'anterior' ? '⚠️ Usa el INPC del mes anterior\n' : ''}` +
-      `📄 Documento: ${docNombre} ${identDoc ? `(${identDoc})` : ''}\n` +
-      `👤 Notificador: ${notifNombre}\n\n` +
+      `CALCULAR TODAS LAS FILAS\n\n` +
+      `Fecha de emisión: ${fechaTexto}\n` +
+      `Modo INPC: ${modoTexto} (${fechaMostrar})\n` +
+      `${modoInpc === 'anterior' ? 'Usa el INPC del mes anterior\n' : ''}` +
+      `Documento: ${docNombre} ${identDoc ? `(${identDoc})` : ''}\n` +
+      `Notificador: ${notifNombre}\n\n` +
       `Total: ${totalRegistros.toLocaleString()} registros\n\n` +
       `¿Continuar?`
     )) return;
@@ -213,10 +213,8 @@ export default function Calculos() {
       const res = await api.post(`/analisis/${proyectoSlug}/calcular-todas`, null, { params });
       
       if (res.data.success) {
-        showMessage('success', `✅ ${res.data.mensaje}`);
-        // 🔥 RECARGAR DATOS PARA MOSTRAR LOS CÁLCULOS ACTUALIZADOS
+        showMessage('success', `${res.data.mensaje}`);
         await loadData();
-        // 🔥 También recargar tabla_dinamica si existe
         await loadTablaDinamica();
       } else {
         showMessage('error', res.data.error || 'Error al calcular');
@@ -327,20 +325,20 @@ export default function Calculos() {
               onClick={calcularTodas}
               disabled={calculando || totalRegistros === 0}
             >
-              {calculando ? '⏳ Calculando...' : '📊 Calcular Todas'}
+              {calculando ? '⏳ Calculando...' : 'Calcular Todas'}
             </button>
           </div>
         </div>
 
         {esEstado && inpcInfo && (
           <div className="inpc-banner">
-            <span className="inpc-label">📊 INPC más reciente:</span>
+            <span className="inpc-label">INPC más reciente:</span>
             <span className="inpc-value">{inpcInfo.periodo} = {inpcInfo.valor}</span>
           </div>
         )}
         {esEstado && !inpcInfo && (
           <div className="inpc-banner inpc-warning">
-            <span>⚠️ No hay datos de INPC. Sincroniza primero con el botón "Sincronizar INPC"</span>
+            <span>No hay datos de INPC. Sincroniza primero con el botón "Sincronizar INPC"</span>
           </div>
         )}
       </div>
@@ -443,7 +441,7 @@ export default function Calculos() {
               </select>
               {modoInpc === 'anterior' && (
                 <span style={{ fontSize: 11, color: '#c05621', marginTop: 4, display: 'block' }}>
-                  ⚠️ Usa el INPC del mes anterior
+                  Usa el INPC del mes anterior
                 </span>
               )}
             </div>
@@ -494,7 +492,6 @@ export default function Calculos() {
                             });
                           }
                           if (col.key === 'codebar' && value) {
-                            // 🔥 Mostrar el código de barras completo
                             return (
                               <td key={col.key} className="col-codebar">
                                 <span className="codebar-text" style={{ 

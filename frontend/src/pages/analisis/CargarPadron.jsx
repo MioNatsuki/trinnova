@@ -238,7 +238,7 @@ const readPreview = (f) => {
                     </>
                   ) : (
                     <>
-                      <div className="drop-zone__icon">📂</div>
+                      <div className="drop-zone__icon"></div>
                       <p className="drop-zone__text">Arrastra aquí o haz clic para seleccionar</p>
                       <p className="drop-zone__hint">CSV, Excel (.xlsx, .xls)</p>
                     </>
@@ -272,7 +272,7 @@ const readPreview = (f) => {
                 {/* Fallback si SheetJS falló */}
                 {preview?.excel && (
                   <div className="preview-section preview-section--excel">
-                    📊 Archivo Excel seleccionado: <strong>{preview.name}</strong>
+                    Archivo Excel seleccionado: <strong>{preview.name}</strong>
                     <br />
                     <small style={{ color: 'var(--clr-muted)' }}>No se pudo generar preview. Se importará correctamente.</small>
                   </div>
@@ -318,7 +318,7 @@ const readPreview = (f) => {
                       )}
                       {result.errores?.length > 0 && (
                         <details className="cp-details cp-details--warn">
-                          <summary>⚠️ {result.errores.length} advertencias</summary>
+                          <summary>{result.errores.length} advertencias</summary>
                           <ul className="cp-errores">
                             {result.errores.map((e, i) => <li key={i}>{e}</li>)}
                           </ul>

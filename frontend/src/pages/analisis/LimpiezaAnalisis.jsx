@@ -473,13 +473,13 @@ export default function LimpiezaAnalisis() {
             onClick={() => ejecutarAccion('quitar_pagada')}
             disabled={ejecutando || selected.size === 0}
             title="Marca seleccionados como No viable (Pagada).">
-            💰<span>Pagadas</span>
+            <span>Pagadas</span>
           </button>
           <button className="la-tool-btn la-tool-btn--warning"
             onClick={() => setShowNdInput(v => !v)}
             disabled={ejecutando || selected.size === 0}
             title="Marca seleccionados como No viable (No Deudor).">
-            📋<span>ND</span>
+            <span>ND</span>
           </button>
           <button className="la-tool-btn la-tool-btn--accent"
             onClick={openCsvModal}
@@ -554,7 +554,7 @@ export default function LimpiezaAnalisis() {
           <span className="la-selected-count">{selected.size} seleccionados</span>
         )}
         {pendingCellCount > 0 && (
-          <span className="la-dirty-count">⚠️ {pendingCellCount} sin guardar</span>
+          <span className="la-dirty-count">{pendingCellCount} sin guardar</span>
         )}
       </div>
 

@@ -403,7 +403,7 @@ export default function Complementar() {
               <button className="comp-modal-x" onClick={closeGenModal}>✕</button>
             </div>
             {genInfo?.previo > 0 && (
-              <p className="comp-modal-warn">⚠️ Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.</p>
+              <p className="comp-modal-warn">Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.</p>
             )}
             <p className="comp-modal-desc">Se reconstruirá tabla_analisis (padrón + complementaria).</p>
             <div className="comp-modal-footer">
@@ -434,7 +434,7 @@ export default function Complementar() {
                 onChange={e => setCsvFile(e.target.files[0] || null)} />
               {csvFile
                 ? <><span style={{fontSize:24}}>✓</span><p>{csvFile.name}</p></>
-                : <><span style={{fontSize:24}}>📂</span><p>Arrastra aquí o haz clic para seleccionar</p></>}
+                : <><span style={{fontSize:24}}></span><p>Arrastra aquí o haz clic para seleccionar</p></>}
             </div>
             {csvResult && (
               <div className={`comp-csv-result ${csvResult.success ? 'ok' : 'err'}`}>

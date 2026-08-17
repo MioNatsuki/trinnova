@@ -1,34 +1,27 @@
-"""
-TRINNOVA - Worker Service para Windows
-=======================================
-Este script corre como servicio de Windows en background.
-Se encarga de procesar los jobs de emisión de documentos.
-
-Estado actual: Fase 2.1 - Cliente API implementado
-Pendiente: Procesamiento real de PDFs (Fase 2.2)
-"""
-
+# Workers/worker_service.py - VERSIÓN CORREGIDA
 import sys
 import os
-import time
 import json
+import asyncio
 import logging
 import signal
 import traceback
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import httpx
+from backend.app.services.monitoreo_service import MonitoreoService
+from backend.app.services.emision_service import EmisionService
 
 # ============================================================
 # CONFIGURACIÓN DE PATHS
 # ============================================================
 
-# Obtener la ruta base del proyecto
 BASE_DIR = Path(__file__).parent.parent
 BACKEND_DIR = BASE_DIR / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-# Crear directorios necesarios
 LOG_DIR = BASE_DIR / "Logs"
 TEMP_DIR = BASE_DIR / "Temp"
 EMISIONES_DIR = BASE_DIR / "Emisiones"
@@ -36,11 +29,6 @@ EMISIONES_DIR = BASE_DIR / "Emisiones"
 LOG_DIR.mkdir(exist_ok=True)
 TEMP_DIR.mkdir(exist_ok=True)
 EMISIONES_DIR.mkdir(exist_ok=True)
-
-print(f"Directorio base: {BASE_DIR}")
-print(f"Backend: {BACKEND_DIR}")
-print(f"Logs: {LOG_DIR}")
-print(f"Emisiones: {EMISIONES_DIR}")
 
 # ============================================================
 # CONFIGURACIÓN DE LOGGING
@@ -60,318 +48,787 @@ logging.basicConfig(
 logger = logging.getLogger("TrinnovaWorker")
 
 # ============================================================
-# IMPORTACIÓN DE MÓDULOS
+# CLIENTE API ASÍNCRONO
 # ============================================================
 
-try:
-    from api_client import WorkerAPIClient
-    logger.info("Cliente API importado correctamente")
-except ImportError as e:
-    logger.error(f"Error importando api_client: {e}")
-    logger.error("Asegúrate de que api_client.py está en la misma carpeta")
-    sys.exit(1)
+class AsyncAPIClient:
+    """Cliente HTTP asíncrono para el worker con auto-registro."""
+    
+    def __init__(self, base_url: str, worker_id: str, worker_secret: str = None, timeout: int = 60):
+        self.base_url = base_url.rstrip('/')
+        self.worker_id = worker_id
+        self.worker_secret = worker_secret or "Admin2024!"
+        self.timeout = timeout
+        self.token = None
+        self.client = None
+    
+    async def __aenter__(self):
+        await self._register()
+        
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            headers={
+                'Authorization': f'Bearer {self.token}',
+                'Content-Type': 'application/json',
+                'User-Agent': f'Trinnova-Worker/{self.worker_id}'
+            },
+            limits=httpx.Limits(max_keepalive_connections=10)
+        )
+        return self
+    
+    async def _register(self):
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/emision/workers/register",
+                    params={
+                        "worker_id": self.worker_id,
+                        "worker_secret": self.worker_secret
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                self.token = data.get("access_token")
+                logger.info(f"Worker registrado: {self.worker_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Error registrando worker: {e}")
+            self.token = None
+            return False
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.client:
+            await self.client.aclose()
+    
+    async def get_pending_jobs(self, worker_id: str) -> List[Dict]:
+        try:
+            response = await self.client.get(
+                "/emision/workers/pending",
+                params={"worker_id": worker_id}
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("jobs", [])
+        except Exception as e:
+            logger.error(f"Error obteniendo jobs: {e}")
+            return []
+    
+    async def claim_job(self, worker_id: str, job_id: int) -> Optional[Dict]:
+        try:
+            response = await self.client.post(
+                "/emision/workers/claim",
+                json={"worker_id": worker_id, "job_id": job_id}
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("job")
+        except Exception as e:
+            logger.error(f"Error tomando job {job_id}: {e}")
+            return None
+    
+    async def update_progress(
+        self,
+        worker_id: str,
+        job_id: int,
+        procesados: int,
+        ultimo_pk: Optional[str] = None,
+        status: str = "processing",
+        error_msg: Optional[str] = None,
+        checkpoint_data: Optional[Dict] = None
+    ) -> bool:
+        try:
+            payload = {
+                "worker_id": worker_id,
+                "procesados": procesados,
+                "status": status
+            }
+            if ultimo_pk:
+                payload["ultimo_pk"] = ultimo_pk
+            if error_msg:
+                payload["error_msg"] = error_msg
+            if checkpoint_data:
+                payload["checkpoint_data"] = checkpoint_data
+            
+            response = await self.client.post(
+                f"/emision/workers/{worker_id}/progress/{job_id}",
+                json=payload
+            )
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Error actualizando progreso: {e}")
+            return False
+    
+    async def save_checkpoint(self, job_id: int, checkpoint_data: Dict) -> bool:
+        try:
+            response = await self.client.post(
+                "/emision/workers/checkpoint",
+                json={"job_id": job_id, "checkpoint": checkpoint_data}
+            )
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Error guardando checkpoint: {e}")
+            return False
+    
+    async def get_checkpoint(self, job_id: int) -> Optional[Dict]:
+        try:
+            response = await self.client.get(f"/emision/workers/checkpoint/{job_id}")
+            response.raise_for_status()
+            data = response.json()
+            return data.get("checkpoint")
+        except Exception as e:
+            logger.error(f"Error obteniendo checkpoint: {e}")
+            return None
+    
+    async def complete_job(
+        self,
+        worker_id: str,
+        job_id: int,
+        manifest: Dict
+    ) -> bool:
+        try:
+            response = await self.client.post(
+                f"/emision/workers/{worker_id}/upload/{job_id}",
+                json={"manifest": manifest}
+            )
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Error completando job: {e}")
+            return False
+    
+    async def send_heartbeat(self, worker_id: str, status: str = "running", current_job: Optional[int] = None) -> bool:
+        try:
+            await self.client.post(
+                "/emision/workers/heartbeat",
+                json={
+                    "worker_id": worker_id,
+                    "status": status,
+                    "timestamp": datetime.now().isoformat(),
+                    "current_job": current_job
+                }
+            )
+            return True
+        except:
+            return False
 
-try:
-    from backend.app.core.config import settings
-    logger.info("Configuración cargada correctamente")
-except ImportError as e:
-    logger.error(f"Error importando configuración: {e}")
-    logger.error("Asegúrate de que el backend está en la ruta correcta")
-    sys.exit(1)
 
 # ============================================================
-# CLASE PRINCIPAL DEL WORKER
+# RENDERER DE PLANTILLAS (Asíncrono)
+# ============================================================
+
+class AsyncPlantillaRenderer:
+    def __init__(self, proyecto_slug: str):
+        self.proyecto_slug = proyecto_slug
+        self.base_path = Path(__file__).parent.parent / "backend" / "app" / "plantillas_html" / proyecto_slug
+        self.browser = None
+        self.context = None
+        self.playwright = None
+        
+        if not self.base_path.exists():
+            raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
+    
+    async def start(self):
+        from playwright.async_api import async_playwright
+        
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-gpu',
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process'
+            ]
+        )
+        self.context = await self.browser.new_context(
+            viewport={'width': 816, 'height': 1286}
+        )
+        logger.info("Navegador iniciado para renderizado")
+    
+    async def stop(self):
+        if self.context:
+            await self.context.close()
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+        logger.info("Navegador cerrado")
+    
+    async def render_pdf(
+        self,
+        nombre_archivo: str,
+        placeholders: Dict[str, str],
+        altura: int = 1286
+    ) -> bytes:
+        import base64
+        
+        ruta_completa = self.base_path / nombre_archivo
+        if not ruta_completa.exists():
+            raise FileNotFoundError(f"Archivo HTML no encontrado: {ruta_completa}")
+        
+        with open(ruta_completa, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        for key, value in placeholders.items():
+            if value is None:
+                value = ""
+            html_content = html_content.replace(f"{{{{{key}}}}}", str(value))
+        
+        ahora = datetime.now()
+        html_content = html_content.replace("{{_fecha_actual}}", ahora.strftime("%d/%m/%Y"))
+        html_content = html_content.replace("{{_numero_pagina}}", "1")
+        html_content = html_content.replace("{{_total_paginas}}", "1")
+        
+        img_folder = self.base_path / "img"
+        if img_folder.exists():
+            for img_path in img_folder.glob("*"):
+                try:
+                    with open(img_path, 'rb') as f:
+                        img_data = base64.b64encode(f.read()).decode('utf-8')
+                        ext = img_path.suffix.lower()
+                        mime = {
+                            '.png': 'image/png', '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+                            '.svg': 'image/svg+xml'
+                        }.get(ext, 'image/png')
+                        html_content = html_content.replace(
+                            f"./img/{img_path.name}",
+                            f"data:{mime};base64,{img_data}"
+                        )
+                        html_content = html_content.replace(
+                            f"img/{img_path.name}",
+                            f"data:{mime};base64,{img_data}"
+                        )
+                except Exception as e:
+                    logger.warning(f"Error convirtiendo imagen {img_path.name}: {e}")
+        
+        page = await self.context.new_page()
+        try:
+            await page.set_content(html_content, wait_until='networkidle')
+            await page.wait_for_timeout(500)
+            
+            pdf_bytes = await page.pdf(
+                print_background=True,
+                width='816px',
+                height=f'{altura}px',
+                margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
+                prefer_css_page_size=True,
+            )
+            return pdf_bytes
+        finally:
+            await page.close()
+
+
+# ============================================================
+# WORKER PRINCIPAL
 # ============================================================
 
 class TrinnovaWorker:
-    """
-    Worker que procesa jobs de emisión de documentos.
-    
-    Estado actual:
-    - Conecta al backend via API Client
-    - Obtiene jobs pendientes
-    - Pendiente: Procesamiento real de PDFs (Fase 2.2)
-    """
-    
     def __init__(self, worker_id: str = "worker_1"):
-        """
-        Inicializa el worker.
-        
-        Args:
-            worker_id: Identificador único del worker
-        """
         self.worker_id = worker_id
         self.running = True
         self.api_client = None
+        self.current_job = None
         
-        # Configuración
-        self.poll_interval = 10  # Segundos entre consultas
-        self.checkpoint_interval = 50  # Registros entre checkpoints
-        self.batch_size = 100
+        self.config = {
+            "worker": {"poll_interval": 5, "secret": "Admin2024!"},
+            "servidor": {"url": "http://localhost:8000/api/v1", "timeout": 60},
+            "procesamiento": {"checkpoint_interval": 50, "batch_size": 50, "max_concurrent_pages": 10},
+            "almacenamiento": {"base_path": str(EMISIONES_DIR), "temp_path": str(TEMP_DIR)}
+        }
         
-        # Estadísticas
+        self.poll_interval = 5
+        self.checkpoint_interval = 50
+        self.batch_size = 50
+        self.max_concurrent_pages = 10
+        self.base_emisiones_path = EMISIONES_DIR
+        self.temp_path = TEMP_DIR
+        
         self.stats = {
             "jobs_procesados": 0,
             "pdfs_generados": 0,
             "errores": 0,
             "inicio": datetime.now().isoformat()
         }
+
+        self.api_config = {
+            "base_url": self.config["servidor"].get("url", "http://localhost:8000/api/v1"),
+            "worker_id": self.worker_id,
+            "worker_secret": self.config["worker"].get("secret", "Admin2024!"),
+            "timeout": self.config["servidor"].get("timeout", 60)
+        }
         
-        # Cargar configuración desde archivo
         self._load_config()
-        
-        # Registrar señales para cierre limpio
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        logger.info(f"Worker {worker_id} inicializado")
-        logger.info(f"Directorio base: {BASE_DIR}")
-    
-    # ============================================================
-    # CONFIGURACIÓN
-    # ============================================================
+        logger.info(f"Worker {worker_id} inicializado (modo: SIN ZIP)")
     
     def _load_config(self):
-        """Carga la configuración desde worker_config.json"""
         config_file = Path(__file__).parent / "worker_config.json"
         
         if config_file.exists():
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+
+                self.config["worker"].update(config.get("worker", {}))
+                self.config["servidor"].update(config.get("servidor", {}))
+                self.config["procesamiento"].update(config.get("procesamiento", {}))
+                self.config["almacenamiento"].update(config.get("almacenamiento", {}))
                 
-                # Configuración del worker
-                self.poll_interval = config.get("worker", {}).get("poll_interval", 10)
-                self.checkpoint_interval = config.get("procesamiento", {}).get("checkpoint_interval", 50)
-                self.batch_size = config.get("procesamiento", {}).get("batch_size", 100)
+                self.poll_interval = self.config["worker"].get("poll_interval", 5)
+                self.checkpoint_interval = self.config["procesamiento"].get("checkpoint_interval", 50)
+                self.batch_size = self.config["procesamiento"].get("batch_size", 50)
+                self.max_concurrent_pages = self.config["procesamiento"].get("max_concurrent_pages", 10)
                 
-                # Crear cliente API
-                servidor = config.get("servidor", {})
-                self.api_client = WorkerAPIClient(
-                    base_url=servidor.get("url", "http://localhost:8000/api/v1"),
-                    token=servidor.get("token", ""),
-                    timeout=servidor.get("timeout", 60)
-                )
+                servidor = self.config["servidor"]
+                self.api_config = {
+                    "base_url": servidor.get("url", "http://localhost:8000/api/v1"),
+                    "token": servidor.get("token", ""),
+                    "timeout": servidor.get("timeout", 60),
+                    "worker_id": self.worker_id,
+                    "worker_secret": self.config["worker"].get("secret", "Admin2024!")
+                }
+                
+                self.base_emisiones_path = Path(self.config["almacenamiento"].get("base_path", str(EMISIONES_DIR)))
+                self.temp_path = Path(self.config["almacenamiento"].get("temp_path", str(TEMP_DIR)))
                 
                 logger.info("Configuración cargada correctamente")
-                
             except Exception as e:
                 logger.error(f"Error cargando configuración: {e}")
-                sys.exit(1)
-        else:
-            logger.warning(f"Archivo de configuración no encontrado: {config_file}")
-            logger.warning("Usando valores por defecto")
-            
-            # Valores por defecto
-            self.api_client = WorkerAPIClient(
-                base_url="http://localhost:8000/api/v1",
-                token="",
-                timeout=60
-            )
+                self.api_config = {
+                    "base_url": "http://localhost:8000/api/v1",
+                    "token": "",
+                    "timeout": 60,
+                    "worker_id": self.worker_id,
+                    "worker_secret": self.config["worker"].get("secret", "Admin2024!")
+                }
+                self.base_emisiones_path = EMISIONES_DIR
+                self.temp_path = TEMP_DIR
     
-    # ============================================================
-    # MANEJO DE SEÑALES
-    # ============================================================
-    
-    def _signal_handler(self, signum, frame):
-        """Maneja señales de cierre (Ctrl+C, terminación)"""
-        logger.info(f"🛑 Recibida señal {signum}, cerrando worker...")
-        self.stop()
-    
-    # ============================================================
-    # BUCLE PRINCIPAL
-    # ============================================================
-    
-    def run(self):
-        """
-        Bucle principal del worker.
-        Se ejecuta indefinidamente hasta que se reciba señal de cierre.
-        """
+    async def run(self):
         logger.info("=" * 60)
         logger.info(f"INICIANDO TRINNOVA WORKER - {self.worker_id}")
-        logger.info(f"Sistema: {os.name}")
-        logger.info(f"Directorio: {BASE_DIR}")
-        logger.info(f"API: {self.api_client.base_url}")
+        logger.info(f"API: {self.api_config['base_url']}")
         logger.info("=" * 60)
         
-        logger.info("Worker listo para procesar jobs")
-        logger.info(f"Intervalo de polling: {self.poll_interval} segundos")
-        logger.info(f"Checkpoint cada: {self.checkpoint_interval} registros")
-        logger.info("=" * 60)
+        async with AsyncAPIClient(**self.api_config) as client:
+            self.api_client = client
+            await self.api_client.send_heartbeat(self.worker_id, "running")
+            
+            logger.info("Worker listo para procesar jobs")
+            logger.info(f"Intervalo de polling: {self.poll_interval}s")
+            logger.info(f"Checkpoint cada: {self.checkpoint_interval} registros")
+            logger.info(f"Batch size: {self.batch_size}")
+            logger.info(f"Concurrencia máxima: {self.max_concurrent_pages} páginas")
+            logger.info("=" * 60)
+            
+            while self.running:
+                try:
+                    jobs = await self.api_client.get_pending_jobs(self.worker_id)
+                    
+                    if jobs:
+                        for job in jobs:
+                            if not self.running:
+                                break
+                            await self._process_job(job)
+                    else:
+                        if self.running:
+                            await asyncio.sleep(self.poll_interval)
+                            
+                except asyncio.CancelledError:
+                    logger.info("Tarea cancelada")
+                    break
+                except Exception as e:
+                    logger.error(f"Error en bucle principal: {e}")
+                    logger.error(traceback.format_exc())
+                    await asyncio.sleep(30)
+            
+            await self.api_client.send_heartbeat(self.worker_id, "stopped")
         
-        # Bucle principal
-        while self.running:
-            try:
-                # 1. Obtener jobs pendientes
-                jobs = self.api_client.get_pending_jobs(self.worker_id)
-                
-                if jobs:
-                    # 2. Procesar cada job (uno a la vez)
-                    for job in jobs:
-                        if not self.running:
-                            break
-                        self._process_job(job)
-                else:
-                    # No hay trabajos, esperar
-                    if self.running:
-                        time.sleep(self.poll_interval)
-                        
-            except KeyboardInterrupt:
-                logger.info("🛑 Interrupción por teclado recibida")
-                break
-            except Exception as e:
-                logger.error(f"Error en bucle principal: {e}")
-                logger.error(traceback.format_exc())
-                time.sleep(30)  # Esperar antes de reintentar
-        
-        # Cierre limpio
-        self._cleanup()
+        self._print_stats()
+        logger.info("Worker detenido correctamente")
     
-    # ============================================================
-    # PROCESAMIENTO DE JOBS
-    # ============================================================
-    
-    def _process_job(self, job: Dict[str, Any]):
-        """
-        Procesa un job completo.
-        
-        Args:
-            job: Datos del job obtenidos del servidor
-        """
-        job_id = job.get("id")
+    async def _process_job(self, job_data: Dict[str, Any]):
+        job_id = job_data.get("id")
         
         if not job_id:
             logger.warning("Job sin ID, ignorando")
             return
         
-        logger.info(f"Iniciando procesamiento del job {job_id}")
-        logger.info(f"   Proyecto: {job.get('proyecto_slug')}")
-        logger.info(f"   Plantilla: {job.get('plantilla_nombre')}")
-        logger.info(f"   Total registros: {job.get('total_registros', 0)}")
+        proyecto_slug = job_data.get('proyecto_slug')
+        total = job_data.get('total_registros', 0)
+        
+        # ✅ LOG: Inicio de job
+        MonitoreoService.registrar_log_estructurado(
+            nivel="info",
+            mensaje=f"Iniciando procesamiento de job {job_id}",
+            job_id=job_id,
+            worker_id=self.worker_id,
+            proyecto_slug=proyecto_slug,
+            datos_extra={"total_registros": total}
+        )
+        
+        logger.info(f"Procesando job {job_id}")
+        logger.info(f"   Proyecto: {proyecto_slug}")
+        logger.info(f"   Plantilla: {job_data.get('plantilla_nombre')}")
+        logger.info(f"   Total registros: {total}")
+        
+        claimed_job = await self.api_client.claim_job(self.worker_id, job_id)
+        
+        if not claimed_job:
+            logger.warning(f"No se pudo tomar el job {job_id}")
+            return
+        
+        self.current_job = job_id
+        
+        emision_service = EmisionService(
+            job_id=job_id,
+            db_global=self.db_global,  # Necesitas pasar la sesión
+            worker_id=self.worker_id
+        )
+
+        def on_progress(progreso):
+            asyncio.create_task(
+                self.api_client.update_progress(
+                    self.worker_id,
+                    job_id,
+                    procesados=progreso["procesados"],
+                    ultimo_pk=None  # Obtener del servicio
+                )
+            )
+        
+        # Generar emisión
+        resultados = await emision_service.generar_emision(
+            max_concurrent_pages=self.max_concurrent_pages,
+            checkpoint_interval=self.checkpoint_interval,
+            progress_callback=on_progress
+        )
+
+        procesados = 0
+        ultimo_pk = None
+        checkpoint = await self.api_client.get_checkpoint(job_id)
+        
+        if checkpoint:
+            procesados = checkpoint.get('procesados', 0)
+            ultimo_pk = checkpoint.get('ultimo_pk')
+            logger.info(f"Recuperando desde checkpoint: {procesados} registros")
+        
+        job_dir = self._get_job_directory(proyecto_slug, job_id)
+        job_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Carpeta de salida: {job_dir}")
+        
+        renderer = None
+        pdfs_generados = 0
+        fallidos = 0
+        errores = []
+        orden_impresion = claimed_job.get('orden_impresion_inicial', 1)
         
         try:
-            # 1. Tomar el job (claim)
-            claimed_job = self.api_client.claim_job(self.worker_id, job_id)
+            renderer = AsyncPlantillaRenderer(proyecto_slug)
+            await renderer.start()
             
-            if not claimed_job:
-                logger.warning(f"No se pudo tomar el job {job_id}, otro worker lo procesará")
-                return
+            offset = procesados
+            plantilla_archivo = claimed_job.get('plantilla_archivo', '').split('/')[-1]
+            pk = self._get_pk_name(proyecto_slug)
             
-            # 2. Actualizar estado a 'processing'
-            self.api_client.update_progress(
-                self.worker_id,
-                job_id,
-                procesados=0,
-                status="processing"
-            )
-            
-            # 3. Verificar si hay checkpoint (recuperación)
-            checkpoint = self.api_client.get_checkpoint(job_id)
-            if checkpoint:
-                logger.info(f"Recuperando desde checkpoint: {checkpoint.get('procesados', 0)} registros")
-                # TODO: Implementar recuperación desde checkpoint (Fase 2.3)
-            
-            # 4. Procesar registros
-            # FASE 2.2: Aquí irá la lógica de generación de PDFs
-            # Por ahora simulamos procesamiento
-            total = job.get('total_registros', 0)
-            procesados = checkpoint.get('procesados', 0) if checkpoint else 0
-            
-            logger.info(f"Procesando {total} registros...")
-            
-            # Simulación de procesamiento (será reemplazado por la lógica real)
-            for i in range(procesados, total):
-                # Simular procesamiento de un registro
-                time.sleep(0.1)
-                procesados = i + 1
+            while offset < total and self.running:
+                registros = await self._get_registros_batch(
+                    proyecto_slug,
+                    claimed_job.get('filtros', {}),
+                    offset,
+                    self.batch_size,
+                    pk
+                )
                 
-                # Guardar checkpoint cada N registros
-                if procesados % self.checkpoint_interval == 0:
-                    self.api_client.save_checkpoint(job_id, {
-                        "procesados": procesados,
-                        "ultimo_pk": f"PK_{procesados}"
+                if not registros:
+                    break
+                
+                resultados = await self._generar_pdfs_lote(
+                    renderer,
+                    plantilla_archivo,
+                    registros,
+                    claimed_job,
+                    job_dir,
+                    orden_impresion
+                )
+                
+                for resultado in resultados:
+                    if resultado.get('success'):
+                        pdfs_generados += 1
+                        orden_impresion += 1
+                    else:
+                        fallidos += 1
+                        errores.append(resultado.get('error', 'Error desconocido'))
+                
+                offset += len(registros)
+                procesados = offset
+                if resultados:
+                    ultimo_pk = resultados[-1].get('pk_value')
+                
+                if offset % self.checkpoint_interval == 0 or offset >= total:
+                    await self.api_client.save_checkpoint(job_id, {
+                        "procesados": offset,
+                        "ultimo_pk": ultimo_pk,
+                        "pdfs_generados": pdfs_generados,
+                        "fallidos": fallidos,
+                        "ultimo_orden": orden_impresion - 1
                     })
                     
-                    # Actualizar progreso en el servidor
-                    self.api_client.update_progress(
+                    await self.api_client.update_progress(
                         self.worker_id,
                         job_id,
-                        procesados=procesados,
-                        ultimo_pk=f"PK_{procesados}"
+                        procesados=offset,
+                        ultimo_pk=ultimo_pk
                     )
                     
-                    logger.info(f"Progreso: {procesados}/{total} ({round(procesados/total*100, 1)}%)")
+                    logger.info(f"Progreso: {offset}/{total} ({round(offset/total*100, 1)}%) | PDFs: {pdfs_generados} | Fallidos: {fallidos}")
             
-            # 5. Marcar como completado
-            # Crear ZIP vacío por ahora (será reemplazado por la lógica real)
-            zip_path = EMISIONES_DIR / f"emision_{job_id}_temp.zip"
-            zip_path.touch()  # Crear archivo vacío
+            manifest = {
+                "job_id": job_id,
+                "worker_id": self.worker_id,
+                "proyecto_slug": proyecto_slug,
+                "total_registros": total,
+                "generados": pdfs_generados,
+                "fallidos": fallidos,
+                "ruta_local": str(job_dir),
+                "fecha_completado": datetime.now().isoformat(),
+                "ultimo_orden": orden_impresion - 1,
+                "errores": errores[:10]
+            }
             
-            self.api_client.mark_completed(self.worker_id, job_id, str(zip_path))
+            await self.api_client.complete_job(self.worker_id, job_id, manifest)
             
-            logger.info(f"Job {job_id} completado exitosamente")
+            # ✅ LOG: Job completado
+            MonitoreoService.registrar_log_estructurado(
+                nivel="info",
+                mensaje=f"Job {job_id} completado exitosamente",
+                job_id=job_id,
+                worker_id=self.worker_id,
+                proyecto_slug=proyecto_slug,
+                datos_extra={"pdfs_generados": pdfs_generados, "fallidos": fallidos}
+            )
             
-            # Actualizar estadísticas
+            logger.info(f"Job {job_id} completado: {pdfs_generados} PDFs generados, {fallidos} fallidos")
+            logger.info(f"Ubicación: {job_dir}")
+            
             self.stats["jobs_procesados"] += 1
-            self.stats["pdfs_generados"] += total
+            self.stats["pdfs_generados"] += pdfs_generados
+            self.stats["errores"] += fallidos
             
         except Exception as e:
             error_msg = f"Error procesando job {job_id}: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
             
-            # Marcar como fallido
-            self.api_client.update_progress(
+            # ✅ LOG: Error
+            MonitoreoService.registrar_log_estructurado(
+                nivel="error",
+                mensaje=f"Error en job {job_id}: {str(e)}",
+                job_id=job_id,
+                worker_id=self.worker_id,
+                proyecto_slug=proyecto_slug,
+                datos_extra={"error": str(e), "traceback": traceback.format_exc()}
+            )
+            
+            await self.api_client.update_progress(
                 self.worker_id,
                 job_id,
-                procesados=0,
+                procesados=procesados,
                 status="failed",
                 error_msg=str(e)
             )
-    
-    # ============================================================
-    # LIMPIEZA Y CIERRE
-    # ============================================================
-    
-    def _cleanup(self):
-        """Limpieza final al cerrar el worker"""
-        logger.info("Limpiando recursos...")
         
-        if self.api_client:
-            # Enviar heartbeat de detención
-            self.api_client.send_heartbeat(self.worker_id, "stopped")
+        finally:
+            if renderer:
+                await renderer.stop()
+            self.current_job = None
+    
+    def _get_pk_name(self, proyecto_slug: str) -> str:
+        pks = {
+            "apa_tlajomulco": "clave_APA",
+            "predial_tlajomulco": "cuenta",
+            "licencias_gdl": "licencia",
+            "predial_gdl": "cuenta_n",
+            "estado": "credito",
+            "pensiones": "prestamo",
+        }
+        return pks.get(proyecto_slug, "id")
+    
+    async def _get_registros_batch(
+        self,
+        proyecto_slug: str,
+        filtros: Dict[str, Any],
+        offset: int,
+        limit: int,
+        pk: str
+    ) -> List[Dict]:
+        from backend.app.db.router import get_project_db
+        from sqlalchemy import text
         
+        try:
+            db_proyecto = next(get_project_db(proyecto_slug))
+            
+            conditions = ["viabilidad = 'viable'"]
+            params = {}
+            
+            if filtros.get("programa") and filtros["programa"] != "todos":
+                conditions.append("programa = :programa")
+                params["programa"] = filtros["programa"]
+            
+            if filtros.get("ids") and isinstance(filtros["ids"], list):
+                placeholders = ", ".join([f":id{i}" for i in range(len(filtros["ids"]))])
+                conditions.append(f"{pk} IN ({placeholders})")
+                for i, id_val in enumerate(filtros["ids"]):
+                    params[f"id{i}"] = id_val
+            
+            where = " AND ".join(conditions) if conditions else "1=1"
+            
+            query = text(f"""
+                SELECT * FROM tabla_analisis 
+                WHERE {where}
+                ORDER BY `{pk}` ASC
+                LIMIT {limit} OFFSET {offset}
+            """)
+            
+            result = db_proyecto.execute(query, params)
+            rows = [dict(r._mapping) for r in result]
+            
+            db_proyecto.close()
+            return rows
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo registros: {e}")
+            return []
+    
+    async def _generar_pdfs_lote(
+        self,
+        renderer: AsyncPlantillaRenderer,
+        plantilla_archivo: str,
+        registros: List[Dict],
+        job_data: Dict[str, Any],
+        job_dir: Path,
+        orden_inicial: int
+    ) -> List[Dict[str, Any]]:
+        semaphore = asyncio.Semaphore(self.max_concurrent_pages)
+        pk = self._get_pk_name(job_data.get('proyecto_slug'))
+        
+        async def generar_pdf(registro, idx):
+            async with semaphore:
+                try:
+                    pk_value = registro.get(pk)
+                    orden_actual = orden_inicial + idx
+                    
+                    placeholders = {}
+                    for key, value in registro.items():
+                        if value is not None:
+                            placeholders[key] = str(value)
+                    
+                    placeholders['_fecha_actual'] = datetime.now().strftime("%d/%m/%Y")
+                    placeholders['_numero_pagina'] = "1"
+                    placeholders['_total_paginas'] = "1"
+                    placeholders['orden_impresion'] = str(orden_actual)
+                    
+                    if 'codebar' not in placeholders:
+                        placeholders['codebar'] = self._generar_codebar(pk_value)
+                    
+                    pdf_bytes = await renderer.render_pdf(
+                        plantilla_archivo,
+                        placeholders,
+                        altura=1286
+                    )
+                    
+                    nombre_pdf = f"{orden_actual:05d} - {pk_value}.pdf"
+                    pdf_path = job_dir / nombre_pdf
+                    
+                    with open(pdf_path, 'wb') as f:
+                        f.write(pdf_bytes)
+                    
+                    return {
+                        "success": True,
+                        "pk_value": pk_value,
+                        "orden": orden_actual,
+                        "path": str(pdf_path)
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Error generando PDF para {idx}: {e}")
+                    return {
+                        "success": False,
+                        "pk_value": registro.get(pk),
+                        "error": str(e)
+                    }
+        
+        tasks = [generar_pdf(reg, i) for i, reg in enumerate(registros)]
+        resultados = await asyncio.gather(*tasks)
+        return resultados
+
+    def _generar_codebar(self, pk_value) -> str:
+        from datetime import datetime as dt
+        fecha_base_excel = dt(1899, 12, 30)
+        fecha_emision = datetime.now()
+        fecha_str = str((fecha_emision - fecha_base_excel).days)
+        codigo = f"{pk_value}{fecha_str}"
+        return f"*{codigo.upper()}*"
+    
+    def _get_job_directory(self, proyecto_slug: str, job_id: int) -> Path:
+        ahora = datetime.now()
+        year = ahora.strftime("%Y")
+        month = ahora.strftime("%m")
+        job_dir = self.base_emisiones_path / proyecto_slug / year / month / f"job_{job_id}"
+        return job_dir
+    
+    def _print_stats(self):
         logger.info("=" * 60)
-        logger.info("ESTADÍSTICAS FINALES")
+        logger.info("ESTADISTICAS FINALES")
         logger.info(f"   Jobs procesados: {self.stats['jobs_procesados']}")
         logger.info(f"   PDFs generados: {self.stats['pdfs_generados']}")
         logger.info(f"   Errores: {self.stats['errores']}")
         logger.info(f"   Inicio: {self.stats['inicio']}")
         logger.info(f"   Fin: {datetime.now().isoformat()}")
         logger.info("=" * 60)
-        logger.info("Worker detenido correctamente")
     
     def stop(self):
-        """Detiene el worker de forma segura"""
-        if not self.running:
-            return
-        
-        logger.info("🛑 Deteniendo worker...")
         self.running = False
-        
-        # Esperar a que termine el procesamiento actual
-        time.sleep(2)
 
 
 # ============================================================
 # PUNTO DE ENTRADA
 # ============================================================
 
-if __name__ == "__main__":
-    # Obtener worker_id de argumentos o usar default
+async def main():
+    import sys
+    
     worker_id = "worker_1"
     if len(sys.argv) > 1:
         worker_id = sys.argv[1]
     
-    # Crear e iniciar worker
     worker = TrinnovaWorker(worker_id)
-    worker.run()
+    
+    loop = asyncio.get_running_loop()
+    
+    def signal_handler():
+        logger.info("Senal recibida, deteniendo worker...")
+        worker.stop()
+    
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        try:
+            loop.add_signal_handler(sig, signal_handler)
+        except NotImplementedError:
+            signal.signal(sig, lambda s, f: signal_handler())
+    
+    try:
+        await worker.run()
+    except KeyboardInterrupt:
+        logger.info("Interrupcion por teclado")
+    except Exception as e:
+        logger.error(f"Error fatal: {e}")
+        logger.error(traceback.format_exc())
+    finally:
+        logger.info("Worker finalizado")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

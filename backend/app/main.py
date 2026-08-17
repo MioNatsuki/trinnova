@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, usuarios, proyectos, roles, dashboard, analisis, plantillas, calculos, emision
+from app.api import auth, usuarios, proyectos, roles, dashboard, analisis, plantillas, calculos, emision, catalogos, logs
 
 app = FastAPI(
     title="Trinnova API",
@@ -25,6 +25,8 @@ app.include_router(analisis.router, prefix="/api/v1/analisis", tags=["Análisis"
 app.include_router(plantillas.router, prefix="/api/v1/plantillas", tags=["Plantillas"])
 app.include_router(calculos.router, prefix="/api/v1/calculos", tags=["Cálculos"])
 app.include_router(emision.router,   prefix="/api/v1/emision",   tags=["Emisión"])
+app.include_router(catalogos.router, prefix="/api/v1/catalogos", tags=["Catálogos"])
+app.include_router(logs.router, prefix="/api/v1/logs", tags=["Bitácora"])
 
 
 @app.get("/")

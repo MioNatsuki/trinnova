@@ -12,6 +12,8 @@ import Complementar from './pages/analisis/Complementar';
 import LimpiezaAnalisis from './pages/analisis/LimpiezaAnalisis';
 import PlantillasDashboard from './pages/plantillas/PlantillasDashboard';
 import Calculos from './pages/analisis/Calculos';
+import Catalogos from './pages/catalogos/Catalogos';
+import Bitacora from './pages/logs/Bitacora';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -67,6 +69,28 @@ function AppRoutes() {
             <>
               <Route path="catalogo/documentos" element={<div style={{ padding: 24 }}>Catálogo Documentos — próximamente</div>} />
               <Route path="catalogo/zonas"      element={<div style={{ padding: 24 }}>Catálogo Zonas — próximamente</div>} />
+            </>
+          )}
+
+          {isSuperadmin && (
+            <>
+              <Route path="catalogos" element={<Catalogos />} />
+              <Route path="catalogo/documentos" element={<Catalogos />} />
+              <Route path="catalogo/zonas" element={<Catalogos />} />
+              <Route path="catalogo/notificadores" element={<Catalogos />} />
+            </>
+          )}
+
+          {isSuperadmin && (
+            <Section label="Catálogos">
+              <SItem to="/catalogos" iconKey="catalog" label="Catálogos" sub exact />
+            </Section>
+          )}
+
+          {isSuperadmin && (
+            <>
+              <Route path="bitacora" element={<Bitacora />} />
+              <Route path="logs" element={<Bitacora />} />
             </>
           )}
 

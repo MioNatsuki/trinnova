@@ -1,0 +1,124 @@
+/* frontend/src/components/emision/Monitoreo.css */
+
+.monitoreo-card {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow-sm);
+  border-left: 4px solid var(--clr-accent);
+}
+
+.monitoreo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.monitoreo-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.monitoreo-info h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--clr-text);
+  margin: 0;
+}
+
+.monitoreo-status {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: var(--clr-accent-lt);
+  color: var(--clr-accent);
+}
+
+.monitoreo-loading {
+  padding: 20px;
+  text-align: center;
+  color: var(--clr-muted);
+}
+
+.btn-cancelar {
+  padding: 6px 14px;
+  border: 1px solid #e53e3e;
+  border-radius: 6px;
+  background: transparent;
+  color: #e53e3e;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-cancelar:hover {
+  background: #fff5f5;
+}
+
+/* Barra de progreso */
+.monitoreo-progreso {
+  margin: 8px 0 12px;
+}
+
+.progreso-bar {
+  height: 8px;
+  background: var(--clr-bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progreso-fill {
+  height: 100%;
+  background: var(--clr-accent);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.progreso-texto {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--clr-muted);
+  margin-top: 4px;
+}
+
+/* Detalles */
+.monitoreo-detalles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.detalle-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detalle-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--clr-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.detalle-valor {
+  font-size: 13px;
+  color: var(--clr-text);
+}
+
+.detalle-item.error {
+  grid-column: 1 / -1;
+}
+
+.detalle-item.error .detalle-valor {
+  color: #e53e3e;
+  word-break: break-word;
+}

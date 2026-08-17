@@ -2,8 +2,9 @@
     "worker": {
         "id": "worker_1",
         "nombre": "Worker Principal",
-        "poll_interval": 10,
-        "heartbeat_interval": 30
+        "poll_interval": 5,
+        "heartbeat_interval": 30,
+        "secret": "Admin2024!"
     },
     "servidor": {
         "url": "http://localhost:8000/api/v1",
@@ -11,8 +12,9 @@
         "timeout": 60
     },
     "procesamiento": {
-        "batch_size": 100,
+        "batch_size": 50,
         "checkpoint_interval": 50,
+        "max_concurrent_pages": 10,
         "pdf_timeout": 60,
         "max_retries": 3
     },

@@ -39,6 +39,41 @@ def get_current_active_user(current_user: Usuario = Depends(get_current_user)) -
 
 # --- Guards de rol ---
 
+def require_analista_or_above(current_user: Usuario = Depends(get_current_active_user)) -> Usuario:
+    """Requiere rol analista o superior (analista, superadmin)"""
+    if current_user.rol.nombre not in (RolNombre.superadmin, RolNombre.analista):
+        raise HTTPException(status_code=403, detail="Se requiere rol analista o superior")
+    return current_user
+
+
+def require_auxiliar_or_above(current_user: Usuario = Depends(get_current_active_user)) -> Usuario:
+    """Cualquier usuario autenticado (incluye auxiliar)"""
+    return current_user
+
+
+def check_plantilla_access(plantilla_id: int, current_user: Usuario, db: Session) -> bool:
+    """Verifica que el usuario tenga acceso a una plantilla"""
+    from app.models.global_models import Plantilla, UsuarioProyecto
+    
+    plantilla = db.query(Plantilla).filter(Plantilla.id == plantilla_id).first()
+    if not plantilla:
+        return False
+    
+    # Superadmin tiene acceso a todo
+    if current_user.rol.nombre == RolNombre.superadmin:
+        return True
+    
+    # Analista solo puede acceder a plantillas de sus proyectos
+    if current_user.rol.nombre == RolNombre.analista:
+        asignado = db.query(UsuarioProyecto).filter(
+            UsuarioProyecto.id_usuario == current_user.id,
+            UsuarioProyecto.id_proyecto == plantilla.id_proyecto
+        ).first()
+        return asignado is not None
+    
+    # Auxiliar NO tiene acceso a plantillas
+    return False
+
 def require_superadmin(current_user: Usuario = Depends(get_current_active_user)) -> Usuario:
     if current_user.rol.nombre != RolNombre.superadmin:
         raise HTTPException(status_code=403, detail="Se requiere rol superadmin")

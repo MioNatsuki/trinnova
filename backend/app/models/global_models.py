@@ -249,3 +249,58 @@ class EmisionDetalle(Base):
     
     # Relaciones
     job = relationship("EmisionJob", back_populates="detalles")
+
+# ============================================================
+# CATÁLOGOS (Fase 6)
+# ============================================================
+
+class CatalogoDocumento(Base):
+    """Catálogo de documentos para emisión"""
+    __tablename__ = "catalogo_documento"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    nombre_documento = Column(String(150), nullable=False)
+    identificador_documento = Column(String(10), nullable=False, comment="N, R, A, etc.")
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+
+    proyecto = relationship("Proyecto")
+    usuario = relationship("Usuario")
+
+
+class CatalogoNotificador(Base):
+    """Catálogo de notificadores/ejecutores"""
+    __tablename__ = "catalogo_notificadores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    nombre = Column(String(150), nullable=False)
+    acronimo = Column(String(10), nullable=False)
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+
+    proyecto = relationship("Proyecto")
+    usuario = relationship("Usuario")
+
+
+class CatalogoZona(Base):
+    """Catálogo de zonas para proyectos"""
+    __tablename__ = "catalogo_zonas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_proyecto = Column(Integer, ForeignKey("proyectos.id"), nullable=False)
+    nombre_zona = Column(String(100), nullable=False)
+    clave_zona = Column(String(20), nullable=False)
+    descripcion = Column(String(255), nullable=True)
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+
+    proyecto = relationship("Proyecto")
+    usuario = relationship("Usuario")

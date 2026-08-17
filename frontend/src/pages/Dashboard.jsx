@@ -1,5 +1,8 @@
+// frontend/src/pages/Dashboard.jsx - MODIFICAR
+
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useProyecto } from '../hooks/useProyecto';
 import api from '../api/auth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -7,7 +10,6 @@ import {
 } from 'recharts';
 import './Dashboard.css';
 
-// Colores por slug de proyecto — coherentes con el mockup
 const SLUG_COLORS = {
   licencias_gdl:    '#4caf50',
   apa_tlajomulco:   '#90caf9',
@@ -21,9 +23,16 @@ const DEFAULT_COLORS = ['#4a7fb5','#38a169','#dd6b20','#805ad5','#e53e3e','#00b5
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [data, setData]       = useState(null);
+  const { setProyectoSlug } = useProyecto();
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
+  const [error, setError] = useState('');
+  const [selectedProyecto, setSelectedProyecto] = useState('todos');
+
+  const rol = user?.rol || 'auxiliar';
+  const esSuperadmin = rol === 'superadmin';
+  const esAnalista = rol === 'analista' || esSuperadmin;
+  const esAuxiliar = rol === 'auxiliar';
 
   useEffect(() => {
     api.get('/dashboard/')
@@ -32,30 +41,38 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Transformar lista plana de emisiones en filas por mes para recharts
   const buildChartData = (emisiones) => {
     if (!emisiones?.length) return { rows: [], proyectos: [] };
 
-    const slugs  = [...new Set(emisiones.map(e => e.slug))];
-    const meses  = [...new Set(emisiones.map(e => e.mes))];
+    const slugs = [...new Set(emisiones.map(e => e.slug))];
+    const meses = [...new Set(emisiones.map(e => e.mes))];
 
-    const rows = meses.map(mes => {
+    // Filtrar por proyecto seleccionado
+    let filtered = emisiones;
+    if (selectedProyecto !== 'todos') {
+      filtered = emisiones.filter(e => e.slug === selectedProyecto);
+    }
+
+    const slugsFiltrados = [...new Set(filtered.map(e => e.slug))];
+    const mesesFiltrados = [...new Set(filtered.map(e => e.mes))];
+
+    const rows = mesesFiltrados.map(mes => {
       const row = { mes };
-      slugs.forEach(slug => { row[slug] = 0; });
-      emisiones.filter(e => e.mes === mes).forEach(e => { row[e.slug] = e.total; });
+      slugsFiltrados.forEach(slug => { row[slug] = 0; });
+      filtered.filter(e => e.mes === mes).forEach(e => { row[e.slug] = e.total; });
       return row;
     });
 
-    const proyectos = slugs.map((slug, i) => ({
+    const proyectos = slugsFiltrados.map((slug, i) => ({
       slug,
-      nombre: emisiones.find(e => e.slug === slug)?.proyecto || slug,
+      nombre: filtered.find(e => e.slug === slug)?.proyecto || slug,
       color: SLUG_COLORS[slug] || DEFAULT_COLORS[i % DEFAULT_COLORS.length],
     }));
 
     return { rows, proyectos };
   };
 
-  const { rows, proyectos } = data ? buildChartData(data.emisiones) : { rows: [], proyectos: [] };
+  const { rows, proyectos } = data ? buildChartData(data.emisiones || []) : { rows: [], proyectos: [] };
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
@@ -72,28 +89,76 @@ export default function Dashboard() {
   };
 
   if (loading) return <div className="dash-loading">Cargando dashboard...</div>;
-  if (error)   return <div className="dash-error">{error}</div>;
+  if (error) return <div className="dash-error">{error}</div>;
+  if (!data) return <div className="dash-loading">Sin datos</div>;
+
+  const cards = data.cards || {};
 
   return (
     <div className="dashboard">
-
-      {/* ── Stat cards ── */}
+      {/* ── Tarjetas según rol ── */}
       <div className="dash-cards">
-        {data.cards.usuarios != null && (
+        {esSuperadmin && cards.usuarios != null && (
           <div className="dash-card">
-            <span className="dash-card-num">{data.cards.usuarios}</span>
+            <span className="dash-card-num">{cards.usuarios}</span>
             <span className="dash-card-label">Usuarios</span>
           </div>
         )}
         <div className="dash-card">
-          <span className="dash-card-num">{data.cards.proyectos}</span>
+          <span className="dash-card-num">{cards.proyectos || 0}</span>
           <span className="dash-card-label">Proyectos</span>
         </div>
         <div className="dash-card">
-          <span className="dash-card-num">{data.cards.plantillas}</span>
+          <span className="dash-card-num">{cards.plantillas || 0}</span>
           <span className="dash-card-label">Plantillas</span>
         </div>
+        <div className="dash-card">
+          <span className="dash-card-num">{cards.emisiones || 0}</span>
+          <span className="dash-card-label">Emisiones</span>
+        </div>
       </div>
+
+      {/* ── Tarjetas de análisis (solo analista/superadmin) ── */}
+      {esAnalista && (
+        <div className="dash-cards">
+          <div className="dash-card dash-card-analisis">
+            <span className="dash-card-num">{cards.viables || 0}</span>
+            <span className="dash-card-label dash-label-viable">✓ Viables</span>
+          </div>
+          <div className="dash-card dash-card-analisis">
+            <span className="dash-card-num">{cards.pendientes || 0}</span>
+            <span className="dash-card-label dash-label-pendiente">⏳ Pendientes</span>
+          </div>
+          <div className="dash-card dash-card-analisis">
+            <span className="dash-card-num">{cards.no_viables || 0}</span>
+            <span className="dash-card-label dash-label-no-viable">✗ No viables</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mensaje para Auxiliar ── */}
+      {esAuxiliar && (
+        <div className="dash-auxiliar-message">
+          <p>Bienvenido, {user?.nombre}.</p>
+          <span>Tu rol es de Auxiliar. Puedes ver el estado general pero no realizar cambios.</span>
+        </div>
+      )}
+
+      {/* ── Filtro de proyecto ── */}
+      {data.proyectos_usuario?.length > 0 && (
+        <div className="dash-filter">
+          <label>Filtrar por proyecto:</label>
+          <select 
+            value={selectedProyecto} 
+            onChange={e => setSelectedProyecto(e.target.value)}
+          >
+            <option value="todos">Todos</option>
+            {data.proyectos_usuario.map(p => (
+              <option key={p.id} value={p.slug}>{p.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* ── Gráfica ── */}
       <div className="dash-chart-card">

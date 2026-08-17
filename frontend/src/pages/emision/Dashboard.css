@@ -1,0 +1,76 @@
+/* frontend/src/pages/emision/Dashboard.css */
+
+.emision-dashboard {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.emision-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.emision-header h1 {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--clr-text);
+  margin: 0;
+}
+
+.emision-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Estadísticas */
+.emision-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-number {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--clr-text);
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--clr-muted);
+  margin-top: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .emision-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .emision-header-actions {
+    flex-direction: column;
+  }
+  
+  .emision-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}

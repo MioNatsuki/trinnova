@@ -1,0 +1,253 @@
+/* frontend/src/components/emision/Historial.css */
+
+.historial-card {
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.historial-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.historial-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--clr-text);
+  margin: 0;
+}
+
+.historial-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.historial-count {
+  font-size: 13px;
+  color: var(--clr-muted);
+}
+
+.btn-refresh {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.btn-refresh:hover {
+  background: var(--clr-bg);
+}
+
+.historial-tabla-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--clr-border);
+  border-radius: 7px;
+}
+
+.historial-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.historial-tabla th {
+  background: #f8f9fa;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--clr-muted);
+  border-bottom: 1px solid var(--clr-border);
+  white-space: nowrap;
+}
+
+.historial-tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--clr-border);
+  vertical-align: middle;
+}
+
+.historial-tabla tr:last-child td {
+  border-bottom: none;
+}
+
+.historial-tabla tr:hover td {
+  background: #fafbfc;
+}
+
+.job-nombre {
+  font-weight: 500;
+  color: var(--clr-text);
+}
+
+.job-id {
+  font-size: 11px;
+  color: var(--clr-muted);
+}
+
+/* Progress bars */
+.job-progreso {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}
+
+.job-progreso-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--clr-bg);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.job-progreso-fill {
+  height: 100%;
+  background: var(--clr-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.job-progreso-texto {
+  font-size: 12px;
+  color: var(--clr-muted);
+  min-width: 40px;
+  text-align: right;
+}
+
+.job-fecha {
+  font-size: 12px;
+  color: var(--clr-muted);
+}
+
+/* Badges */
+.badge-pending {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #feebc8;
+  color: #9c4221;
+}
+
+.badge-processing {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #bee3f8;
+  color: #1a365d;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.badge-completed {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #c6f6d5;
+  color: #276749;
+}
+
+.badge-failed {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fed7d7;
+  color: #9b2c2c;
+}
+
+.badge-cancelled {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #4a5568;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Actions */
+.btn-ver,
+.btn-descargar {
+  padding: 4px 10px;
+  border: 1px solid var(--clr-border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  background: var(--clr-white);
+  transition: all 0.15s;
+  text-decoration: none;
+  color: var(--clr-text);
+}
+
+.btn-ver:hover {
+  background: var(--clr-accent-lt);
+  border-color: var(--clr-accent);
+}
+
+.btn-descargar {
+  font-size: 14px;
+  padding: 4px 8px;
+}
+
+.btn-descargar:hover {
+  background: var(--clr-bg);
+}
+
+.historial-empty {
+  padding: 30px;
+  text-align: center;
+  color: var(--clr-muted);
+}
+
+.historial-empty p {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.historial-empty span {
+  font-size: 13px;
+}
+
+.historial-footer {
+  padding-top: 12px;
+  text-align: center;
+}
+
+.btn-ver-mas {
+  background: none;
+  border: none;
+  color: var(--clr-accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.btn-ver-mas:hover {
+  background: var(--clr-accent-lt);
+}

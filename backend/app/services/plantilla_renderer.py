@@ -1,479 +1,422 @@
 # backend/app/services/plantilla_renderer.py
 """
-Motor de renderizado de plantillas HTML → PDF
-Usa Playwright con Chromium headless
+PlantillaRenderer - Motor de renderizado para emisión masiva
+Adaptado para alta concurrencia y reutilización de navegador
 """
 
 import re
 import os
 import base64
-import time
-from pathlib import Path
-from typing import Dict, Optional, List, Any
-from datetime import datetime
 import asyncio
-from playwright.async_api import async_playwright
+from pathlib import Path
+from typing import Dict, Optional, List, Any, Set
+from datetime import datetime
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
-# DATOS DE EJEMPLO POR PROYECTO
+# CONSTANTES
 # ============================================================
-DATOS_EJEMPLO = {
-    'apa_tlajomulco': {
-        'clave_apa': 'APA-12345',
-        'propietario_nombre': 'JUAN PÉREZ GONZÁLEZ',
-        'domicilio': 'Calle Hidalgo 456, Col. Centro',
-        'saldo': '$12,345.67',
-        'adeudo_agua': '$8,900.00',
-        'recargos': '$250.00',
-        'actualizacion': '$150.00',
-        'total_adeudo': '$12,345.67',
-        'codebar': '1234567890',
-    },
-    'estado': {
-        'credito': 'CRED-2024-056',
-        'nombre_razon_social': 'EMPRESA EJEMPLO S.A. DE C.V.',
-        'importe_historico_determinado': '$156,789.00',
-        'calle_numero': 'Blvd. Principal 500',
-        'colonia': 'Empresarial',
-        'codigo_postal': '45010',
-        'municipio': 'Zapopan',
-        'rfc': 'EEJ900101ABC',
-        'no_documento': 'DOC-2024-001',
-        'codebar': '1234567890',
-    },
-    'pensiones': {
-        'nombre': 'JUAN PÉREZ GONZÁLEZ',
-        'prestamo': '12345',
-        'adeudo': '$45,678.90',
-        'ultimo_abono': '15/01/2025',
-        'aval_nombre': 'ROBERTO LÓPEZ MARTÍNEZ',
-        'codebar': '1234567890',
-    },
-    'predial_gdl': {
-        'propietario': 'ANA LAURA HERNÁNDEZ',
-        'cuenta': 'GDL-98765',
-        'saldo': '$15,200.00',
-        'folio_req': 'FOL-001',
-        'axo_req': '2025',
-        'codebar': '1234567890',
-    },
-    'predial_tlajomulco': {
-        'cuenta': 'PRED-00123',
-        'domicilio': 'Calle Independencia 789',
-        'total_adeudo': '$8,900.00',
-        'nombre_contribuyente': 'MARÍA GARCÍA LÓPEZ',
-        'codebar': '1234567890',
-    },
-}
 
-# ============================================================
-# ALTURA POR PROYECTO Y PLANTILLA
-# ============================================================
+PAGE_WIDTH = 816
+PAGE_HEIGHT = 1286
+
+# Alturas específicas por plantilla
 ALTURAS_ESPECIALES = {
-    'estado': {
-        'FEDERAL_estado_requerimiento.html': 1300,
-        'FE_CI_Liquidaciones_DGOS.html': 1286,
-        'FE_CI_Liquidaciones_DNEF.html': 1286,
+    "estado": {
+        "FEDERAL_estado_requerimiento.html": 1300,
+        "FE_CI_Liquidaciones_DGOS.html": 1286,
+        "FE_CI_Liquidaciones_DNEF.html": 1286,
     },
-    'pensiones': {
-        'afiliados.html': 1300,
-        'avales.html': 1300,
-        'garantias.html': 1300,
+    "pensiones": {
+        "afiliados.html": 1300,
+        "avales.html": 1300,
+        "garantias.html": 1300,
     },
-    'apa_tlajomulco': {
-        'apa_tlajomulco.html': 1286,
-    },
-    'predial_gdl': {
-        'predial_gdl.html': 1286,
-    },
-    'predial_tlajomulco': {
-        'predial_tlajomulco.html': 1286,
-    },
+    "apa_tlajomulco": {"apa_tlajomulco.html": 1286},
+    "predial_gdl": {"predial_gdl.html": 1286},
+    "predial_tlajomulco": {"predial_tlajomulco.html": 1286},
 }
-
-# ============================================================
-# FUENTE DE CÓDIGO DE BARRAS
-# ============================================================
-_RUTA_FUENTE_CODEBAR = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
-_FUENTE_CODEBAR_B64: Optional[str] = None
-
-
-def _cargar_fuente_codebar_base64() -> Optional[str]:
-    """Carga la fuente IDAutomationHC39M y la cachea en memoria como base64."""
-    global _FUENTE_CODEBAR_B64
-    if _FUENTE_CODEBAR_B64 is not None:
-        return _FUENTE_CODEBAR_B64
-
-    if not _RUTA_FUENTE_CODEBAR.exists():
-        print(f"⚠️ Fuente de código de barras no encontrada en: {_RUTA_FUENTE_CODEBAR}")
-        return None
-
-    with open(_RUTA_FUENTE_CODEBAR, 'rb') as f:
-        _FUENTE_CODEBAR_B64 = base64.b64encode(f.read()).decode('utf-8')
-        print(f"✅ Fuente de código de barras cargada: {_RUTA_FUENTE_CODEBAR.name}")
-    return _FUENTE_CODEBAR_B64
-
 
 # ============================================================
 # CLASE PRINCIPAL
 # ============================================================
+
 class PlantillaRenderer:
     """
-    Renderer que usa Playwright + Chromium para generar PDFs
+    Renderer optimizado para emisión masiva.
+    - Reutiliza el navegador para múltiples PDFs
+    - Soporta renderizado concurrente con páginas
+    - Cache de HTML y recursos
     """
-
-    PAGE_WIDTH = 816
-    PAGE_HEIGHT = 1286
-
+    
+    _instance = None
+    _browser: Optional[Browser] = None
+    _context: Optional[BrowserContext] = None
+    _playwright = None
+    _html_cache: Dict[str, str] = {}
+    _image_cache: Dict[str, str] = {}
+    _lock = asyncio.Lock()
+    
     def __init__(self, proyecto_slug: str):
         self.proyecto_slug = proyecto_slug
         self.base_path = Path(__file__).parent.parent / "plantillas_html" / proyecto_slug
-
+        self._cache_placeholders: Dict[str, List[str]] = {}
+        
         if not self.base_path.exists():
             raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
-
-    def _cargar_html(self, nombre_archivo: str) -> str:
+    
+    # ============================================================
+    # GESTIÓN DEL NAVEGADOR (SINGLETON GLOBAL)
+    # ============================================================
+    
+    @classmethod
+    async def get_browser(cls) -> Browser:
+        """
+        Obtiene una instancia única del navegador.
+        Se reutiliza para todos los PDFs.
+        """
+        async with cls._lock:
+            if cls._browser is None:
+                logger.info("Iniciando navegador Chromium (singleton)...")
+                cls._playwright = await async_playwright().start()
+                cls._browser = await cls._playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--disable-gpu',
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-web-security',
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-background-timer-throttling',
+                        '--disable-backgrounding-occluded-windows',
+                        '--disable-renderer-backgrounding',
+                        '--disable-setuid-sandbox'
+                    ]
+                )
+                cls._context = await cls._browser.new_context(
+                    viewport={'width': PAGE_WIDTH, 'height': PAGE_HEIGHT},
+                    device_scale_factor=1,
+                )
+                logger.info("Navegador iniciado correctamente")
+            return cls._browser
+    
+    @classmethod
+    async def close_browser(cls):
+        """Cierra el navegador globalmente."""
+        async with cls._lock:
+            if cls._context:
+                await cls._context.close()
+                cls._context = None
+            if cls._browser:
+                await cls._browser.close()
+                cls._browser = None
+            if cls._playwright:
+                await cls._playwright.stop()
+                cls._playwright = None
+            cls._html_cache.clear()
+            cls._image_cache.clear()
+            logger.info("Navegador cerrado")
+    
+    # ============================================================
+    # CACHE DE PLANTILLAS
+    # ============================================================
+    
+    def _get_cache_key(self, nombre_archivo: str, preview_mode: bool = False) -> str:
+        return f"{nombre_archivo}:{self.proyecto_slug}:{preview_mode}"
+    
+    def _cargar_html(self, nombre_archivo: str, force_reload: bool = False) -> str:
+        """Carga HTML con caché."""
+        cache_key = self._get_cache_key(nombre_archivo)
+        
+        if cache_key in self._html_cache and not force_reload:
+            return self._html_cache[cache_key]
+        
         ruta_completa = self.base_path / nombre_archivo
         if not ruta_completa.exists():
             raise FileNotFoundError(f"Archivo HTML no encontrado: {ruta_completa}")
+        
         with open(ruta_completa, 'r', encoding='utf-8') as f:
-            return f.read()
-
-    def _extraer_placeholders(self, html_content: str) -> List[str]:
-        pattern = r'\{\{([a-zA-Z0-9_]+)\}\}'
-        matches = re.findall(pattern, html_content)
-        return list(dict.fromkeys(matches))
-
-    def _resaltar_placeholders(self, html_content: str) -> str:
-        def reemplazar(match):
-            placeholder = match.group(1)
-            return f'<span style="background: #fefcbf; border: 2px solid #f6e05e; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #975a16;">{{{{{placeholder}}}}}</span>'
-        pattern = r'\{\{([a-zA-Z0-9_]+)\}\}'
-        return re.sub(pattern, reemplazar, html_content)
-
-    def _reemplazar_placeholders(self, html_content: str, placeholders: Dict[str, str]) -> str:
-        for key, value in placeholders.items():
-            placeholder = f"{{{{{key}}}}}"
-            if value is None:
-                value = ""
-            html_content = html_content.replace(placeholder, str(value))
-        return html_content
-
-    def _calcular_placeholders_especiales(self, pagina_actual: int = 1, total_paginas: int = 1) -> Dict[str, str]:
-        ahora = datetime.now()
-        return {
-            '_fecha_actual': ahora.strftime("%d/%m/%Y"),
-            '_numero_pagina': str(pagina_actual),
-            '_total_paginas': str(total_paginas),
-            '_nombre_proyecto': self.proyecto_slug.replace('_', ' ').title(),
-        }
-
-    def _obtener_datos_ejemplo(self) -> Dict[str, str]:
-        return DATOS_EJEMPLO.get(self.proyecto_slug, {})
-
-    def _obtener_altura(self, nombre_archivo: str) -> int:
-        proyecto_alturas = ALTURAS_ESPECIALES.get(self.proyecto_slug, {})
-        return proyecto_alturas.get(nombre_archivo, 1286)
-
-    def _generar_codigo_barras(self, datos: Dict[str, str]) -> str:
-        """Genera código de barras con formato Código 39 (*TEXTO*)"""
-        codebar = datos.get('codebar', '')
-        if not codebar:
-            timestamp = int(time.time() * 1000) % 10000000000
-            codebar = f"TRN{self.proyecto_slug[:4].upper()}{timestamp:010d}"
-        return f"*{codebar.upper()}*"
-
-    def _estilo_codebar(self) -> str:
-        """
-        Bloque <style> con la fuente IDAutomationHC39M embebida
-        Tamaño 11px, sin negritas
-        """
-        fuente_b64 = _cargar_fuente_codebar_base64()
-
-        font_face = ""
-        if fuente_b64:
-            font_face = f"""
-            @font-face {{
-                font-family: 'IDAutomationHC39M';
-                src: url('data:font/truetype;base64,{fuente_b64}') format('truetype');
-                font-weight: normal;
-                font-style: normal;
-            }}
-            """
-
-        return f"""
-        <style>
-            {font_face}
-            .codebar-render {{
-                font-family: 'IDAutomationHC39M', monospace !important;
-                font-size: 11px !important;
-                font-weight: normal !important;
-                font-style: normal !important;
-                letter-spacing: normal !important;
-                white-space: nowrap !important;
-                display: inline !important;
-                line-height: 1 !important;
-                text-decoration: none !important;
-                background: transparent !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                border: none !important;
-            }}
-        </style>
-        """
-
-    def _convertir_imagenes_a_base64(self, html_content: str) -> str:
-        """
-        Convierte imágenes a base64 para Playwright
-        SOLO CAMBIO: Ahora busca TODAS las variantes de url()
-        """
-        print(f"\n🔍 [IMÁGENES] Procesando {self.proyecto_slug}...")
-        print(f"📁 Ruta base: {self.base_path}")
-
+            html = f.read()
+        
+        self._html_cache[cache_key] = html
+        return html
+    
+    def _cargar_imagen_base64(self, nombre_imagen: str) -> Optional[str]:
+        """Carga imagen y la convierte a base64 con caché."""
+        if nombre_imagen in self._image_cache:
+            return self._image_cache[nombre_imagen]
+        
         img_folder = self.base_path / "img"
         if not img_folder.exists():
-            print(f"⚠️ Carpeta img NO EXISTE en: {img_folder}")
-            return html_content
-
-        imagenes_disponibles = list(img_folder.glob("*"))
-        print(f"📸 Imágenes disponibles ({len(imagenes_disponibles)}): {[f.name for f in imagenes_disponibles]}")
-
-        # Cache de imágenes convertidas
-        cache_imagenes = {}
-
-        def obtener_imagen_base64(nombre_imagen: str) -> Optional[str]:
-            """Retorna el data:image base64 o None si no existe"""
-            nombre_limpio = nombre_imagen.split('?')[0].split('#')[0]
-            
-            if nombre_limpio in cache_imagenes:
-                return cache_imagenes[nombre_limpio]
-            
-            ruta_imagen = img_folder / nombre_limpio
-            print(f"   🔎 Buscando: {nombre_limpio}")
-            
-            if not ruta_imagen.exists():
-                # Intentar con minúsculas
-                nombre_minusculas = nombre_limpio.lower()
-                if nombre_minusculas != nombre_limpio:
-                    ruta_imagen_alt = img_folder / nombre_minusculas
-                    if ruta_imagen_alt.exists():
-                        ruta_imagen = ruta_imagen_alt
-                        nombre_limpio = nombre_minusculas
-                        print(f"   🔄 Encontrado como: {nombre_minusculas}")
-                    else:
-                        print(f"   ❌ NO ENCONTRADA: {nombre_limpio}")
-                        cache_imagenes[nombre_limpio] = None
-                        return None
-                else:
-                    print(f"   ❌ NO ENCONTRADA: {nombre_limpio}")
-                    cache_imagenes[nombre_limpio] = None
-                    return None
-
-            try:
-                with open(ruta_imagen, 'rb') as f:
-                    img_data = base64.b64encode(f.read()).decode('utf-8')
-                    ext = ruta_imagen.suffix.lower()
-                    mime = {
-                        '.png': 'image/png', '.jpg': 'image/jpeg',
-                        '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-                        '.svg': 'image/svg+xml', '.webp': 'image/webp'
-                    }.get(ext, 'image/png')
-                    result = f"data:{mime};base64,{img_data}"
-                    cache_imagenes[nombre_limpio] = result
-                    print(f"   ✅ Convertida: {nombre_limpio}")
-                    return result
-            except Exception as e:
-                print(f"   ❌ Error al leer {nombre_limpio}: {e}")
-                cache_imagenes[nombre_limpio] = None
-                return None
-
-        # ============================================================
-        # CAMBIO IMPORTANTE: Buscar TODAS las variantes de url()
-        # ============================================================
+            return None
         
-        # 1. url('./img/archivo.png') - con ./img/
-        def reemplazar_url1(match):
-            ruta = match.group(1)
-            nombre = ruta.replace('./img/', '').replace('img/', '')
-            img_b64 = obtener_imagen_base64(nombre)
+        # Buscar la imagen (con y sin minúsculas)
+        posibles = [nombre_imagen, nombre_imagen.lower()]
+        for nombre in posibles:
+            ruta_imagen = img_folder / nombre
+            if ruta_imagen.exists():
+                try:
+                    with open(ruta_imagen, 'rb') as f:
+                        img_data = base64.b64encode(f.read()).decode('utf-8')
+                        ext = ruta_imagen.suffix.lower()
+                        mime = {
+                            '.png': 'image/png', '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+                            '.svg': 'image/svg+xml', '.webp': 'image/webp'
+                        }.get(ext, 'image/png')
+                        result = f"data:{mime};base64,{img_data}"
+                        self._image_cache[nombre_imagen] = result
+                        return result
+                except Exception as e:
+                    logger.warning(f"Error convirtiendo imagen {nombre_imagen}: {e}")
+                    continue
+        
+        return None
+    
+    def _convertir_imagenes_a_base64(self, html_content: str) -> str:
+        """Convierte todas las imágenes a base64 en el HTML."""
+        # Buscar patrones: url('./img/archivo.png'), url('img/archivo.png'), url('archivo.png')
+        pattern = r"url\(['\"]?(?:\./)?(?:img/)?([^'\"()]+)['\"]?\)"
+        
+        def reemplazar(match):
+            nombre_imagen = match.group(1).strip()
+            img_b64 = self._cargar_imagen_base64(nombre_imagen)
             if img_b64:
                 return f"url('{img_b64}')"
             return match.group(0)
         
-        html_content = re.sub(
-            r'url\([\'"]?(\./img/[^\'")]+)[\'"]?\)',
-            reemplazar_url1,
-            html_content
-        )
-
-        # 2. url('img/archivo.png') - sin ./
-        def reemplazar_url2(match):
-            ruta = match.group(1)
-            nombre = ruta.replace('img/', '')
-            img_b64 = obtener_imagen_base64(nombre)
-            if img_b64:
-                return f"url('{img_b64}')"
-            return match.group(0)
+        return re.sub(pattern, reemplazar, html_content)
+    
+    # ============================================================
+    # EXTRACCIÓN DE PLACEHOLDERS
+    # ============================================================
+    
+    def extraer_placeholders(self, nombre_archivo: str) -> List[str]:
+        """Extrae todos los placeholders de una plantilla."""
+        if nombre_archivo in self._cache_placeholders:
+            return self._cache_placeholders[nombre_archivo]
         
-        html_content = re.sub(
-            r'url\([\'"]?(img/[^\'")]+)[\'"]?\)',
-            reemplazar_url2,
-            html_content
-        )
-
-        # 3. url('archivo.png') - solo el nombre (asumiendo que está en img/)
-        def reemplazar_url3(match):
-            nombre = match.group(1).strip()
-            # Verificar si existe en la carpeta img
-            if (img_folder / nombre).exists() or (img_folder / nombre.lower()).exists():
-                img_b64 = obtener_imagen_base64(nombre)
-                if img_b64:
-                    return f"url('{img_b64}')"
-            return match.group(0)
-        
-        html_content = re.sub(
-            r'url\([\'"]?([^/\'")]+\.[a-zA-Z0-9]+)[\'"]?\)',
-            reemplazar_url3,
-            html_content
-        )
-
-        return html_content
-
-    def renderizar_html(
+        html = self._cargar_html(nombre_archivo)
+        pattern = r'\{\{([a-zA-Z0-9_]+)\}\}'
+        matches = re.findall(pattern, html)
+        placeholders = list(dict.fromkeys(matches))
+        self._cache_placeholders[nombre_archivo] = placeholders
+        return placeholders
+    
+    def _calcular_placeholders_especiales(
         self,
-        nombre_archivo: str,
-        placeholders: Optional[Dict[str, str]] = None,
-        preview_mode: bool = False,
         pagina_actual: int = 1,
         total_paginas: int = 1,
-        usar_datos_ejemplo: bool = False
-    ) -> str:
-        html_content = self._cargar_html(nombre_archivo)
-        especiales = self._calcular_placeholders_especiales(pagina_actual, total_paginas)
-
-        # === 1. INYECTAR ESTILO DE CÓDIGO DE BARRAS ===
-        html_content = html_content.replace('</head>', self._estilo_codebar() + '</head>')
-
-        # === 2. PREPARAR DATOS ===
-        if usar_datos_ejemplo or preview_mode:
-            datos = self._obtener_datos_ejemplo()
-            if 'codebar' not in datos:
-                datos['codebar'] = '1234567890'
-            placeholders = {**datos, **(placeholders or {})}
-
-        # === 3. PROCESAR CÓDIGO DE BARRAS ===
-        if '{{codebar}}' in html_content:
-            codebar = self._generar_codigo_barras(placeholders or {})
-            html_content = html_content.replace(
-                '{{codebar}}',
-                f'<span class="codebar-render">{codebar}</span>'
-            )
-            print(f"🔲 Código de barras generado: {codebar}")
-
-        # === 4. PROCESAR RESTO DE PLACEHOLDERS ===
-        if placeholders:
-            placeholders_sin_codebar = {k: v for k, v in placeholders.items() if k != 'codebar'}
-            todos_placeholders = {**placeholders_sin_codebar, **especiales}
-            html_content = self._reemplazar_placeholders(html_content, todos_placeholders)
-
-        # === 5. MODO PREVIEW ===
-        if preview_mode and not usar_datos_ejemplo:
-            html_content = self._resaltar_placeholders(html_content)
-
-        # === 6. CONVERTIR IMÁGENES A BASE64 ===
-        html_content = self._convertir_imagenes_a_base64(html_content)
-
-        return html_content
-
-    async def _generar_pdf_async(self, html_content: str, nombre_archivo: str = None) -> bytes:
-        altura = self._obtener_altura(nombre_archivo) if nombre_archivo else 1286
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True, 
-                args=[
-                    '--disable-gpu', 
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-web-security',
-                    '--disable-features=IsolateOrigins,site-per-process'
-                ]
-            )
-            try:
-                context = await browser.new_context(viewport={'width': 816, 'height': altura})
-                page = await context.new_page()
-                
-                await page.set_content(html_content, wait_until='networkidle')
-                await page.wait_for_timeout(1000)
-                
-                pdf_bytes = await page.pdf(
-                    print_background=True,
-                    width=f'816px',
-                    height=f'{altura}px',
-                    margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
-                    prefer_css_page_size=True,
-                )
-                return pdf_bytes
-            finally:
-                await browser.close()
-
-    def generar_pdf(self, html_content: str, nombre_archivo: Optional[str] = None) -> bytes:
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            pdf_bytes = loop.run_until_complete(self._generar_pdf_async(html_content, nombre_archivo))
-            loop.close()
-            return pdf_bytes
-        except Exception as e:
-            print(f"⚠️ Error generando PDF con Playwright: {e}")
-            import traceback
-            traceback.print_exc()
-            return html_content.encode('utf-8')
-
-    def renderizar_pdf(
+        codebar: str = ""
+    ) -> Dict[str, str]:
+        """Calcula placeholders especiales (fechas, páginas, etc.)"""
+        ahora = datetime.now()
+        return {
+            '{{_fecha_actual}}': ahora.strftime("%d/%m/%Y"),
+            '{{_fecha_actual_larga}}': ahora.strftime("%d de %B de %Y"),
+            '{{_numero_pagina}}': str(pagina_actual),
+            '{{_total_paginas}}': str(total_paginas),
+            '{{_nombre_proyecto}}': self.proyecto_slug.replace('_', ' ').title(),
+            '{{_hora_actual}}': ahora.strftime("%H:%M"),
+        }
+    
+    # ============================================================
+    # RENDERIZADO DE PDF (NÚCLEO)
+    # ============================================================
+    
+    async def render_pdf(
         self,
         nombre_archivo: str,
-        placeholders: Optional[Dict[str, str]] = None,
-        preview_mode: bool = False,
-        usar_datos_ejemplo: bool = False
+        placeholders: Dict[str, str],
+        altura: Optional[int] = None,
+        pagina_actual: int = 1,
+        total_paginas: int = 1,
+        codebar: Optional[str] = None,
+        usar_cache: bool = True
     ) -> bytes:
-        html_content = self.renderizar_html(
-            nombre_archivo=nombre_archivo,
-            placeholders=placeholders,
-            preview_mode=preview_mode,
-            usar_datos_ejemplo=usar_datos_ejemplo
+        """
+        Renderiza un PDF desde una plantilla HTML.
+        
+        Args:
+            nombre_archivo: Nombre del archivo HTML
+            placeholders: Diccionario de placeholders a reemplazar
+            altura: Altura personalizada (opcional)
+            pagina_actual: Número de página actual
+            total_paginas: Total de páginas del documento
+            codebar: Código de barras personalizado (opcional)
+            usar_cache: Usar caché de HTML
+        
+        Returns:
+            bytes: Contenido del PDF
+        """
+        # 1. Obtener navegador
+        browser = await self.get_browser()
+        context = PlantillaRenderer._context
+        
+        # 2. Cargar HTML
+        html = self._cargar_html(nombre_archivo, force_reload=not usar_cache)
+        
+        # 3. Reemplazar placeholders
+        # Placeholders especiales
+        especiales = self._calcular_placeholders_especiales(
+            pagina_actual, total_paginas, codebar or ""
         )
-        return self.generar_pdf(html_content, nombre_archivo)
-
-    def extraer_placeholders_desde_archivo(self, nombre_archivo: str) -> List[str]:
-        html_content = self._cargar_html(nombre_archivo)
-        return self._extraer_placeholders(html_content)
+        
+        # Combinar todos los placeholders (prioridad: los pasados por parámetro)
+        todos_placeholders = {**especiales, **placeholders}
+        
+        # Reemplazar en HTML
+        for key, value in todos_placeholders.items():
+            if value is None:
+                value = ""
+            html = html.replace(f"{{{{{key}}}}}", str(value))
+        
+        # 4. Inyectar estilo de código de barras
+        from app.services.codebar_service import CodebarService
+        html = CodebarService.inject_codebar_style(html)
+        
+        # 5. Convertir imágenes a base64
+        html = self._convertir_imagenes_a_base64(html)
+        
+        # 6. Generar PDF
+        altura_final = altura or ALTURAS_ESPECIALES.get(self.proyecto_slug, {}).get(
+            nombre_archivo, PAGE_HEIGHT
+        )
+        
+        page = await context.new_page()
+        try:
+            await page.set_content(html, wait_until='networkidle')
+            await page.wait_for_timeout(500)
+            
+            pdf_bytes = await page.pdf(
+                print_background=True,
+                width=f'{PAGE_WIDTH}px',
+                height=f'{altura_final}px',
+                margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
+                prefer_css_page_size=True,
+                print_background=True,
+            )
+            return pdf_bytes
+        finally:
+            await page.close()
+    
+    # ============================================================
+    # RENDERIZADO CONCURRENTE (BATCH)
+    # ============================================================
+    
+    async def render_batch_pdfs(
+        self,
+        nombre_archivo: str,
+        placeholders_list: List[Dict[str, str]],
+        max_concurrent: int = 10,
+        altura: Optional[int] = None,
+        codebar_prefix: Optional[str] = None
+    ) -> List[bytes]:
+        """
+        Renderiza múltiples PDFs en paralelo.
+        
+        Args:
+            nombre_archivo: Nombre del archivo HTML
+            placeholders_list: Lista de placeholders para cada PDF
+            max_concurrent: Número máximo de páginas concurrentes
+            altura: Altura personalizada
+            codebar_prefix: Prefijo para códigos de barras (opcional)
+        
+        Returns:
+            List[bytes]: Lista de PDFs
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def render_one(placeholders: Dict[str, str], idx: int) -> bytes:
+            async with semaphore:
+                # Generar código de barras si se solicitó
+                codebar = None
+                if codebar_prefix:
+                    from app.services.codebar_service import CodebarService
+                    pk = placeholders.get('pk', str(idx))
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=pk,
+                        identificador=placeholders.get('identificador_documento'),
+                        visita=placeholders.get('visita')
+                    )
+                
+                return await self.render_pdf(
+                    nombre_archivo,
+                    placeholders,
+                    altura,
+                    pagina_actual=idx + 1,
+                    total_paginas=len(placeholders_list),
+                    codebar=codebar
+                )
+        
+        tasks = [render_one(p, i) for i, p in enumerate(placeholders_list)]
+        resultados = await asyncio.gather(*tasks)
+        return resultados
+    
+    # ============================================================
+    # MÉTODOS DE UTILIDAD
+    # ============================================================
+    
+    def get_altura(self, nombre_archivo: str) -> int:
+        """Obtiene la altura recomendada para una plantilla."""
+        return ALTURAS_ESPECIALES.get(self.proyecto_slug, {}).get(
+            nombre_archivo, PAGE_HEIGHT
+        )
+    
+    def get_template_path(self, nombre_archivo: str) -> Path:
+        """Obtiene la ruta completa de una plantilla."""
+        return self.base_path / nombre_archivo
+    
+    def template_exists(self, nombre_archivo: str) -> bool:
+        """Verifica si una plantilla existe."""
+        return (self.base_path / nombre_archivo).exists()
+    
+    def list_templates(self) -> List[str]:
+        """Lista todas las plantillas disponibles."""
+        return [f.name for f in self.base_path.glob("*.html")]
 
 
 # ============================================================
-# FUNCIONES DE UTILIDAD
+# FUNCIONES DE CONVENIENCIA
 # ============================================================
 
-def generar_preview_pdf(
+async def renderizar_pdf_simple(
     proyecto_slug: str,
     nombre_archivo: str,
-    placeholders: Optional[Dict[str, str]] = None,
-    preview_mode: bool = False
+    placeholders: Dict[str, str]
 ) -> bytes:
+    """Función simple para renderizar un PDF."""
     renderer = PlantillaRenderer(proyecto_slug)
-    return renderer.renderizar_pdf(
+    return await renderer.render_pdf(nombre_archivo, placeholders)
+
+
+async def renderizar_pdfs_batch(
+    proyecto_slug: str,
+    nombre_archivo: str,
+    placeholders_list: List[Dict[str, str]],
+    max_concurrent: int = 10
+) -> List[bytes]:
+    """Función simple para renderizar múltiples PDFs."""
+    renderer = PlantillaRenderer(proyecto_slug)
+    return await renderer.render_batch_pdfs(
         nombre_archivo,
-        placeholders=placeholders,
-        preview_mode=preview_mode,
-        usar_datos_ejemplo=preview_mode
+        placeholders_list,
+        max_concurrent=max_concurrent
     )
 
 
 def obtener_placeholders_especiales() -> Dict[str, str]:
+    """Retorna la lista de placeholders especiales del sistema."""
     return {
-        '{{codebar}}': 'Código de barras (Código 39 con asteriscos)',
         '{{_fecha_actual}}': 'Fecha actual en formato dd/mm/aaaa',
+        '{{_fecha_actual_larga}}': 'Fecha actual en formato largo',
         '{{_numero_pagina}}': 'Número de página actual',
         '{{_total_paginas}}': 'Total de páginas del documento',
         '{{_nombre_proyecto}}': 'Nombre del proyecto',
+        '{{_hora_actual}}': 'Hora actual',
+        '{{codebar}}': 'Código de barras (Código 39)',
     }

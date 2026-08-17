@@ -1,0 +1,9 @@
+# Workers/requirements.txt
+httpx>=0.27.0
+playwright>=1.40.0
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+redis>=5.0.0
+pyinstaller>=6.0.0

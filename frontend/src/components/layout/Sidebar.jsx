@@ -102,6 +102,12 @@ export default function Sidebar() {
         <SItem to="/proyectos" iconKey="folder" label="Proyectos" exact />
       </Section>
 
+      {isSuperadmin && (
+        <>
+          <SItem to="/bitacora" iconKey="settings" label="Bitácora" sub exact />
+        </>
+      )}
+      
       {isAnalista && (
         <Section label="Análisis">
           <SItem to="/analisis/cargar"       iconKey="upload"   label="Cargar Padrón"       sub exact />

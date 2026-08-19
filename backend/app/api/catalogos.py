@@ -14,7 +14,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.db.session import get_global_db
-from app.core.dependencies import get_current_active_user, check_project_access, require_superadmin
+from app.core.dependencies import get_current_active_user, check_project_access_by_id, require_superadmin
 from app.models.global_models import (
     Usuario, Proyecto, 
     CatalogoDocumento, CatalogoNotificador, CatalogoZona

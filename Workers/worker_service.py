@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 from backend.app.services.monitoreo_service import MonitoreoService
 from backend.app.services.emision_service import EmisionService
+from backend.app.services.codebar_service import CodebarService
 
 # ============================================================
 # CONFIGURACIÓN DE PATHS
@@ -220,43 +221,53 @@ class AsyncAPIClient:
 # ============================================================
 
 class AsyncPlantillaRenderer:
+    # Variables de clase para compartir entre todos los Jobs
+    _playwright = None
+    _browser = None
+    _context = None
+    _lock = asyncio.Lock()
+
     def __init__(self, proyecto_slug: str):
         self.proyecto_slug = proyecto_slug
         self.base_path = Path(__file__).parent.parent / "backend" / "app" / "plantillas_html" / proyecto_slug
-        self.browser = None
-        self.context = None
-        self.playwright = None
         
         if not self.base_path.exists():
             raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
     
-    async def start(self):
-        from playwright.async_api import async_playwright
-        
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=True,
-            args=[
-                '--disable-gpu',
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process'
-            ]
-        )
-        self.context = await self.browser.new_context(
-            viewport={'width': 816, 'height': 1286}
-        )
-        logger.info("Navegador iniciado para renderizado")
-    
-    async def stop(self):
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
-        logger.info("Navegador cerrado")
+    @classmethod
+    async def start(cls):
+        """Inicia el navegador una sola vez para todo el proceso del Worker"""
+        async with cls._lock:
+            if cls._browser is None:
+                from playwright.async_api import async_playwright
+                logger.info("Lanzando instancia global de Chromium...")
+                cls._playwright = await async_playwright().start()
+                cls._browser = await cls._playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--disable-gpu',
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-web-security'
+                    ]
+                )
+                cls._context = await cls._browser.new_context(
+                    viewport={'width': 816, 'height': 1286}
+                )
+                logger.info("Navegador global iniciado correctamente.")
+
+    @classmethod
+    async def stop(cls):
+        """Cierra el navegador al apagar el Worker"""
+        async with cls._lock:
+            if cls._context:
+                await cls._context.close()
+            if cls._browser:
+                await cls._browser.close()
+            if cls._playwright:
+                await cls._playwright.stop()
+            cls._browser = cls._context = cls._playwright = None
+            logger.info("Navegador global cerrado.")
     
     async def render_pdf(
         self,
@@ -266,6 +277,10 @@ class AsyncPlantillaRenderer:
     ) -> bytes:
         import base64
         
+        # Asegurar que el contexto exista
+        if not self._context:
+            await self.start()
+
         ruta_completa = self.base_path / nombre_archivo
         if not ruta_completa.exists():
             raise FileNotFoundError(f"Archivo HTML no encontrado: {ruta_completa}")
@@ -274,53 +289,38 @@ class AsyncPlantillaRenderer:
             html_content = f.read()
         
         for key, value in placeholders.items():
-            if value is None:
-                value = ""
-            html_content = html_content.replace(f"{{{{{key}}}}}", str(value))
+            html_content = html_content.replace(f"{{{{{key}}}}}", str(value if value is not None else ""))
         
-        ahora = datetime.now()
-        html_content = html_content.replace("{{_fecha_actual}}", ahora.strftime("%d/%m/%Y"))
-        html_content = html_content.replace("{{_numero_pagina}}", "1")
-        html_content = html_content.replace("{{_total_paginas}}", "1")
+        # Inyectar estilos de código de barras
+        html_content = CodebarService.inject_codebar_style(html_content)
         
+        # Convertir imágenes
         img_folder = self.base_path / "img"
         if img_folder.exists():
             for img_path in img_folder.glob("*"):
                 try:
                     with open(img_path, 'rb') as f:
                         img_data = base64.b64encode(f.read()).decode('utf-8')
-                        ext = img_path.suffix.lower()
-                        mime = {
-                            '.png': 'image/png', '.jpg': 'image/jpeg',
-                            '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-                            '.svg': 'image/svg+xml'
-                        }.get(ext, 'image/png')
-                        html_content = html_content.replace(
-                            f"./img/{img_path.name}",
-                            f"data:{mime};base64,{img_data}"
-                        )
-                        html_content = html_content.replace(
-                            f"img/{img_path.name}",
-                            f"data:{mime};base64,{img_data}"
-                        )
-                except Exception as e:
-                    logger.warning(f"Error convirtiendo imagen {img_path.name}: {e}")
+                        mime = "image/png" if img_path.suffix == ".png" else "image/jpeg"
+                        html_content = html_content.replace(f"./img/{img_path.name}", f"data:{mime};base64,{img_data}")
+                        html_content = html_content.replace(f"img/{img_path.name}", f"data:{mime};base64,{img_data}")
+                except: continue
         
-        page = await self.context.new_page()
+        # USAR EL CONTEXTO GLOBAL
+        page = await self._context.new_page()
         try:
             await page.set_content(html_content, wait_until='networkidle')
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(300) # Un poco menos de espera por eficiencia
             
-            pdf_bytes = await page.pdf(
+            return await page.pdf(
                 print_background=True,
                 width='816px',
                 height=f'{altura}px',
                 margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
                 prefer_css_page_size=True,
             )
-            return pdf_bytes
         finally:
-            await page.close()
+            await page.close() # Cerramos solo la pestaña
 
 
 # ============================================================
@@ -413,41 +413,45 @@ class TrinnovaWorker:
         logger.info(f"INICIANDO TRINNOVA WORKER - {self.worker_id}")
         logger.info(f"API: {self.api_config['base_url']}")
         logger.info("=" * 60)
+
+        await AsyncPlantillaRenderer.start()
         
-        async with AsyncAPIClient(**self.api_config) as client:
-            self.api_client = client
-            await self.api_client.send_heartbeat(self.worker_id, "running")
-            
-            logger.info("Worker listo para procesar jobs")
-            logger.info(f"Intervalo de polling: {self.poll_interval}s")
-            logger.info(f"Checkpoint cada: {self.checkpoint_interval} registros")
-            logger.info(f"Batch size: {self.batch_size}")
-            logger.info(f"Concurrencia máxima: {self.max_concurrent_pages} páginas")
-            logger.info("=" * 60)
-            
-            while self.running:
-                try:
-                    jobs = await self.api_client.get_pending_jobs(self.worker_id)
-                    
-                    if jobs:
-                        for job in jobs:
-                            if not self.running:
-                                break
-                            await self._process_job(job)
-                    else:
-                        if self.running:
-                            await asyncio.sleep(self.poll_interval)
-                            
-                except asyncio.CancelledError:
-                    logger.info("Tarea cancelada")
-                    break
-                except Exception as e:
-                    logger.error(f"Error en bucle principal: {e}")
-                    logger.error(traceback.format_exc())
-                    await asyncio.sleep(30)
-            
-            await self.api_client.send_heartbeat(self.worker_id, "stopped")
-        
+        try:
+            async with AsyncAPIClient(**self.api_config) as client:
+                self.api_client = client
+                await self.api_client.send_heartbeat(self.worker_id, "running")
+                
+                logger.info("Worker listo para procesar jobs")
+                logger.info(f"Intervalo de polling: {self.poll_interval}s")
+                logger.info(f"Checkpoint cada: {self.checkpoint_interval} registros")
+                logger.info(f"Batch size: {self.batch_size}")
+                logger.info(f"Concurrencia máxima: {self.max_concurrent_pages} páginas")
+                logger.info("=" * 60)
+                
+                while self.running:
+                    try:
+                        jobs = await self.api_client.get_pending_jobs(self.worker_id)
+                        
+                        if jobs:
+                            for job in jobs:
+                                if not self.running:
+                                    break
+                                await self._process_job(job)
+                        else:
+                            if self.running:
+                                await asyncio.sleep(self.poll_interval)
+                                
+                    except asyncio.CancelledError:
+                        logger.info("Tarea cancelada")
+                        break
+                    except Exception as e:
+                        logger.error(f"Error en bucle principal: {e}")
+                        logger.error(traceback.format_exc())
+                        await asyncio.sleep(30)
+                
+                await self.api_client.send_heartbeat(self.worker_id, "stopped")
+        finally:
+            await AsyncPlantillaRenderer.stop()
         self._print_stats()
         logger.info("Worker detenido correctamente")
     
@@ -528,7 +532,6 @@ class TrinnovaWorker:
         
         try:
             renderer = AsyncPlantillaRenderer(proyecto_slug)
-            await renderer.start()
             
             offset = procesados
             plantilla_archivo = claimed_job.get('plantilla_archivo', '').split('/')[-1]
@@ -642,7 +645,6 @@ class TrinnovaWorker:
         
         finally:
             if renderer:
-                await renderer.stop()
             self.current_job = None
     
     def _get_pk_name(self, proyecto_slug: str) -> str:
@@ -731,7 +733,12 @@ class TrinnovaWorker:
                     placeholders['orden_impresion'] = str(orden_actual)
                     
                     if 'codebar' not in placeholders:
-                        placeholders['codebar'] = self._generar_codebar(pk_value)
+                        placeholders['codebar'] = CodebarService.generar_codebar_completo(
+                            pk_value=str(pk_value),
+                            fecha_emision=datetime.now(),
+                            visita=job_data.get('visita'),
+                            identificador_documento=job_data.get('identificador_documento')
+                        )
                     
                     pdf_bytes = await renderer.render_pdf(
                         plantilla_archivo,
@@ -763,14 +770,6 @@ class TrinnovaWorker:
         tasks = [generar_pdf(reg, i) for i, reg in enumerate(registros)]
         resultados = await asyncio.gather(*tasks)
         return resultados
-
-    def _generar_codebar(self, pk_value) -> str:
-        from datetime import datetime as dt
-        fecha_base_excel = dt(1899, 12, 30)
-        fecha_emision = datetime.now()
-        fecha_str = str((fecha_emision - fecha_base_excel).days)
-        codigo = f"{pk_value}{fecha_str}"
-        return f"*{codigo.upper()}*"
     
     def _get_job_directory(self, proyecto_slug: str, job_id: int) -> Path:
         ahora = datetime.now()

@@ -1,19 +1,4 @@
-# backend/app/api/analisis.py  — Fase 4 (fix alias estado, programas, sticky cols)
-"""
-  GET   /{slug}/programas
-  POST  /{slug}/cargar-viabilidad-csv
-  POST  /{slug}/cargar-padron
-  GET   /{slug}/complementar
-  POST  /{slug}/guardar-complemento
-  POST  /{slug}/generar-analisis
-  GET   /{slug}/analisis
-  POST  /{slug}/acciones-manuales
-  POST  /{slug}/limpieza/normalizar-calles
-  POST  /{slug}/limpieza/limpiar-espacios
-  GET   /{slug}/versiones
-  GET   /{slug}/estadisticas
-"""
-
+# backend/app/api/analisis.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -32,6 +17,7 @@ from app.services.log_service import registrar_log
 from app.services.inpc_service import INPCService
 from app.services.numero_a_letras import numero_a_letras
 from pydantic import BaseModel
+from app.services.codebar_service import CodebarService
 
 router = APIRouter()
 
@@ -417,31 +403,31 @@ def _generar_codebar_completo(
     - VISTA: número de visita (ej: 3)
     """
     from datetime import datetime as dt
-    
+
     fecha_base_excel = dt(1899, 12, 30)
-    
+
     # PK COMPLETA - NO TRUNCADA
     pk_completa = str(pk_value)
-    
+
     # Fecha serial
     fecha_str = str((fecha_emision - fecha_base_excel).days)
-    
+
     # Identificador del documento + visita
     ident_str = ""
     if identificador_documento:
         ident_str = str(identificador_documento).upper()
-    
+
     visita_str = ""
     if visita:
         # Si visita es un número, lo dejamos como está
         visita_str = str(visita).strip()
-    
+
     # Combinar identificador + visita (ej: N3, R1, A2)
     combo_str = f"{ident_str}{visita_str}" if ident_str or visita_str else ""
-    
+
     # Construir código completo
     codigo = f"{pk_completa}{fecha_str}{combo_str}"
-    
+
     # Código 39 con asteriscos
     return f"*{codigo.upper()}*"
 
@@ -458,29 +444,29 @@ def _upsert_tabla_dinamica(
     Solo usa columnas que existen en la tabla
     """
     from sqlalchemy import text
-    
+
     data_filtrada = {}
     for key, value in data.items():
         if key == "pk":
             continue
         if key in cols_existentes:
             data_filtrada[key] = value
-    
+
     if not data_filtrada:
         print(f"⚠️ No hay columnas válidas para guardar {pk_name}={pk_value}")
         return
-    
+
     columns = list(data_filtrada.keys())
     placeholders = [f":{col}" for col in columns]
     updates = [f"`{col}` = VALUES(`{col}`)" for col in columns]
-    
+
     query_str = f"""
         INSERT INTO tabla_dinamica (`{pk_name}`, {', '.join([f'`{col}`' for col in columns])})
         VALUES (:pk, {', '.join(placeholders)})
         ON DUPLICATE KEY UPDATE
             {', '.join(updates)}
     """
-    
+
     db_proyecto.execute(text(query_str), {"pk": pk_value, **data_filtrada})
 
 
@@ -520,14 +506,17 @@ def get_programas(
     except Exception:
         pass
 
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
     try:
-        db_proyecto = next(get_project_db(proyecto_slug))
         rows = db_proyecto.execute(
             text("SELECT id, nombre, slug FROM tabla_programas WHERE activo = 1 ORDER BY nombre")
         ).fetchall()
         return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
     except Exception:
         return []
+    finally:
+        db_gen.close()
 
 
 # CARGAR VIABILIDAD / PAGOS — CSV masivo
@@ -593,110 +582,114 @@ async def cargar_viabilidad_csv(
     prog_col = _find_col(["programa","program"])
 
     VIABILIDADES_VALIDAS = {"viable", "no_viable", "pendiente"}
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
     procesados = 0
 
-    for idx, row in df.iterrows():
-        try:
-            pk_val = row[pk_col_csv]
-            if pd.isna(pk_val):
-                errores.append(f"Fila {idx + 2}: PK vacío, se omite.")
-                continue
-
-            if info["pk_type"] == "int":
-                try:
-                    pk_val = int(pk_val)
-                except (ValueError, TypeError):
-                    errores.append(f"Fila {idx + 2}: PK '{pk_val}' no es entero.")
+    try:
+        for idx, row in df.iterrows():
+            try:
+                pk_val = row[pk_col_csv]
+                if pd.isna(pk_val):
+                    errores.append(f"Fila {idx + 2}: PK vacío, se omite.")
                     continue
 
-            if via_col and not pd.isna(row.get(via_col, float('nan'))):
-                raw_via = str(row[via_col]).strip()
-                via_val = _normalizar_viabilidad(raw_via)
-                if via_val:
-                    db_proyecto.execute(
-                        text(f"UPDATE tabla_analisis SET viabilidad = :v WHERE `{pk}` = :pk"),
-                        {"v": via_val, "pk": pk_val},
-                    )
-
-            if pago_col and not pd.isna(row.get(pago_col, float('nan'))):
-                estatus_pago = str(row[pago_col]).strip()
-                fecha_pago = None
-                if fech_col and not pd.isna(row.get(fech_col, float('nan'))):
-                    fp = row[fech_col]
-                    if isinstance(fp, pd.Timestamp):
-                        fecha_pago = fp.date()
-                    else:
-                        parsed = _parse_fecha(str(fp))
-                        if parsed:
-                            fecha_pago = parsed.date()
-
-                monto = None
-                if mont_col and not pd.isna(row.get(mont_col, float('nan'))):
+                if info["pk_type"] == "int":
                     try:
-                        monto = float(row[mont_col])
+                        pk_val = int(pk_val)
                     except (ValueError, TypeError):
-                        pass
+                        errores.append(f"Fila {idx + 2}: PK '{pk_val}' no es entero.")
+                        continue
 
-                obs = str(row[obs_col]).strip() if obs_col and not pd.isna(row.get(obs_col, float('nan'))) else None
-                prog = str(row[prog_col]).strip() if prog_col and not pd.isna(row.get(prog_col, float('nan'))) else None
+                if via_col and not pd.isna(row.get(via_col, float('nan'))):
+                    raw_via = str(row[via_col]).strip()
+                    via_val = _normalizar_viabilidad(raw_via)
+                    if via_val:
+                        db_proyecto.execute(
+                            text(f"UPDATE tabla_analisis SET viabilidad = :v WHERE `{pk}` = :pk"),
+                            {"v": via_val, "pk": pk_val},
+                        )
 
-                existe_pago = db_proyecto.execute(
-                    text("SELECT id FROM tabla_pagos WHERE pk_cuenta = :pk LIMIT 1"),
-                    {"pk": str(pk_val)},
-                ).first()
+                if pago_col and not pd.isna(row.get(pago_col, float('nan'))):
+                    estatus_pago = str(row[pago_col]).strip()
+                    fecha_pago = None
+                    if fech_col and not pd.isna(row.get(fech_col, float('nan'))):
+                        fp = row[fech_col]
+                        if isinstance(fp, pd.Timestamp):
+                            fecha_pago = fp.date()
+                        else:
+                            parsed = _parse_fecha(str(fp))
+                            if parsed:
+                                fecha_pago = parsed.date()
 
-                if existe_pago:
+                    monto = None
+                    if mont_col and not pd.isna(row.get(mont_col, float('nan'))):
+                        try:
+                            monto = float(row[mont_col])
+                        except (ValueError, TypeError):
+                            pass
+
+                    obs = str(row[obs_col]).strip() if obs_col and not pd.isna(row.get(obs_col, float('nan'))) else None
+                    prog = str(row[prog_col]).strip() if prog_col and not pd.isna(row.get(prog_col, float('nan'))) else None
+
+                    existe_pago = db_proyecto.execute(
+                        text("SELECT id FROM tabla_pagos WHERE pk_cuenta = :pk LIMIT 1"),
+                        {"pk": str(pk_val)},
+                    ).first()
+
+                    if existe_pago:
+                        db_proyecto.execute(
+                            text("""
+                                UPDATE tabla_pagos
+                                SET estatus_pago=:ep, fecha_pago=:fp, monto_pago=:mp,
+                                    observaciones=:obs, programa=:prog, updated_at=NOW()
+                                WHERE pk_cuenta=:pk
+                            """),
+                            {"ep": estatus_pago, "fp": fecha_pago, "mp": monto,
+                             "obs": obs, "prog": prog, "pk": str(pk_val)},
+                        )
+                    else:
+                        db_proyecto.execute(
+                            text("""
+                                INSERT INTO tabla_pagos (pk_cuenta, estatus_pago, fecha_pago,
+                                    monto_pago, observaciones, programa, creado_por)
+                                VALUES (:pk, :ep, :fp, :mp, :obs, :prog, :usr)
+                            """),
+                            {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
+                             "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
+                        )
                     db_proyecto.execute(
-                        text("""
-                            UPDATE tabla_pagos
-                            SET estatus_pago=:ep, fecha_pago=:fp, monto_pago=:mp,
-                                observaciones=:obs, programa=:prog, updated_at=NOW()
-                            WHERE pk_cuenta=:pk
-                        """),
-                        {"ep": estatus_pago, "fp": fecha_pago, "mp": monto,
-                         "obs": obs, "prog": prog, "pk": str(pk_val)},
+                        text(f"UPDATE tabla_analisis SET estatus_pago = :ep WHERE `{pk}` = :pk"),
+                        {"ep": estatus_pago, "pk": pk_val},
                     )
-                else:
+
+                if prog_col and not pd.isna(row.get(prog_col, float('nan'))):
+                    prog_val = str(row[prog_col]).strip()
                     db_proyecto.execute(
-                        text("""
-                            INSERT INTO tabla_pagos (pk_cuenta, estatus_pago, fecha_pago,
-                                monto_pago, observaciones, programa, creado_por)
-                            VALUES (:pk, :ep, :fp, :mp, :obs, :prog, :usr)
-                        """),
-                        {"pk": str(pk_val), "ep": estatus_pago, "fp": fecha_pago,
-                         "mp": monto, "obs": obs, "prog": prog, "usr": current_user.id},
+                        text(f"UPDATE tabla_analisis SET programa = :prog WHERE `{pk}` = :pk"),
+                        {"prog": prog_val, "pk": pk_val},
                     )
-                db_proyecto.execute(
-                    text(f"UPDATE tabla_analisis SET estatus_pago = :ep WHERE `{pk}` = :pk"),
-                    {"ep": estatus_pago, "pk": pk_val},
-                )
+                    db_proyecto.execute(
+                        text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk"),
+                        {"prog": prog_val, "pk": pk_val},
+                    )
 
-            if prog_col and not pd.isna(row.get(prog_col, float('nan'))):
-                prog_val = str(row[prog_col]).strip()
-                db_proyecto.execute(
-                    text(f"UPDATE tabla_analisis SET programa = :prog WHERE `{pk}` = :pk"),
-                    {"prog": prog_val, "pk": pk_val},
-                )
-                db_proyecto.execute(
-                    text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk"),
-                    {"prog": prog_val, "pk": pk_val},
-                )
+                if (procesados + 1) % 200 == 0:
+                    db_proyecto.commit()
 
-            if (procesados + 1) % 200 == 0:
-                db_proyecto.commit()
+                procesados += 1
 
-            procesados += 1
+            except Exception as e:
+                errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
+                if len(errores) >= 30:
+                    errores.append("Límite de 30 errores alcanzado.")
+                    break
 
-        except Exception as e:
-            errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
-            if len(errores) >= 30:
-                errores.append("Límite de 30 errores alcanzado.")
-                break
-
-    db_proyecto.commit()
-    registrar_log(db_global, current_user.id, "cargar_viabilidad_csv",
-        f"CSV viabilidad/pagos {proyecto_slug}: {procesados} filas procesadas.", proyecto.id)
+        db_proyecto.commit()
+        registrar_log(db_global, current_user.id, "cargar_viabilidad_csv",
+            f"CSV viabilidad/pagos {proyecto_slug}: {procesados} filas procesadas.", proyecto.id)
+    finally:
+        db_gen.close()
 
     return CargaViabilidadCSVResponse(
         success=procesados > 0,
@@ -755,81 +748,88 @@ async def cargar_padron(
                    f"Columnas mapeadas: {list(mapeo.values())[:20]}",
         )
 
-    db_proyecto = next(get_project_db(proyecto_slug))
+    # NOTA: este endpoint no tocaba el patrón next(get_project_db(...)) en el
+    # bloque de importación masiva original; se deja igual salvo por el cierre
+    # explícito de la conexión al finalizar (mismo fix aplicado al resto).
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
     insertados = actualizados = 0
     registros = df_mapped.to_dict("records")
 
-    for idx, registro in enumerate(registros):
-        try:
-            limpio: Dict[str, Any] = {
-                k: _safe_value_v2(v, col_name=k, slug=proyecto_slug)
-                for k, v in registro.items()
-            }
-            pk_val = limpio.get(pk)
-            if pk_val is None:
-                errores.append(f"Fila {idx + 2}: sin valor en '{pk}', se omite.")
-                continue
-            if info["pk_type"] == "int":
-                try:
-                    pk_val = int(pk_val); limpio[pk] = pk_val
-                except (ValueError, TypeError):
-                    errores.append(f"Fila {idx + 2}: '{pk}' = '{pk_val}' no es entero.")
+    try:
+        for idx, registro in enumerate(registros):
+            try:
+                limpio: Dict[str, Any] = {
+                    k: _safe_value_v2(v, col_name=k, slug=proyecto_slug)
+                    for k, v in registro.items()
+                }
+                pk_val = limpio.get(pk)
+                if pk_val is None:
+                    errores.append(f"Fila {idx + 2}: sin valor en '{pk}', se omite.")
                     continue
+                if info["pk_type"] == "int":
+                    try:
+                        pk_val = int(pk_val); limpio[pk] = pk_val
+                    except (ValueError, TypeError):
+                        errores.append(f"Fila {idx + 2}: '{pk}' = '{pk_val}' no es entero.")
+                        continue
 
-            existe = db_proyecto.execute(
-                text(f"SELECT 1 FROM tabla_padron WHERE `{pk}` = :pk_val LIMIT 1"),
-                {"pk_val": pk_val},
-            ).first()
+                existe = db_proyecto.execute(
+                    text(f"SELECT 1 FROM tabla_padron WHERE `{pk}` = :pk_val LIMIT 1"),
+                    {"pk_val": pk_val},
+                ).first()
 
-            if existe:
-                set_parts = [f"`{k}` = :{k}" for k in limpio if k != pk]
-                if set_parts:
+                if existe:
+                    set_parts = [f"`{k}` = :{k}" for k in limpio if k != pk]
+                    if set_parts:
+                        db_proyecto.execute(
+                            text(f"UPDATE tabla_padron SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                            {**limpio, "pk_val": pk_val},
+                        )
+                        actualizados += 1
+                else:
+                    cols_str = ", ".join(f"`{k}`" for k in limpio)
+                    vals_str = ", ".join(f":{k}" for k in limpio)
                     db_proyecto.execute(
-                        text(f"UPDATE tabla_padron SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                        {**limpio, "pk_val": pk_val},
-                    )
-                    actualizados += 1
-            else:
-                cols_str = ", ".join(f"`{k}`" for k in limpio)
-                vals_str = ", ".join(f":{k}" for k in limpio)
-                db_proyecto.execute(
-                    text(f"INSERT INTO tabla_padron ({cols_str}) VALUES ({vals_str})"), limpio)
-                insertados += 1
+                        text(f"INSERT INTO tabla_padron ({cols_str}) VALUES ({vals_str})"), limpio)
+                    insertados += 1
 
-            if (insertados + actualizados) % 200 == 0:
-                db_proyecto.commit()
+                if (insertados + actualizados) % 200 == 0:
+                    db_proyecto.commit()
 
-        except Exception as e:
-            errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
-            if len(errores) >= 30:
-                errores.append("Límite de 30 errores alcanzado, importación detenida.")
-                break
+            except Exception as e:
+                errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
+                if len(errores) >= 30:
+                    errores.append("Límite de 30 errores alcanzado, importación detenida.")
+                    break
 
-    db_proyecto.commit()
+        db_proyecto.commit()
 
-    version_id = None
-    total = insertados + actualizados
-    if total > 0:
-        version = PadronVersion(
-            id_proyecto=proyecto.id,
-            version=_siguiente_version(db_global, proyecto.id),
-            ruta_snapshot="", total_registros=total,
-            archivo_nombre=file.filename, cargado_por=current_user.id,
-        )
-        db_global.add(version)
-        db_global.commit()
-        version_id = version.id
+        version_id = None
+        total = insertados + actualizados
+        if total > 0:
+            version = PadronVersion(
+                id_proyecto=proyecto.id,
+                version=_siguiente_version(db_global, proyecto.id),
+                ruta_snapshot="", total_registros=total,
+                archivo_nombre=file.filename, cargado_por=current_user.id,
+            )
+            db_global.add(version)
+            db_global.commit()
+            version_id = version.id
 
-    registrar_log(db_global, current_user.id, "cargar_padron",
-        f"Padrón {proyecto_slug}: {insertados} nuevos, {actualizados} actualizados. Archivo: {file.filename}",
-        proyecto.id)
+        registrar_log(db_global, current_user.id, "cargar_padron",
+            f"Padrón {proyecto_slug}: {insertados} nuevos, {actualizados} actualizados. Archivo: {file.filename}",
+            proyecto.id)
 
-    preview_cols = list(df_mapped.columns[:12])
-    preview = [
-        {k: str(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else ""
-         for k, v in row.items() if k in preview_cols}
-        for row in registros[:5]
-    ]
+        preview_cols = list(df_mapped.columns[:12])
+        preview = [
+            {k: str(v) if v is not None and not (isinstance(v, float) and pd.isna(v)) else ""
+             for k, v in row.items() if k in preview_cols}
+            for row in registros[:5]
+        ]
+    finally:
+        db_gen.close()
 
     return CargaPadronResponse(
         success=total > 0,
@@ -873,52 +873,56 @@ def get_complementar(
         params["programa"] = programa
 
     where = " AND ".join(conditions)
-    db_proyecto = next(get_project_db(proyecto_slug))
-    total = db_proyecto.execute(
-        text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE {where}"), params
-    ).first().total
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        total = db_proyecto.execute(
+            text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE {where}"), params
+        ).first().total
 
-    offset = (page - 1) * limit
-    cols_c = [col for col in info["columnas_complementaria"] if col != pk and col != "id_comp"]
-    cols_c_str = (", " + ", ".join(f"c.`{col}`" for col in cols_c)) if cols_c else ""
+        offset = (page - 1) * limit
+        cols_c = [col for col in info["columnas_complementaria"] if col != pk and col != "id_comp"]
+        cols_c_str = (", " + ", ".join(f"c.`{col}`" for col in cols_c)) if cols_c else ""
 
-    cols_validas_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
-    cols_validas_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
-    cols_validas_all    = cols_validas_padron | cols_validas_comp
+        cols_validas_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
+        cols_validas_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
+        cols_validas_all    = cols_validas_padron | cols_validas_comp
 
-    order_table = "p"
-    order_col   = pk
-    if sort_col and sort_col in cols_validas_all:
-        order_col   = sort_col
-        order_table = "c" if sort_col in cols_validas_comp and sort_col not in cols_validas_padron else "p"
-    order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+        order_table = "p"
+        order_col   = pk
+        if sort_col and sort_col in cols_validas_all:
+            order_col   = sort_col
+            order_table = "c" if sort_col in cols_validas_comp and sort_col not in cols_validas_padron else "p"
+        order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
 
-    rows = db_proyecto.execute(
-        text(f"""
-            SELECT p.*{cols_c_str}
-            FROM tabla_padron p
-            LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
-            WHERE {where}
-            ORDER BY {order_table}.`{order_col}` {order_dir}
-            LIMIT {limit} OFFSET {offset}
-        """),
-        params,
-    ).fetchall()
+        rows = db_proyecto.execute(
+            text(f"""
+                SELECT p.*{cols_c_str}
+                FROM tabla_padron p
+                LEFT JOIN tabla_complementaria c ON p.`{pk}` = c.`{pk}`
+                WHERE {where}
+                ORDER BY {order_table}.`{order_col}` {order_dir}
+                LIMIT {limit} OFFSET {offset}
+            """),
+            params,
+        ).fetchall()
 
-    cols_editables = list(info["columnas_complementaria"])
-    if "programa" not in cols_editables:
-        cols_editables.append("programa")
-        
-    return {
-        "rows":               [dict(r._mapping) for r in rows],
-        "columnas_editables": cols_editables,
-        "total":              total,
-        "page":               page,
-        "limit":              limit,
-        "pk":                 pk,
-        "sort_col":           sort_col,
-        "sort_dir":           sort_dir,
-    }
+        cols_editables = list(info["columnas_complementaria"])
+        if "programa" not in cols_editables:
+            cols_editables.append("programa")
+
+        return {
+            "rows":               [dict(r._mapping) for r in rows],
+            "columnas_editables": cols_editables,
+            "total":              total,
+            "page":               page,
+            "limit":              limit,
+            "pk":                 pk,
+            "sort_col":           sort_col,
+            "sort_dir":           sort_dir,
+        }
+    finally:
+        db_gen.close()
 
 
 # GUARDAR COMPLEMENTO
@@ -938,51 +942,55 @@ def guardar_complemento(
 
     info = _info(proyecto_slug)
     pk = info["pk"]
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    cols_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
-    cols_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
+    try:
+        cols_padron = set(_get_tabla_cols(db_proyecto, "tabla_padron"))
+        cols_comp   = set(_get_tabla_cols(db_proyecto, "tabla_complementaria"))
 
-    guardados = 0
+        guardados = 0
 
-    for fila in datos:
-        pk_val = fila.pk_value
-        all_campos = {k: v for k, v in fila.campos_complementarios.items()
-                      if v is not None and v != ""}
+        for fila in datos:
+            pk_val = fila.pk_value
+            all_campos = {k: v for k, v in fila.campos_complementarios.items()
+                          if v is not None and v != ""}
 
-        campos_padron = {k: v for k, v in all_campos.items() if k in cols_padron and k != pk}
-        campos_comp   = {k: v for k, v in all_campos.items() if k in cols_comp   and k != pk and k not in campos_padron}
+            campos_padron = {k: v for k, v in all_campos.items() if k in cols_padron and k != pk}
+            campos_comp   = {k: v for k, v in all_campos.items() if k in cols_comp   and k != pk and k not in campos_padron}
 
-        if campos_padron:
-            set_parts = [f"`{k}` = :{k}" for k in campos_padron]
-            db_proyecto.execute(
-                text(f"UPDATE tabla_padron SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                {**campos_padron, "pk_val": pk_val},
-            )
-
-        if campos_comp:
-            existe = db_proyecto.execute(
-                text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
-                {"pk_val": pk_val},
-            ).first()
-            if existe:
-                set_parts = [f"`{k}` = :{k}" for k in campos_comp]
+            if campos_padron:
+                set_parts = [f"`{k}` = :{k}" for k in campos_padron]
                 db_proyecto.execute(
-                    text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                    {**campos_comp, "pk_val": pk_val},
+                    text(f"UPDATE tabla_padron SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                    {**campos_padron, "pk_val": pk_val},
                 )
-            else:
-                all_fields = {pk: pk_val, **campos_comp}
-                cols_str = ", ".join(f"`{k}`" for k in all_fields)
-                vals_str = ", ".join(f":{k}" for k in all_fields)
-                db_proyecto.execute(
-                    text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
-                    all_fields,
-                )
-        guardados += 1
 
-    db_proyecto.commit()
-    return {"success": True, "message": f"{guardados} registros guardados."}
+            if campos_comp:
+                existe = db_proyecto.execute(
+                    text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
+                    {"pk_val": pk_val},
+                ).first()
+                if existe:
+                    set_parts = [f"`{k}` = :{k}" for k in campos_comp]
+                    db_proyecto.execute(
+                        text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                        {**campos_comp, "pk_val": pk_val},
+                    )
+                else:
+                    all_fields = {pk: pk_val, **campos_comp}
+                    cols_str = ", ".join(f"`{k}`" for k in all_fields)
+                    vals_str = ", ".join(f":{k}" for k in all_fields)
+                    db_proyecto.execute(
+                        text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
+                        all_fields,
+                    )
+            guardados += 1
+
+        db_proyecto.commit()
+        return {"success": True, "message": f"{guardados} registros guardados."}
+    finally:
+        db_gen.close()
 
 
 # GENERAR ANÁLISIS
@@ -998,20 +1006,24 @@ def generar_analisis(
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    previo = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
-    insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"])
+    try:
+        previo = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
+        insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"])
 
-    db_proyecto.execute(text("DELETE FROM tabla_analisis"))
-    db_proyecto.execute(text(insert_sql))
-    db_proyecto.commit()
+        db_proyecto.execute(text("DELETE FROM tabla_analisis"))
+        db_proyecto.execute(text(insert_sql))
+        db_proyecto.commit()
 
-    total = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
-    registrar_log(db_global, current_user.id, "generar_analisis",
-        f"tabla_analisis reconstruida en {proyecto_slug}: {total} registros", proyecto.id)
+        total = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
+        registrar_log(db_global, current_user.id, "generar_analisis",
+            f"tabla_analisis reconstruida en {proyecto_slug}: {total} registros", proyecto.id)
 
-    return {"success": True, "message": f"Análisis generado: {total} registros.", "total": total, "previo": previo}
+        return {"success": True, "message": f"Análisis generado: {total} registros.", "total": total, "previo": previo}
+    finally:
+        db_gen.close()
 
 
 # ACCIONES MANUALES
@@ -1030,31 +1042,35 @@ def acciones_manuales(
     pk = info["pk"]
     if not request.ids:
         raise HTTPException(status_code=400, detail="No se enviaron IDs.")
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
     ph = {f"id{i}": v for i, v in enumerate(request.ids)}
     in_clause = ", ".join(f":id{i}" for i in range(len(request.ids)))
 
-    accion = request.accion
-    if accion == "viable":
-        db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='viable' WHERE `{pk}` IN ({in_clause})"), ph)
-        msg = f"{len(request.ids)} registros marcados como Viables"
-    elif accion == "no_viable":
-        db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
-        msg = f"{len(request.ids)} registros marcados como No Viables"
-    elif accion == "quitar_pagada":
-        db_proyecto.execute(text(f"UPDATE tabla_analisis SET pagada=1, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
-        msg = f"{len(request.ids)} registros marcados como Pagados"
-    elif accion == "quitar_nd":
-        motivo = request.valor or "ND"
-        ph["motivo_nd"] = motivo
-        db_proyecto.execute(text(f"UPDATE tabla_analisis SET nd=:motivo_nd, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
-        msg = f"{len(request.ids)} registros marcados como No Deudores ({motivo})"
-    else:
-        raise HTTPException(status_code=400, detail=f"Acción '{accion}' no reconocida.")
+    try:
+        accion = request.accion
+        if accion == "viable":
+            db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='viable' WHERE `{pk}` IN ({in_clause})"), ph)
+            msg = f"{len(request.ids)} registros marcados como Viables"
+        elif accion == "no_viable":
+            db_proyecto.execute(text(f"UPDATE tabla_analisis SET viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+            msg = f"{len(request.ids)} registros marcados como No Viables"
+        elif accion == "quitar_pagada":
+            db_proyecto.execute(text(f"UPDATE tabla_analisis SET pagada=1, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+            msg = f"{len(request.ids)} registros marcados como Pagados"
+        elif accion == "quitar_nd":
+            motivo = request.valor or "ND"
+            ph["motivo_nd"] = motivo
+            db_proyecto.execute(text(f"UPDATE tabla_analisis SET nd=:motivo_nd, viabilidad='no_viable' WHERE `{pk}` IN ({in_clause})"), ph)
+            msg = f"{len(request.ids)} registros marcados como No Deudores ({motivo})"
+        else:
+            raise HTTPException(status_code=400, detail=f"Acción '{accion}' no reconocida.")
 
-    db_proyecto.commit()
-    registrar_log(db_global, current_user.id, f"accion_{accion}", msg, proyecto.id)
-    return {"success": True, "message": msg}
+        db_proyecto.commit()
+        registrar_log(db_global, current_user.id, f"accion_{accion}", msg, proyecto.id)
+        return {"success": True, "message": msg}
+    finally:
+        db_gen.close()
 
 
 # LIMPIEZA
@@ -1088,33 +1104,37 @@ def normalizar_calles(
     info = _info(proyecto_slug)
     pk = info["pk"]
     all_calle_cols = list(dict.fromkeys(info["col_calle"] + ["calle","domicilio","ubicacion","calle_numero"]))
-    db_proyecto = next(get_project_db(proyecto_slug))
-    cols_existentes = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-    cols_a_procesar = [c for c in all_calle_cols if c in cols_existentes]
-    if not cols_a_procesar:
-        return {"success": True, "message": "No se encontraron columnas de calle para normalizar."}
-    sel_cols = ", ".join(f"`{c}`" for c in [pk] + cols_a_procesar)
-    filas = db_proyecto.execute(text(f"SELECT {sel_cols} FROM tabla_analisis")).fetchall()
-    actualizados = 0
-    for fila in filas:
-        row = dict(fila._mapping)
-        pk_val = row[pk]
-        cambios: Dict[str, str] = {}
-        for col in cols_a_procesar:
-            original = row.get(col) or ""
-            normalizado = _aplicar_regex_calles(str(original))
-            if normalizado != original:
-                cambios[col] = normalizado
-        if cambios:
-            set_parts = [f"`{k}` = :{k}" for k in cambios]
-            db_proyecto.execute(
-                text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                {**cambios, "pk_val": pk_val})
-            actualizados += 1
-    db_proyecto.commit()
-    registrar_log(db_global, current_user.id, "normalizar_calles",
-        f"Normalizadas calles en {actualizados} filas de {proyecto_slug}", proyecto.id)
-    return {"success": True, "message": f"Calles normalizadas: {actualizados} registros actualizados."}
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        cols_existentes = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+        cols_a_procesar = [c for c in all_calle_cols if c in cols_existentes]
+        if not cols_a_procesar:
+            return {"success": True, "message": "No se encontraron columnas de calle para normalizar."}
+        sel_cols = ", ".join(f"`{c}`" for c in [pk] + cols_a_procesar)
+        filas = db_proyecto.execute(text(f"SELECT {sel_cols} FROM tabla_analisis")).fetchall()
+        actualizados = 0
+        for fila in filas:
+            row = dict(fila._mapping)
+            pk_val = row[pk]
+            cambios: Dict[str, str] = {}
+            for col in cols_a_procesar:
+                original = row.get(col) or ""
+                normalizado = _aplicar_regex_calles(str(original))
+                if normalizado != original:
+                    cambios[col] = normalizado
+            if cambios:
+                set_parts = [f"`{k}` = :{k}" for k in cambios]
+                db_proyecto.execute(
+                    text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                    {**cambios, "pk_val": pk_val})
+                actualizados += 1
+        db_proyecto.commit()
+        registrar_log(db_global, current_user.id, "normalizar_calles",
+            f"Normalizadas calles en {actualizados} filas de {proyecto_slug}", proyecto.id)
+        return {"success": True, "message": f"Calles normalizadas: {actualizados} registros actualizados."}
+    finally:
+        db_gen.close()
 
 
 @router.post("/{proyecto_slug}/limpieza/limpiar-espacios")
@@ -1126,29 +1146,33 @@ def limpiar_espacios(
     from sqlalchemy import text
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
-    db_proyecto = next(get_project_db(proyecto_slug))
-    cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-    cols_texto = [r[0] for r in cols_result if "VARCHAR" in str(r[1]).upper() or "TEXT" in str(r[1]).upper()]
-    actualizados = 0
-    for col in cols_texto[:20]:
-        try:
-            result = db_proyecto.execute(text(f"""
-                UPDATE tabla_analisis
-                SET `{col}` = TRIM(REGEXP_REPLACE(`{col}`, '[ ]{{2,}}', ' '))
-                WHERE `{col}` IS NOT NULL AND `{col}` LIKE '%  %'
-            """))
-            actualizados += result.rowcount
-        except Exception:
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
+        cols_texto = [r[0] for r in cols_result if "VARCHAR" in str(r[1]).upper() or "TEXT" in str(r[1]).upper()]
+        actualizados = 0
+        for col in cols_texto[:20]:
             try:
-                result = db_proyecto.execute(text(
-                    f"UPDATE tabla_analisis SET `{col}` = TRIM(`{col}`) WHERE `{col}` IS NOT NULL"))
+                result = db_proyecto.execute(text(f"""
+                    UPDATE tabla_analisis
+                    SET `{col}` = TRIM(REGEXP_REPLACE(`{col}`, '[ ]{{2,}}', ' '))
+                    WHERE `{col}` IS NOT NULL AND `{col}` LIKE '%  %'
+                """))
                 actualizados += result.rowcount
             except Exception:
-                pass
-    db_proyecto.commit()
-    registrar_log(db_global, current_user.id, "limpiar_espacios",
-        f"Espacios limpiados en {proyecto_slug}: {actualizados} celdas", proyecto.id)
-    return {"success": True, "message": f"Espacios limpiados: {actualizados} celdas actualizadas."}
+                try:
+                    result = db_proyecto.execute(text(
+                        f"UPDATE tabla_analisis SET `{col}` = TRIM(`{col}`) WHERE `{col}` IS NOT NULL"))
+                    actualizados += result.rowcount
+                except Exception:
+                    pass
+        db_proyecto.commit()
+        registrar_log(db_global, current_user.id, "limpiar_espacios",
+            f"Espacios limpiados en {proyecto_slug}: {actualizados} celdas", proyecto.id)
+        return {"success": True, "message": f"Espacios limpiados: {actualizados} celdas actualizadas."}
+    finally:
+        db_gen.close()
 
 
 # VERSIONES
@@ -1184,27 +1208,31 @@ def get_estadisticas(
 ):
     from sqlalchemy import text
     check_project_access(proyecto_slug, current_user, db_global)
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    def count(tabla: str) -> int:
-        try:
-            return db_proyecto.execute(text(f"SELECT COUNT(*) AS c FROM {tabla}")).first().c
-        except Exception:
-            return 0
+    try:
+        def count(tabla: str) -> int:
+            try:
+                return db_proyecto.execute(text(f"SELECT COUNT(*) AS c FROM {tabla}")).first().c
+            except Exception:
+                return 0
 
-    def count_via(valor: str) -> int:
-        try:
-            return db_proyecto.execute(
-                text("SELECT COUNT(*) AS c FROM tabla_analisis WHERE viabilidad = :v"), {"v": valor}
-            ).first().c
-        except Exception:
-            return 0
+        def count_via(valor: str) -> int:
+            try:
+                return db_proyecto.execute(
+                    text("SELECT COUNT(*) AS c FROM tabla_analisis WHERE viabilidad = :v"), {"v": valor}
+                ).first().c
+            except Exception:
+                return 0
 
-    return {
-        "padron": count("tabla_padron"), "analisis": count("tabla_analisis"),
-        "viable": count_via("viable"), "no_viable": count_via("no_viable"),
-        "pendiente": count_via("pendiente"),
-    }
+        return {
+            "padron": count("tabla_padron"), "analisis": count("tabla_analisis"),
+            "viable": count_via("viable"), "no_viable": count_via("no_viable"),
+            "pendiente": count_via("pendiente"),
+        }
+    finally:
+        db_gen.close()
 
 # CARGA COMPLEMENTO CSV
 
@@ -1255,81 +1283,85 @@ async def cargar_complemento_csv(
                 detail=f"No se encontró la columna PK '{pk}' en el archivo. Columnas: {list(df.columns)[:10]}"
             )
 
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
     procesados = 0
 
-    for idx, row in df.iterrows():
-        try:
-            pk_val_raw = row[pk_norm]
-            if pd.isna(pk_val_raw):
-                continue
-            pk_val = int(pk_val_raw) if info["pk_type"] == "int" else str(pk_val_raw).strip()
-
-            campos: Dict[str, Any] = {}
-            for col in df.columns:
-                if col == pk_norm:
+    try:
+        for idx, row in df.iterrows():
+            try:
+                pk_val_raw = row[pk_norm]
+                if pd.isna(pk_val_raw):
                     continue
-                col_real = col  
-                match = None
-                for cp in cols_permitidas:
-                    if _normalizar_col(cp) == col_real or cp == col_real:
-                        match = cp
-                        break
-                if match is None:
-                    continue
-                v = row[col]
-                if pd.isna(v) or v == "":
-                    continue
-                campos[match] = v
+                pk_val = int(pk_val_raw) if info["pk_type"] == "int" else str(pk_val_raw).strip()
 
-            if not campos:
-                continue
+                campos: Dict[str, Any] = {}
+                for col in df.columns:
+                    if col == pk_norm:
+                        continue
+                    col_real = col
+                    match = None
+                    for cp in cols_permitidas:
+                        if _normalizar_col(cp) == col_real or cp == col_real:
+                            match = cp
+                            break
+                    if match is None:
+                        continue
+                    v = row[col]
+                    if pd.isna(v) or v == "":
+                        continue
+                    campos[match] = v
 
-            if 'programa' in campos:
-                db_proyecto.execute(
-                    text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk_val"),
-                    {"prog": campos.pop('programa'), "pk_val": pk_val},
-                )
                 if not campos:
-                    procesados += 1
-                    if procesados % 200 == 0:
-                        db_proyecto.commit()
                     continue
 
-            existe = db_proyecto.execute(
-                text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
-                {"pk_val": pk_val},
-            ).first()
+                if 'programa' in campos:
+                    db_proyecto.execute(
+                        text(f"UPDATE tabla_padron SET programa = :prog WHERE `{pk}` = :pk_val"),
+                        {"prog": campos.pop('programa'), "pk_val": pk_val},
+                    )
+                    if not campos:
+                        procesados += 1
+                        if procesados % 200 == 0:
+                            db_proyecto.commit()
+                        continue
 
-            if existe:
-                set_parts = [f"`{k}` = :{k}" for k in campos]
-                db_proyecto.execute(
-                    text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-                    {**campos, "pk_val": pk_val},
-                )
-            else:
-                all_fields = {pk: pk_val, **campos}
-                cols_str = ", ".join(f"`{k}`" for k in all_fields)
-                vals_str = ", ".join(f":{k}" for k in all_fields)
-                db_proyecto.execute(
-                    text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
-                    all_fields,
-                )
-            procesados += 1
+                existe = db_proyecto.execute(
+                    text(f"SELECT 1 FROM tabla_complementaria WHERE `{pk}` = :pk_val LIMIT 1"),
+                    {"pk_val": pk_val},
+                ).first()
 
-            if procesados % 200 == 0:
-                db_proyecto.commit()
+                if existe:
+                    set_parts = [f"`{k}` = :{k}" for k in campos]
+                    db_proyecto.execute(
+                        text(f"UPDATE tabla_complementaria SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                        {**campos, "pk_val": pk_val},
+                    )
+                else:
+                    all_fields = {pk: pk_val, **campos}
+                    cols_str = ", ".join(f"`{k}`" for k in all_fields)
+                    vals_str = ", ".join(f":{k}" for k in all_fields)
+                    db_proyecto.execute(
+                        text(f"INSERT INTO tabla_complementaria ({cols_str}) VALUES ({vals_str})"),
+                        all_fields,
+                    )
+                procesados += 1
 
-        except Exception as e:
-            errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
-            if len(errores) >= 30:
-                errores.append("Límite de 30 errores alcanzado.")
-                break
+                if procesados % 200 == 0:
+                    db_proyecto.commit()
 
-    db_proyecto.commit()
-    registrar_log(db_global, current_user.id, "cargar_complemento_csv",
-        f"Complemento masivo {proyecto_slug}: {procesados} registros. Archivo: {file.filename}",
-        proyecto.id)
+            except Exception as e:
+                errores.append(f"Fila {idx + 2}: {str(e)[:120]}")
+                if len(errores) >= 30:
+                    errores.append("Límite de 30 errores alcanzado.")
+                    break
+
+        db_proyecto.commit()
+        registrar_log(db_global, current_user.id, "cargar_complemento_csv",
+            f"Complemento masivo {proyecto_slug}: {procesados} registros. Archivo: {file.filename}",
+            proyecto.id)
+    finally:
+        db_gen.close()
 
     return {
         "success": procesados > 0 or len(errores) == 0,
@@ -1352,33 +1384,37 @@ def actualizar_analisis_celdas(
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-    actualizados = 0
+    try:
+        cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+        actualizados = 0
 
-    for cambio in cambios:
-        pk_val = cambio.pk_value
-        campos = {
-            k: v for k, v in cambio.campos.items()
-            if k in cols_validas and k != pk
-        }
-        if not campos:
-            continue
-        set_parts = [f"`{k}` = :{k}" for k in campos]
-        db_proyecto.execute(
-            text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
-            {**campos, "pk_val": pk_val},
+        for cambio in cambios:
+            pk_val = cambio.pk_value
+            campos = {
+                k: v for k, v in cambio.campos.items()
+                if k in cols_validas and k != pk
+            }
+            if not campos:
+                continue
+            set_parts = [f"`{k}` = :{k}" for k in campos]
+            db_proyecto.execute(
+                text(f"UPDATE tabla_analisis SET {', '.join(set_parts)} WHERE `{pk}` = :pk_val"),
+                {**campos, "pk_val": pk_val},
+            )
+            actualizados += 1
+
+        db_proyecto.commit()
+        registrar_log(
+            db_global, current_user.id, "actualizar_analisis_celdas",
+            f"{actualizados} filas editadas en tabla_analisis de {proyecto_slug}",
+            proyecto.id,
         )
-        actualizados += 1
-
-    db_proyecto.commit()
-    registrar_log(
-        db_global, current_user.id, "actualizar_analisis_celdas",
-        f"{actualizados} filas editadas en tabla_analisis de {proyecto_slug}",
-        proyecto.id,
-    )
-    return {"success": True, "message": f"{actualizados} registro(s) actualizados."}
+        return {"success": True, "message": f"{actualizados} registro(s) actualizados."}
+    finally:
+        db_gen.close()
 
 # ANALISIS - TABLA ORDENAMIENTOS
 
@@ -1418,51 +1454,55 @@ def get_analisis(
         params["busqueda"] = f"%{busqueda}%"
 
     where = " AND ".join(conditions) if conditions else "1=1"
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-    order_col = pk
-    if sort_col and sort_col in cols_validas:
-        order_col = sort_col
-    order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
+    try:
+        cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
+        order_col = pk
+        if sort_col and sort_col in cols_validas:
+            order_col = sort_col
+        order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
 
-    total = db_proyecto.execute(
-        text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"), params
-    ).first().total
+        total = db_proyecto.execute(
+            text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"), params
+        ).first().total
 
-    offset = (page - 1) * limit
-    rows = db_proyecto.execute(
-        text(f"SELECT * FROM tabla_analisis WHERE {where} ORDER BY `{order_col}` {order_dir} LIMIT {limit} OFFSET {offset}"),
-        params,
-    ).fetchall()
+        offset = (page - 1) * limit
+        rows = db_proyecto.execute(
+            text(f"SELECT * FROM tabla_analisis WHERE {where} ORDER BY `{order_col}` {order_dir} LIMIT {limit} OFFSET {offset}"),
+            params,
+        ).fetchall()
 
-    result = []
-    for r in rows:
-        row_dict = dict(r._mapping)
-        adeudo_val = 0
-        for col in info["col_adeudo"]:
-            v = row_dict.get(col)
-            if v is not None:
-                try:
-                    adeudo_val = float(v); break
-                except (TypeError, ValueError):
-                    pass
-        row_dict["_adeudo_display"] = adeudo_val
-        nombre_val = ""
-        for col in info["col_nombre"]:
-            v = row_dict.get(col)
-            if v:
-                nombre_val = str(v); break
-        row_dict["_nombre_display"] = nombre_val
-        calle_val = ""
-        for col in info["col_calle"]:
-            v = row_dict.get(col)
-            if v:
-                calle_val = str(v); break
-        row_dict["_calle_display"] = calle_val
-        result.append(row_dict)
+        result = []
+        for r in rows:
+            row_dict = dict(r._mapping)
+            adeudo_val = 0
+            for col in info["col_adeudo"]:
+                v = row_dict.get(col)
+                if v is not None:
+                    try:
+                        adeudo_val = float(v); break
+                    except (TypeError, ValueError):
+                        pass
+            row_dict["_adeudo_display"] = adeudo_val
+            nombre_val = ""
+            for col in info["col_nombre"]:
+                v = row_dict.get(col)
+                if v:
+                    nombre_val = str(v); break
+            row_dict["_nombre_display"] = nombre_val
+            calle_val = ""
+            for col in info["col_calle"]:
+                v = row_dict.get(col)
+                if v:
+                    calle_val = str(v); break
+            row_dict["_calle_display"] = calle_val
+            result.append(row_dict)
 
-    return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
+        return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
+    finally:
+        db_gen.close()
 
 # ============================================================
 # FUNCIONES AUXILIARES PARA CÁLCULOS
@@ -1495,7 +1535,7 @@ def calcular_todas_filas(
     pmo: Optional[str] = Query(None, description="Último PMO"),
     id_documento: Optional[int] = Query(None, description="ID del documento del catálogo"),
     id_notificador: Optional[int] = Query(None, description="ID del notificador del catálogo"),
-    modo_inpc: Optional[str] = Query("actual", description="actual | anterior", 
+    modo_inpc: Optional[str] = Query("actual", description="actual | anterior",
                                       regex="^(actual|anterior)$"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
@@ -1503,269 +1543,276 @@ def calcular_todas_filas(
     from sqlalchemy import text
     from app.services.inpc_service import INPCService
     from app.services.numero_a_letras import numero_a_letras
-    
+
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    db_proyecto = next(get_project_db(proyecto_slug))
-    
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    # A partir de aquí, TODO el flujo (incluyendo los returns tempranos)
+    # queda envuelto en try/finally para garantizar db_gen.close() siempre,
+    # sin importar por dónde salga la función. Esto es crítico aquí porque
+    # el proceso es largo y masivo (el más propenso a saturar el pool).
     try:
-        db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
-    except Exception as e:
-        return {
-            "success": False,
-            "error": "La tabla_analisis aún no existe. Genera el análisis primero."
+        try:
+            db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
+        except Exception as e:
+            return {
+                "success": False,
+                "error": "La tabla_analisis aún no existe. Genera el análisis primero."
+            }
+
+        pks = {
+            "apa_tlajomulco": "clave_APA",
+            "predial_tlajomulco": "cuenta",
+            "licencias_gdl": "licencia",
+            "predial_gdl": "cuenta_n",
+            "estado": "credito",
+            "pensiones": "prestamo",
         }
-    
-    pks = {
-        "apa_tlajomulco": "clave_APA",
-        "predial_tlajomulco": "cuenta",
-        "licencias_gdl": "licencia",
-        "predial_gdl": "cuenta_n",
-        "estado": "credito",
-        "pensiones": "prestamo",
-    }
-    pk_name = pks.get(proyecto_slug, "id")
-    
-    if fecha_emision:
+        pk_name = pks.get(proyecto_slug, "id")
+
+        if fecha_emision:
+            try:
+                fecha_emision_dt = datetime.strptime(fecha_emision, '%Y-%m-%d')
+            except ValueError:
+                return {"success": False, "error": f"Formato de fecha inválido: {fecha_emision}"}
+        else:
+            fecha_emision_dt = datetime.now()
+
+        # Ajustar fecha para INPC según modo
+        if modo_inpc == "anterior":
+            fecha_emision_ajustada = fecha_emision_dt.replace(day=1) - timedelta(days=1)
+            fecha_emision_ajustada = fecha_emision_ajustada.replace(day=1)
+        else:
+            fecha_emision_ajustada = fecha_emision_dt
+
+        # Obtener información del documento y notificador
+        nombre_documento = None
+        identificador_documento = None
+
+        if id_documento:
+            try:
+                doc = db_global.execute(
+                    text("""
+                        SELECT nombre_documento, identificador_documento
+                        FROM catalogo_documento
+                        WHERE id_documento = :id
+                    """),
+                    {"id": id_documento}
+                ).first()
+                if doc:
+                    nombre_documento = doc.nombre_documento
+                    identificador_documento = doc.identificador_documento
+            except Exception:
+                pass
+
+        rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
+
+        if not rows:
+            return {"success": False, "error": "No hay datos en tabla_analisis"}
+
+        # Asegurar tabla_dinamica
         try:
-            fecha_emision_dt = datetime.strptime(fecha_emision, '%Y-%m-%d')
-        except ValueError:
-            return {"success": False, "error": f"Formato de fecha inválido: {fecha_emision}"}
-    else:
-        fecha_emision_dt = datetime.now()
-    
-    # Ajustar fecha para INPC según modo
-    if modo_inpc == "anterior":
-        fecha_emision_ajustada = fecha_emision_dt.replace(day=1) - timedelta(days=1)
-        fecha_emision_ajustada = fecha_emision_ajustada.replace(day=1)
-    else:
-        fecha_emision_ajustada = fecha_emision_dt
-    
-    # Obtener información del documento y notificador
-    nombre_documento = None
-    identificador_documento = None
-    
-    if id_documento:
+            db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
+        except Exception:
+            create_query = text("""
+                CREATE TABLE IF NOT EXISTS tabla_dinamica (
+                    codebar VARCHAR(100) PRIMARY KEY,
+                    id_documento INT,
+                    visita VARCHAR(10),
+                    pmo VARCHAR(50),
+                    fecha_emision DATETIME,
+                    status_captura VARCHAR(50),
+                    id_notificador INT,
+                    no_documento VARCHAR(255),
+                    importe_letra LONGTEXT,
+                    proximo_inpc VARCHAR(7),
+                    inpc_notificacion DECIMAL(10,4),
+                    inpc_requerimiento DECIMAL(10,4),
+                    periodo_notificacion VARCHAR(7),
+                    periodo_requerimiento VARCHAR(7),
+                    factor_actualizacion DECIMAL(12,6),
+                    importe_actualizacion DECIMAL(15,2),
+                    total_multa_actualizada DECIMAL(15,2),
+                    fecha_inpc_a DATE,
+                    periodo_a VARCHAR(7),
+                    inpc_a DECIMAL(10,4),
+                    fecha_inpc_b DATE,
+                    periodo_b VARCHAR(7),
+                    inpc_b DECIMAL(10,4),
+                    INDEX idx_codebar (codebar),
+                    INDEX idx_fecha_emision (fecha_emision)
+                )
+            """)
+            db_proyecto.execute(create_query)
+            db_proyecto.commit()
+
+        cols_dinamica = set()
         try:
-            doc = db_global.execute(
-                text("""
-                    SELECT nombre_documento, identificador_documento 
-                    FROM catalogo_documento 
-                    WHERE id_documento = :id
-                """),
-                {"id": id_documento}
-            ).first()
-            if doc:
-                nombre_documento = doc.nombre_documento
-                identificador_documento = doc.identificador_documento
+            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_dinamica")).fetchall()
+            cols_dinamica = {r[0] for r in cols_result}
         except Exception:
             pass
-    
-    rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
-    
-    if not rows:
-        return {"success": False, "error": "No hay datos en tabla_analisis"}
-    
-    # Asegurar tabla_dinamica
-    try:
-        db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
-    except Exception:
-        create_query = text("""
-            CREATE TABLE IF NOT EXISTS tabla_dinamica (
-                codebar VARCHAR(100) PRIMARY KEY,
-                id_documento INT,
-                visita VARCHAR(10),
-                pmo VARCHAR(50),
-                fecha_emision DATETIME,
-                status_captura VARCHAR(50),
-                id_notificador INT,
-                no_documento VARCHAR(255),
-                importe_letra LONGTEXT,
-                proximo_inpc VARCHAR(7),
-                inpc_notificacion DECIMAL(10,4),
-                inpc_requerimiento DECIMAL(10,4),
-                periodo_notificacion VARCHAR(7),
-                periodo_requerimiento VARCHAR(7),
-                factor_actualizacion DECIMAL(12,6),
-                importe_actualizacion DECIMAL(15,2),
-                total_multa_actualizada DECIMAL(15,2),
-                fecha_inpc_a DATE,
-                periodo_a VARCHAR(7),
-                inpc_a DECIMAL(10,4),
-                fecha_inpc_b DATE,
-                periodo_b VARCHAR(7),
-                inpc_b DECIMAL(10,4),
-                INDEX idx_codebar (codebar),
-                INDEX idx_fecha_emision (fecha_emision)
-            )
-        """)
-        db_proyecto.execute(create_query)
-        db_proyecto.commit()
-    
-    cols_dinamica = set()
-    try:
-        cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_dinamica")).fetchall()
-        cols_dinamica = {r[0] for r in cols_result}
-    except Exception:
-        pass
-    
-    procesados = 0
-    errores = []
-    batch_size = 100
-    
-    for idx, row in enumerate(rows):
-        row_dict = dict(row._mapping)
-        pk_value = row_dict.get(pk_name)
-        
-        if not pk_value:
-            errores.append(f"Fila {idx}: Sin PK - SKIP")
-            continue
-        
-        try:
-            if proyecto_slug == "estado":
-                fecha_notificacion = row_dict.get('fecha_notificacion')
-                
-                if not fecha_notificacion:
-                    errores.append(f"Fila {pk_value}: Falta fecha_notificacion - SKIP")
-                    continue
-                
-                if isinstance(fecha_notificacion, str):
-                    try:
-                        fecha_notificacion = datetime.strptime(fecha_notificacion, '%Y-%m-%d')
-                    except ValueError:
-                        errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SKIP")
+
+        procesados = 0
+        errores = []
+        batch_size = 100
+
+        for idx, row in enumerate(rows):
+            row_dict = dict(row._mapping)
+            pk_value = row_dict.get(pk_name)
+
+            if not pk_value:
+                errores.append(f"Fila {idx}: Sin PK - SKIP")
+                continue
+
+            try:
+                if proyecto_slug == "estado":
+                    fecha_notificacion = row_dict.get('fecha_notificacion')
+
+                    if not fecha_notificacion:
+                        errores.append(f"Fila {pk_value}: Falta fecha_notificacion - SKIP")
                         continue
-                elif isinstance(fecha_notificacion, datetime):
-                    pass
+
+                    if isinstance(fecha_notificacion, str):
+                        try:
+                            fecha_notificacion = datetime.strptime(fecha_notificacion, '%Y-%m-%d')
+                        except ValueError:
+                            errores.append(f"Fila {pk_value}: Formato fecha_notificacion inválido - SKIP")
+                            continue
+                    elif isinstance(fecha_notificacion, datetime):
+                        pass
+                    else:
+                        try:
+                            fecha_notificacion = datetime.combine(fecha_notificacion, datetime.min.time())
+                        except Exception:
+                            errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SKIP")
+                            continue
+
+                    importe_historico = row_dict.get('importe_historico_determinado', 0)
+                    try:
+                        importe_historico = float(importe_historico)
+                    except (ValueError, TypeError):
+                        importe_historico = 0
+
+                    calculo = INPCService.calcular_actualizacion_multas_v2(
+                        db_global,
+                        importe_historico,
+                        fecha_notificacion,
+                        fecha_emision_ajustada
+                    )
+
+                    if not calculo["success"]:
+                        errores.append(f"Fila {pk_value}: {calculo['error']} - SKIP")
+                        continue
+
+                    data = calculo["data"]
+                    total_actualizado = float(data["total_actualizado"])
+                    importe_letra = numero_a_letras(total_actualizado)
+                    po_valor = pmo or ''
+
+                    # Usar _generar_codebar_completo (definida arriba)
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento
+                    )
+
+                    ultimo_inpc = INPCService.obtener_ultimo_registro(db_global)
+
+                    data_dict = {
+                        "codebar": codebar,
+                        "id_documento": id_documento,
+                        "visita": visita,
+                        "pmo": pmo,
+                        "po": pmo,
+                        "fecha_emision": fecha_emision_dt,
+                        "id_notificador": id_notificador,
+                        "no_documento": nombre_documento,
+                        "importe_letra": importe_letra,
+                        "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
+                        # REMOVIDOS LOS float() AQUÍ:
+                        "inpc_notificacion": data["inpc_a"],
+                        "inpc_requerimiento": data["inpc_b"],
+                        "periodo_notificacion": data["periodo_a"],
+                        "periodo_requerimiento": data["periodo_b"],
+                        "factor_actualizacion": data["factor_actualizacion"],
+                        "importe_actualizacion": data["importe_actualizacion"],
+                        "total_multa_actualizada": total_actualizado,
+                        "fecha_inpc_a": data["fecha_a"].date(),
+                        "periodo_a": data["periodo_a"],
+                        "inpc_a": data["inpc_a"],
+                        "fecha_inpc_b": data["fecha_b"].date(),
+                        "periodo_b": data["periodo_b"],
+                        "inpc_b": data["inpc_b"],
+                        "pk": pk_value
+                    }
+
+                    _upsert_tabla_dinamica(
+                        db_proyecto,
+                        pk_name,
+                        pk_value,
+                        data_dict,
+                        cols_dinamica
+                    )
+                    procesados += 1
+
                 else:
-                    try:
-                        fecha_notificacion = datetime.combine(fecha_notificacion, datetime.min.time())
-                    except Exception:
-                        errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SKIP")
-                        continue
-                
-                importe_historico = row_dict.get('importe_historico_determinado', 0)
-                try:
-                    importe_historico = float(importe_historico)
-                except (ValueError, TypeError):
-                    importe_historico = 0
-                
-                calculo = INPCService.calcular_actualizacion_multas_v2(
-                    db_global,
-                    importe_historico,
-                    fecha_notificacion,
-                    fecha_emision_ajustada
-                )
-                
-                if not calculo["success"]:
-                    errores.append(f"Fila {pk_value}: {calculo['error']} - SKIP")
-                    continue
-                
-                data = calculo["data"]
-                total_actualizado = float(data["total_actualizado"])
-                importe_letra = numero_a_letras(total_actualizado)
-                po_valor = pmo or ''
-                
-                # Usar _generar_codebar_completo (definida arriba)
-                codebar = _generar_codebar_completo(
-                    pk_value=str(pk_value),
-                    fecha_emision=fecha_emision_dt,
-                    id_documento=id_documento,
-                    visita=visita,
-                    identificador_documento=identificador_documento
-                )
-                
-                ultimo_inpc = INPCService.obtener_ultimo_registro(db_global)
-                
-                data_dict = {
-                    "codebar": codebar,
-                    "id_documento": id_documento,
-                    "visita": visita,
-                    "pmo": pmo,
-                    "po": pmo,
-                    "fecha_emision": fecha_emision_dt,
-                    "id_notificador": id_notificador,
-                    "no_documento": nombre_documento,
-                    "importe_letra": importe_letra,
-                    "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
-                    "inpc_notificacion": float(data["inpc_a"]),
-                    "inpc_requerimiento": float(data["inpc_b"]),
-                    "periodo_notificacion": data["periodo_a"],
-                    "periodo_requerimiento": data["periodo_b"],
-                    "factor_actualizacion": float(data["factor_actualizacion"]),
-                    "importe_actualizacion": float(data["importe_actualizacion"]),
-                    "total_multa_actualizada": total_actualizado,
-                    "fecha_inpc_a": data["fecha_a"].date(),
-                    "periodo_a": data["periodo_a"],
-                    "inpc_a": float(data["inpc_a"]),
-                    "fecha_inpc_b": data["fecha_b"].date(),
-                    "periodo_b": data["periodo_b"],
-                    "inpc_b": float(data["inpc_b"]),
-                    "pk": pk_value
-                }
-                
-                _upsert_tabla_dinamica(
-                    db_proyecto, 
-                    pk_name, 
-                    pk_value, 
-                    data_dict,
-                    cols_dinamica
-                )
-                procesados += 1
-                
-            else:
-                codebar = _generar_codebar_completo(
-                    pk_value=str(pk_value),
-                    fecha_emision=fecha_emision_dt,
-                    id_documento=id_documento,
-                    visita=visita,
-                    identificador_documento=identificador_documento
-                )
-                
-                data_dict = {
-                    "codebar": codebar,
-                    "id_documento": id_documento,
-                    "visita": visita,
-                    "pmo": pmo,
-                    "fecha_emision": fecha_emision_dt,
-                    "id_notificador": id_notificador,
-                    "no_documento": nombre_documento,
-                    "pk": pk_value
-                }
-                
-                _upsert_tabla_dinamica(
-                    db_proyecto,
-                    pk_name,
-                    pk_value,
-                    data_dict,
-                    cols_dinamica
-                )
-                procesados += 1
-            
-            if procesados % batch_size == 0:
-                db_proyecto.commit()
-                
-        except Exception as e:
-            errores.append(f"Fila {pk_value}: {str(e)[:100]}")
-            db_proyecto.rollback()
-    
-    db_proyecto.commit()
-    
-    registrar_log(
-        db_global,
-        current_user.id,
-        "calcular_todas_filas",
-        f"Cálculo masivo en {proyecto_slug}: {procesados} filas, {len(errores)} errores. Modo INPC: {modo_inpc}",
-        proyecto.id
-    )
-    
-    return {
-        "success": procesados > 0,
-        "procesados": procesados,
-        "errores": errores[:50],
-        "total_errores": len(errores),
-        "modo_inpc": modo_inpc,
-        "mensaje": f"{procesados} filas calculadas, {len(errores)} errores"
-    }
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento
+                    )
+
+                    data_dict = {
+                        "codebar": codebar,
+                        "id_documento": id_documento,
+                        "visita": visita,
+                        "pmo": pmo,
+                        "fecha_emision": fecha_emision_dt,
+                        "id_notificador": id_notificador,
+                        "no_documento": nombre_documento,
+                        "pk": pk_value
+                    }
+
+                    _upsert_tabla_dinamica(
+                        db_proyecto,
+                        pk_name,
+                        pk_value,
+                        data_dict,
+                        cols_dinamica
+                    )
+                    procesados += 1
+
+                if procesados % batch_size == 0:
+                    db_proyecto.commit()
+
+            except Exception as e:
+                errores.append(f"Fila {pk_value}: {str(e)[:100]}")
+                db_proyecto.rollback()
+
+        db_proyecto.commit()
+
+        registrar_log(
+            db_global,
+            current_user.id,
+            "calcular_todas_filas",
+            f"Cálculo masivo en {proyecto_slug}: {procesados} filas, {len(errores)} errores. Modo INPC: {modo_inpc}",
+            proyecto.id
+        )
+
+        return {
+            "success": procesados > 0,
+            "procesados": procesados,
+            "errores": errores[:50],
+            "total_errores": len(errores),
+            "modo_inpc": modo_inpc,
+            "mensaje": f"{procesados} filas calculadas, {len(errores)} errores"
+        }
+    finally:
+        db_gen.close()
 
 
 # ============================================================
@@ -1779,28 +1826,28 @@ def get_catalogo_documentos(
     db_global: Session = Depends(get_global_db),
 ):
     from sqlalchemy import text
-    
+
     check_project_access(proyecto_slug, current_user, db_global)
-    
+
     proyecto = db_global.execute(
         text("SELECT id FROM proyectos WHERE slug = :slug"),
         {"slug": proyecto_slug}
     ).first()
-    
+
     if not proyecto:
         return []
-    
+
     try:
         rows = db_global.execute(
             text("""
                 SELECT id_documento, nombre_documento, identificador_documento
-                FROM catalogo_documento 
+                FROM catalogo_documento
                 WHERE id_proyecto = :pid AND activo = 1
                 ORDER BY nombre_documento
             """),
             {"pid": proyecto.id}
         ).fetchall()
-        
+
         return [
             {
                 "id": r.id_documento,
@@ -1821,28 +1868,28 @@ def get_catalogo_notificadores(
     db_global: Session = Depends(get_global_db),
 ):
     from sqlalchemy import text
-    
+
     check_project_access(proyecto_slug, current_user, db_global)
-    
+
     proyecto = db_global.execute(
         text("SELECT id FROM proyectos WHERE slug = :slug"),
         {"slug": proyecto_slug}
     ).first()
-    
+
     if not proyecto:
         return []
-    
+
     try:
         rows = db_global.execute(
             text("""
                 SELECT id_notificador, nombre, acronimo
-                FROM catalogo_notificadores 
+                FROM catalogo_notificadores
                 WHERE id_proyecto = :pid AND activo = 1
                 ORDER BY nombre
             """),
             {"pid": proyecto.id}
         ).fetchall()
-        
+
         return [
             {
                 "id": r.id_notificador,

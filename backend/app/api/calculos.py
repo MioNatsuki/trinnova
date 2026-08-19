@@ -14,6 +14,7 @@ from app.services.inpc_service import INPCService
 from app.services.numero_a_letras import numero_a_letras
 from app.db.router import get_project_db
 from app.services.log_service import registrar_log
+from app.services.codebar_service import CodebarService
 
 router = APIRouter()
 
@@ -155,12 +156,11 @@ def _calcular_campos_estado(
     
     # Generar código de barras
     pk_value = fila.get('credito', str(fila.get('pk_value', '')))
-    codebar = _generar_codebar(
-        pk_value,
-        fecha_emision,
-        id_documento=fila.get('id_documento'),
+    codebar = CodebarService.generar_codebar_completo(
+        pk_value=str(pk_value),
+        fecha_emision=fecha_emision,
         visita=visita,
-        identificador_documento=identificador_documento 
+        identificador_documento=identificador_documento
     )
     
     # Obtener próximo INPC (el más reciente disponible)
@@ -172,13 +172,14 @@ def _calcular_campos_estado(
         "proximo_inpc": proximo_inpc,
         "fecha_inpc_a": data["fecha_a"].strftime('%Y-%m-%d') if data["fecha_a"] else None,
         "periodo_a": data["periodo_a"],
-        "inpc_a": float(data["inpc_a"]),
+        # REMOVIDOS LOS float():
+        "inpc_a": data["inpc_a"],
         "fecha_inpc_b": data["fecha_b"].strftime('%Y-%m-%d') if data["fecha_b"] else None,
         "periodo_b": data["periodo_b"],
-        "inpc_b": float(data["inpc_b"]),
-        "factor_actualizacion": float(data["factor_actualizacion"]),
-        "importe_actualizacion": float(data["importe_actualizacion"]),
-        "total_multa_actualizada": float(data["total_actualizado"]),
+        "inpc_b": data["inpc_b"],
+        "factor_actualizacion": data["factor_actualizacion"],
+        "importe_actualizacion": data["importe_actualizacion"],
+        "total_multa_actualizada": data["total_actualizado"],
         "importe_letra": importe_letra,
         "codebar": codebar,
         "fecha_emision": fecha_emision.date().isoformat() if fecha_emision else None,
@@ -223,11 +224,11 @@ def _calcular_campos_apa_tlajomulco(
     
     # Generar código de barras
     pk_value = fila.get('clave_apa', str(fila.get('pk_value', '')))
-    codebar = _generar_codebar(
-        pk_value,
-        fecha_emision,
-        id_documento=fila.get('id_documento'),
-        visita=visita
+    codebar = CodebarService.generar_codebar_completo(
+        pk_value=str(pk_value),
+        fecha_emision=fecha_emision,
+        visita=visita,
+        identificador_documento=identificador_documento
     )
     
     result.update({
@@ -254,11 +255,11 @@ def _calcular_campos_genericos(
     
     # Generar código de barras
     pk_value = str(fila.get('pk_value', ''))
-    codebar = _generar_codebar(
-        pk_value,
-        fecha_emision,
-        id_documento=fila.get('id_documento'),
-        visita=visita
+    codebar = CodebarService.generar_codebar_completo(
+        pk_value=str(pk_value),
+        fecha_emision=fecha_emision,
+        visita=visita,
+        identificador_documento=identificador_documento
     )
     
     result.update({
@@ -329,16 +330,16 @@ def calcular_actualizacion(
         # Convertir Decimal a float para JSON
         data = resultado["data"]
         data_serializable = {
-            "importe_original": float(data["importe_original"]),
+            "importe_original": data["importe_original"],
             "fecha_notificacion": data["fecha_notificacion"].isoformat(),
             "fecha_requerimiento": data["fecha_requerimiento"].isoformat(),
             "periodo_notificacion": data["periodo_notificacion"],
             "periodo_requerimiento": data["periodo_requerimiento"],
-            "inpc_notificacion": float(data["inpc_notificacion"]),
-            "inpc_requerimiento": float(data["inpc_requerimiento"]),
-            "factor_actualizacion": float(data["factor_actualizacion"]),
-            "importe_actualizacion": float(data["importe_actualizacion"]),
-            "total_actualizado": float(data["total_actualizado"])
+            "inpc_notificacion": data["inpc_notificacion"],
+            "inpc_requerimiento": data["inpc_requerimiento"],
+            "factor_actualizacion": data["factor_actualizacion"],
+            "importe_actualizacion": data["importe_actualizacion"],
+            "total_actualizado": data["total_actualizado"]
         }
         
         return CalcularINPCResponse(success=True, data=data_serializable)

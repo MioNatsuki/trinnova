@@ -6,6 +6,7 @@ from sqlalchemy import text
 from typing import Optional, Dict, Any, List
 import json
 import logging
+import secrets as secrets_module  # para comparación segura de secretos (evita timing attacks)
 
 from app.db.session import get_global_db
 from app.core.dependencies import get_current_active_user, check_project_access
@@ -20,12 +21,12 @@ import shutil
 import os
 from datetime import datetime, timedelta
 import zipfile
-from dictutil import func
 
 from app.services.monitoreo_service import MonitoreoService
 
 import tempfile
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ def _calcular_hash_datos(registros: List[Dict]) -> str:
     """
     # Ordenar por PK para consistencia
     sorted_data = sorted(registros, key=lambda x: str(x.get('pk', '')))
-    
+
     # Crear string con los datos relevantes
     data_str = ""
     for reg in sorted_data:
@@ -140,7 +141,7 @@ def _calcular_hash_datos(registros: List[Dict]) -> str:
         for field in fields:
             if field in reg:
                 data_str += f"{field}:{reg[field]}|"
-    
+
     return hashlib.sha256(data_str.encode()).hexdigest()
 
 def _verificar_integridad_checkpoint(
@@ -154,27 +155,27 @@ def _verificar_integridad_checkpoint(
     Retorna True si son consistentes, False si cambiaron.
     """
     from sqlalchemy import text
-    
+
     if not checkpoint.get('hash_datos'):
         return True  # Si no hay hash, asumir que es válido
-    
+
     # Obtener los datos actuales para el rango del checkpoint
     ultimo_pk = checkpoint.get('ultimo_pk')
     if not ultimo_pk:
         return True
-    
+
     query = text(f"""
-        SELECT * FROM tabla_analisis 
+        SELECT * FROM tabla_analisis
         WHERE `{pk}` <= :ultimo_pk
         ORDER BY `{pk}` ASC
     """)
-    
+
     result = db_proyecto.execute(query, {"ultimo_pk": ultimo_pk})
     registros = [dict(r._mapping) for r in result]
-    
+
     # Recalcular hash y comparar
     hash_actual = _calcular_hash_datos(registros)
-    
+
     return hash_actual == checkpoint.get('hash_datos')
 
 def _get_pk_name(proyecto_slug: str) -> str:
@@ -193,15 +194,15 @@ def _calcular_tiempo_estimado(procesados: int, total: int, started_at: datetime)
     """Calcula el tiempo estimado restante basado en el progreso actual"""
     if procesados == 0 or total == 0:
         return None
-    
+
     tiempo_transcurrido = (datetime.now() - started_at).total_seconds()
     velocidad = procesados / tiempo_transcurrido if tiempo_transcurrido > 0 else 0
-    
+
     if velocidad == 0:
         return None
-    
+
     tiempo_restante = (total - procesados) / velocidad
-    
+
     if tiempo_restante < 60:
         return f"~{int(tiempo_restante)} segundos"
     elif tiempo_restante < 3600:
@@ -223,11 +224,11 @@ def _get_job_directory(
     if base_path is None:
         from app.core.config import settings
         base_path = Path(settings.EMISIONES_PATH)
-    
+
     ahora = datetime.now()
     year = ahora.strftime("%Y")
     month = ahora.strftime("%m")
-    
+
     job_dir = base_path / proyecto_slug / year / month / f"job_{job_id}"
     return job_dir
 
@@ -259,7 +260,7 @@ def _obtener_manifiesto_job(job_dir: Path) -> Dict:
             "tamaño_total_kb": 0,
             "archivos": []
         }
-    
+
     pdf_files = list(job_dir.glob("*.pdf"))
     manifest = {
         "existe": True,
@@ -269,19 +270,19 @@ def _obtener_manifiesto_job(job_dir: Path) -> Dict:
         "fecha_creacion": None,
         "ultima_modificacion": None
     }
-    
+
     # Obtener estadísticas
     total_size = 0
     for pdf in sorted(pdf_files):
         stat = pdf.stat()
         total_size += stat.st_size
-        
+
         # Extraer orden y PK del nombre
         name = pdf.stem
         parts = name.split(" - ", 1)
         orden = int(parts[0]) if parts[0].isdigit() else 0
         pk = parts[1] if len(parts) > 1 else name
-        
+
         manifest["archivos"].append({
             "nombre": pdf.name,
             "orden": orden,
@@ -290,14 +291,14 @@ def _obtener_manifiesto_job(job_dir: Path) -> Dict:
             "tamaño_kb": round(stat.st_size / 1024, 2),
             "fecha_creacion": datetime.fromtimestamp(stat.st_ctime).isoformat()
         })
-    
+
     manifest["tamaño_total_kb"] = round(total_size / 1024, 2)
-    
+
     # Obtener fechas del directorio
     dir_stat = job_dir.stat()
     manifest["fecha_creacion"] = datetime.fromtimestamp(dir_stat.st_ctime).isoformat()
     manifest["ultima_modificacion"] = datetime.fromtimestamp(dir_stat.st_mtime).isoformat()
-    
+
     return manifest
 
 def _calcular_espacio_disponible(ruta: Path) -> float:
@@ -319,10 +320,10 @@ def _verificar_espacio_suficiente(
     """
     espacio_disponible_kb = _calcular_espacio_disponible(ruta)
     espacio_necesario_kb = archivos_estimados * tamaño_promedio_kb
-    
+
     # Dejar 10% de margen
     espacio_necesario_kb *= 1.1
-    
+
     return espacio_disponible_kb > espacio_necesario_kb
 
 def _limpiar_archivos_temporales(temp_path: Path, dias_antiguedad: int = 7) -> int:
@@ -332,10 +333,10 @@ def _limpiar_archivos_temporales(temp_path: Path, dias_antiguedad: int = 7) -> i
     """
     if not temp_path.exists():
         return 0
-    
+
     eliminados = 0
     fecha_limite = datetime.now() - timedelta(days=dias_antiguedad)
-    
+
     for item in temp_path.glob("*"):
         try:
             if item.is_file():
@@ -358,8 +359,38 @@ def _limpiar_archivos_temporales(temp_path: Path, dias_antiguedad: int = 7) -> i
                     pass
         except Exception as e:
             logger.warning(f"Error limpiando {item}: {e}")
-    
+
     return eliminados
+
+# ============================================================
+# HELPERS DE AUTENTICACIÓN DE WORKERS (implementación del TODO)
+# ============================================================
+
+def _worker_esta_registrado(worker_id: str) -> bool:
+    """
+    Verifica que el worker_id tenga un registro vigente en Redis,
+    generado únicamente por /workers/register tras validar worker_secret.
+
+    Antes esto era un TODO ("por ahora solo validamos token"): cualquier
+    usuario autenticado podía llamar a los endpoints de worker sin que el
+    sistema comprobara que quien llama es realmente un worker dado de alta.
+    Ahora se exige que exista la llave `worker:{worker_id}:auth`, que solo
+    se crea dentro de /workers/register después de validar el secreto.
+    """
+    from app.core.redis_client import redis_client
+    redis_conn = redis_client.connection
+    return redis_conn.exists(f"worker:{worker_id}:auth") == 1
+
+
+def _requerir_worker_registrado(worker_id: str) -> None:
+    if not worker_id or not _worker_esta_registrado(worker_id):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"El worker '{worker_id}' no está registrado o su registro expiró. "
+                "Debe llamar primero a POST /workers/register con un worker_secret válido."
+            ),
+        )
 
 # ============================================================
 # ENDPOINT: PREPARAR EMISIÓN
@@ -375,7 +406,7 @@ def preparar_emision(
 ):
     """
     Prepara una emisión masiva de documentos.
-    
+
     1. Valida que el proyecto y plantilla existen
     2. Cuenta los registros a procesar según los filtros
     3. Crea un job en la base de datos (status: pending)
@@ -383,57 +414,57 @@ def preparar_emision(
     5. Retorna el ID del job para seguimiento
     """
     from app.api.analisis import _info
-    
+
     # 1. VALIDAR ACCESO AL PROYECTO
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
+
     # 2. VALIDAR PLANTILLA
     plantilla = db_global.query(Plantilla).filter(
         Plantilla.id == request.id_plantilla,
         Plantilla.id_proyecto == proyecto.id,
         Plantilla.activa == True
     ).first()
-    
+
     if not plantilla:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Plantilla no encontrada o inactiva. ID: {request.id_plantilla}"
         )
-    
+
     # 3. OBTENER REGISTROS A PROCESAR
     db_proyecto = next(get_project_db(proyecto_slug))
     info = _info(proyecto_slug)
     pk = info["pk"]
-    
+
     condiciones = ["viabilidad = 'viable'"]
     params = {}
-    
+
     if request.filtros.get("programa") and request.filtros["programa"] != "todos":
         condiciones.append("programa = :programa")
         params["programa"] = request.filtros["programa"]
-    
+
     if request.filtros.get("ids") and isinstance(request.filtros["ids"], list):
         placeholders = ", ".join([f":id{i}" for i in range(len(request.filtros["ids"]))])
         condiciones.append(f"{pk} IN ({placeholders})")
         for i, id_val in enumerate(request.filtros["ids"]):
             params[f"id{i}"] = id_val
-    
+
     if request.filtros.get("cuenta_inicial") and request.filtros.get("cuenta_final"):
         condiciones.append(f"{pk} BETWEEN :inicio AND :fin")
         params["inicio"] = request.filtros["cuenta_inicial"]
         params["fin"] = request.filtros["cuenta_final"]
-    
+
     where = " AND ".join(condiciones)
-    
+
     count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
     total = db_proyecto.execute(count_query, params).first().total
-    
+
     if total == 0:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="No hay registros viables para emitir con los filtros seleccionados"
         )
-    
+
     # 4. CREAR JOB EN LA BASE DE DATOS
     job = EmisionJob(
         id_proyecto=proyecto.id,
@@ -448,11 +479,11 @@ def preparar_emision(
         filtros=json.dumps(request.filtros),
         created_by=current_user.id
     )
-    
+
     db_global.add(job)
     db_global.commit()
     db_global.refresh(job)
-    
+
     # 5. REGISTRAR EN LOG
     registrar_log(
         db_global,
@@ -461,19 +492,17 @@ def preparar_emision(
         f"Emisión preparada: {total} registros, job_id={job.id}, plantilla={plantilla.nombre}",
         proyecto.id
     )
-    
+
     # 6. PONER EN COLA DE REDIS
     from app.core.redis_client import push_job
     publicado = push_job(job.id)
-    
+
     if not publicado:
-        import logging
-        logger = logging.getLogger("TrinnovaAPI")
         logger.warning(f"Job {job.id} creado pero NO publicado en Redis")
-    
+
     from app.core.redis_client import set_job_status
     set_job_status(
-        job.id, 
+        job.id,
         'pending',
         {
             'total': total,
@@ -481,7 +510,7 @@ def preparar_emision(
             'usuario': current_user.nombre
         }
     )
-    
+
     return PrepararEmisionResponse(
         success=True,
         job_id=job.id,
@@ -502,25 +531,25 @@ def get_job_estado(
 ):
     """Obtiene el estado de un job de emisión."""
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     if job.id_usuario != current_user.id and current_user.rol.nombre != "superadmin":
         raise HTTPException(status_code=403, detail="No tienes acceso a este job")
-    
+
     progreso = 0
     if job.total_registros > 0:
         progreso = round((job.procesados / job.total_registros) * 100, 1)
-    
+
     estimado = None
     if job.status in ('processing', 'pending') and job.started_at:
         estimado = _calcular_tiempo_estimado(
-            job.procesados, 
-            job.total_registros, 
+            job.procesados,
+            job.total_registros,
             job.started_at
         )
-    
+
     return JobEstadoResponse(
         id=job.id,
         status=job.status,
@@ -549,23 +578,23 @@ def cancelar_job(
 ):
     """Cancela un job de emisión en progreso."""
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     if job.id_usuario != current_user.id and current_user.rol.nombre != "superadmin":
         raise HTTPException(status_code=403, detail="No tienes acceso a este job")
-    
+
     if job.status not in ('pending', 'processing'):
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"El job no se puede cancelar porque está en estado '{job.status}'"
         )
-    
+
     job.status = 'cancelled'
     job.completed_at = datetime.now()
     db_global.commit()
-    
+
     registrar_log(
         db_global,
         current_user.id,
@@ -573,7 +602,7 @@ def cancelar_job(
         f"Emisión cancelada: job_id={job_id}, usuario={current_user.nombre}",
         job.id_proyecto
     )
-    
+
     return CancelarEmisionResponse(
         success=True,
         message=f"Job {job_id} cancelado correctamente"
@@ -594,12 +623,12 @@ def get_plantillas_emision(
     Obtiene las plantillas disponibles para emisión en un proyecto.
     """
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
+
     plantillas = db_global.query(Plantilla).filter(
         Plantilla.id_proyecto == proyecto.id,
         Plantilla.activa == True
     ).all()
-    
+
     return [
         {
             "id": p.id,
@@ -632,27 +661,27 @@ def get_estadisticas_emision(
 ):
     """Obtiene estadísticas para emisión."""
     from sqlalchemy import text
-    
+
     check_project_access(proyecto_slug, current_user, db_global)
     db_proyecto = next(get_project_db(proyecto_slug))
-    
+
     try:
         total_viables = db_proyecto.execute(
             text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'viable'")
         ).first().total
-        
+
         total_no_viables = db_proyecto.execute(
             text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'no_viable'")
         ).first().total
-        
+
         total_pendientes = db_proyecto.execute(
             text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'pendiente'")
         ).first().total
-        
+
         total_general = db_proyecto.execute(
             text("SELECT COUNT(*) AS total FROM tabla_analisis")
         ).first().total
-        
+
     except Exception as e:
         return {
             "total_viables": 0,
@@ -662,7 +691,7 @@ def get_estadisticas_emision(
             "mensaje": "La tabla de análisis aún no existe. Genera el análisis primero.",
             "error": str(e)
         }
-    
+
     return {
         "total_viables": total_viables,
         "total_no_viables": total_no_viables,
@@ -688,62 +717,62 @@ def get_cuentas_emision(
     """Obtiene cuentas para selección en emisión."""
     from sqlalchemy import text
     from app.api.analisis import _info
-    
+
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
     db_proyecto = next(get_project_db(proyecto_slug))
-    
+
     conditions = []
     params = {}
-    
+
     if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
         conditions.append("viabilidad = :viabilidad")
         params["viabilidad"] = viabilidad
-    
+
     if programa and programa != "todos":
         conditions.append("programa = :programa")
         params["programa"] = programa
-    
+
     if busqueda:
         search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
         parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
         conditions.append("(" + " OR ".join(parts) + ")")
         params["busqueda"] = f"%{busqueda}%"
-    
+
     where = " AND ".join(conditions) if conditions else "1=1"
-    
+
     # Columnas válidas para ordenamiento
     try:
         cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
         cols_validas = {r[0] for r in cols_result}
     except Exception:
         cols_validas = set()
-    
+
     order_col = pk
     if sort_col and sort_col in cols_validas:
         order_col = sort_col
     order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
-    
+
     # Contar total
     count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
     total = db_proyecto.execute(count_query, params).first().total
-    
+
     # Obtener datos
     offset = (page - 1) * limit
     data_query = text(f"""
-        SELECT * FROM tabla_analisis 
-        WHERE {where} 
+        SELECT * FROM tabla_analisis
+        WHERE {where}
         ORDER BY `{order_col}` {order_dir}
         LIMIT {limit} OFFSET {offset}
     """)
     rows = db_proyecto.execute(data_query, params).fetchall()
-    
+
     # Procesar resultados
     result = []
     for r in rows:
         row_dict = dict(r._mapping)
-        
+
         # Adeudo
         adeudo_val = 0
         for col in info["col_adeudo"]:
@@ -755,7 +784,7 @@ def get_cuentas_emision(
                 except (TypeError, ValueError):
                     pass
         row_dict["_adeudo_display"] = adeudo_val
-        
+
         # Nombre
         nombre_val = ""
         for col in info["col_nombre"]:
@@ -764,7 +793,7 @@ def get_cuentas_emision(
                 nombre_val = str(v)
                 break
         row_dict["_nombre_display"] = nombre_val
-        
+
         # Calle
         calle_val = ""
         for col in info["col_calle"]:
@@ -773,9 +802,9 @@ def get_cuentas_emision(
                 calle_val = str(v)
                 break
         row_dict["_calle_display"] = calle_val
-        
+
         result.append(row_dict)
-    
+
     return {
         "rows": result,
         "total": total,
@@ -802,15 +831,15 @@ def listar_jobs_usuario(
     query = db_global.query(EmisionJob).filter(
         EmisionJob.id_usuario == current_user.id
     )
-    
+
     if status:
         query = query.filter(EmisionJob.status == status)
-    
+
     total = query.count()
     jobs = query.order_by(EmisionJob.created_at.desc()).offset(
         (page - 1) * limit
     ).limit(limit).all()
-    
+
     return {
         "jobs": [
             {
@@ -844,49 +873,51 @@ def get_pending_jobs(
 ):
     """
     Obtiene jobs pendientes para el worker.
-    
+
     Usa Redis como fuente de verdad para la cola.
+    - Verifica que el worker esté registrado (ver _requerir_worker_registrado)
     - Obtiene job_ids de Redis
     - Consulta BD para obtener detalles completos
     - Retorna solo jobs en estado 'pending'
     """
-    from app.core.redis_client import get_queue_length, pop_job
-    from sqlalchemy import text
-    
-    # Verificar que el worker está registrado
-    # TODO: Implementar registro de workers (por ahora solo validamos token)
-    
+    from app.core.redis_client import get_queue_length, redis_client
+
+    # Verificar que el worker está registrado.
+    # (Antes era un TODO: solo se validaba el token del usuario, no que
+    # quien llama sea realmente un worker dado de alta vía /workers/register.)
+    _requerir_worker_registrado(worker_id)
+
     # Obtener todos los job_ids de la cola de Redis
     queue_length = get_queue_length()
-    
+
     if queue_length == 0:
         return {"jobs": [], "total": 0}
-    
+
     # Obtener todos los jobs de la cola (sin removerlos)
     # Usamos LRANGE para ver la cola sin popear
-    redis_client = redis_client.connection
-    job_ids = redis_client.lrange("emision_jobs", 0, -1)
-    
+    redis_conn = redis_client.connection
+    job_ids = redis_conn.lrange("emision_jobs", 0, -1)
+
     jobs = []
     for job_id_str in job_ids:
         try:
             job_id = int(job_id_str)
-            
+
             # Obtener job de la BD
             job = db_global.query(EmisionJob).filter(
                 EmisionJob.id == job_id,
                 EmisionJob.status == 'pending'
             ).first()
-            
+
             if not job:
                 # Si el job ya no existe o no está pending, limpiar de Redis
-                redis_client.lrem("emision_jobs", 0, job_id_str)
+                redis_conn.lrem("emision_jobs", 0, job_id_str)
                 continue
-            
+
             # Obtener datos del proyecto y plantilla
             proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
             plantilla = db_global.query(Plantilla).filter(Plantilla.id == job.id_plantilla).first()
-            
+
             jobs.append({
                 "id": job.id,
                 "nombre_job": job.nombre_job,
@@ -903,14 +934,14 @@ def get_pending_jobs(
                 "filtros": job.filtros,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
             })
-            
+
         except ValueError:
             # Si no es un número válido, ignorar
             continue
         except Exception as e:
             logger.error(f"Error procesando job {job_id_str}: {e}")
             continue
-    
+
     return {
         "jobs": jobs,
         "total": len(jobs),
@@ -926,55 +957,60 @@ def claim_job(
 ):
     """
     Toma un job para procesarlo.
-    
+
     Flujo:
-    1. Verifica que el job existe y está en estado 'pending'
-    2. Lo marca como 'processing' en BD
-    3. Remueve el job de la cola de Redis
-    4. Retorna los datos del job al worker
+    1. Verifica que el worker esté registrado
+    2. Verifica que el job existe y está en estado 'pending'
+    3. Lo marca como 'processing' en BD
+    4. Remueve el job de la cola de Redis
+    5. Retorna los datos del job al worker
     """
     from app.core.redis_client import redis_client
-    
+
     worker_id = request.get("worker_id")
     job_id = request.get("job_id")
-    
+
     if not worker_id or not job_id:
         raise HTTPException(status_code=400, detail="Faltan worker_id o job_id")
-    
+
+    # Mismo control de registro que en /workers/pending: sin esto, cualquier
+    # usuario autenticado podía reclamar jobs ajenos haciéndose pasar por worker.
+    _requerir_worker_registrado(worker_id)
+
     # Obtener job
     job = db_global.query(EmisionJob).filter(
         EmisionJob.id == job_id,
         EmisionJob.status == 'pending'
     ).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado o ya fue tomado")
-    
+
     # Verificar que el job está en Redis (para evitar duplicados)
     redis_conn = redis_client.connection
     in_queue = redis_conn.lrem("emision_jobs", 0, str(job_id))
-    
+
     if in_queue == 0:
         # El job no está en la cola, podría estar siendo procesado
         raise HTTPException(status_code=409, detail="Job ya fue tomado por otro worker")
-    
+
     # Marcar como processing
     job.status = 'processing'
     job.started_at = datetime.now()
     job.ultimo_pk_procesado = None
     db_global.commit()
-    
+
     # Guardar en Redis que está siendo procesado
     redis_conn.setex(
         f"job:{job_id}:worker",
         3600,  # 1 hora
         worker_id
     )
-    
+
     # Obtener datos del proyecto y plantilla
     proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
     plantilla = db_global.query(Plantilla).filter(Plantilla.id == job.id_plantilla).first()
-    
+
     # Registrar log
     registrar_log(
         db_global,
@@ -983,7 +1019,7 @@ def claim_job(
         f"Job {job_id} tomado por worker {worker_id}",
         job.id_proyecto
     )
-    
+
     return {
         "success": True,
         "message": f"Job {job_id} tomado exitosamente",
@@ -1015,7 +1051,7 @@ def update_progress(
 ):
     """
     Actualiza el progreso de un job.
-    
+
     Recibe:
     - procesados: Número de registros procesados
     - ultimo_pk: Última PK procesada
@@ -1023,38 +1059,38 @@ def update_progress(
     - error_msg: Mensaje de error (opcional)
     """
     from app.core.redis_client import redis_client
-    
+
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Verificar que el worker tiene el job
     redis_conn = redis_client.connection
     current_worker = redis_conn.get(f"job:{job_id}:worker")
-    
+
     if current_worker and current_worker != worker_id:
         raise HTTPException(
             status_code=409,
             detail=f"Job está siendo procesado por otro worker: {current_worker}"
         )
-    
+
     # Actualizar campos
     if "procesados" in request:
         job.procesados = request["procesados"]
-    
+
     if "ultimo_pk" in request:
         job.ultimo_pk_procesado = request["ultimo_pk"]
-    
+
     if "status" in request:
         new_status = request["status"]
-        
+
         # Validar transiciones de estado
         valid_transitions = {
             'processing': ['processing', 'completed', 'failed', 'cancelled'],
             'pending': ['processing', 'cancelled'],
         }
-        
+
         if job.status in valid_transitions and new_status in valid_transitions.get(job.status, []):
             job.status = new_status
         elif job.status == 'processing' and new_status in ['completed', 'failed', 'cancelled']:
@@ -1064,7 +1100,7 @@ def update_progress(
                 status_code=400,
                 detail=f"Transición inválida: {job.status} -> {new_status}"
             )
-        
+
         # Si se completa o falla, actualizar fechas
         if new_status in ['completed', 'failed', 'cancelled']:
             job.completed_at = datetime.now()
@@ -1073,12 +1109,12 @@ def update_progress(
             # Actualizar checkpoint final
             if request.get("checkpoint_data"):
                 job.checkpoint_data = request["checkpoint_data"]
-    
+
     if "error_msg" in request:
         job.error_msg = request["error_msg"]
-    
+
     db_global.commit()
-    
+
     # Guardar progreso en Redis (para consultas rápidas)
     redis_conn.setex(
         f"job:{job_id}:progress",
@@ -1091,7 +1127,7 @@ def update_progress(
             "updated_at": datetime.now().isoformat()
         })
     )
-    
+
     return {
         "success": True,
         "message": f"Progreso actualizado: {job.procesados}/{job.total_registros}",
@@ -1113,55 +1149,68 @@ def upload_result(
 ):
     """
     Recibe la confirmación de que el worker completó el job.
-    
+
     NO recibe ZIP (cambio de paradigma).
     Solo registra la ruta local y el manifiesto.
     """
     from app.core.redis_client import redis_client
-    
+    from app.core.config import settings
+
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Verificar que el worker tiene el job
     redis_conn = redis_client.connection
     current_worker = redis_conn.get(f"job:{job_id}:worker")
-    
+
     if current_worker and current_worker != worker_id:
         raise HTTPException(
             status_code=409,
             detail=f"Job está siendo procesado por otro worker: {current_worker}"
         )
-    
+
     # Obtener datos del manifiesto
     manifest = request.get("manifest", {})
     ruta_local = manifest.get("ruta_local")
     total_generados = manifest.get("generados", 0)
     total_fallidos = manifest.get("fallidos", 0)
-    
+
     if not ruta_local:
         raise HTTPException(status_code=400, detail="Falta ruta_local en el manifiesto")
-    
+
+    # Validar que ruta_local esté contenida dentro de EMISIONES_PATH.
+    # Sin esto, un worker (o cualquiera que logre autenticarse como uno)
+    # podía apuntar a cualquier carpeta del servidor y luego listarla
+    # vía /workers/checkpoint/{job_id}/files.
+    base_emisiones = Path(settings.EMISIONES_PATH).resolve()
+    ruta_resuelta = Path(ruta_local).resolve()
+    if base_emisiones not in ruta_resuelta.parents and ruta_resuelta != base_emisiones:
+        raise HTTPException(
+            status_code=400,
+            detail="ruta_local debe estar dentro del directorio de emisiones configurado",
+        )
+
     # Actualizar job
     job.status = 'completed'
     job.completed_at = datetime.now()
-    job.ruta_zip = ruta_local  # Ahora es la ruta local, no un ZIP
+    job.ruta_zip = str(ruta_resuelta)  # Ahora es la ruta local, no un ZIP
     job.procesados = total_generados
-    
+
     # Guardar manifiesto completo en checkpoint_data
     job.checkpoint_data = {
         "manifest": manifest,
         "worker_id": worker_id,
         "completed_at": datetime.now().isoformat()
     }
-    
+
     db_global.commit()
-    
+
     # Limpiar Redis
     redis_conn.delete(f"job:{job_id}:worker")
     redis_conn.delete(f"job:{job_id}:progress")
-    
+
     # Registrar log
     registrar_log(
         db_global,
@@ -1170,12 +1219,12 @@ def upload_result(
         f"Job {job_id} completado por worker {worker_id}: {total_generados} PDFs generados",
         job.id_proyecto
     )
-    
+
     return {
         "success": True,
         "message": f"Job {job_id} completado exitosamente",
         "job_id": job_id,
-        "ruta_local": ruta_local,
+        "ruta_local": str(ruta_resuelta),
         "generados": total_generados,
         "fallidos": total_fallidos
     }
@@ -1190,15 +1239,15 @@ def worker_heartbeat(
     Recibe heartbeat de los workers para monitoreo.
     """
     from app.core.redis_client import redis_client
-    
+
     worker_id = request.get("worker_id")
     status = request.get("status", "running")
     timestamp = request.get("timestamp", datetime.now().isoformat())
     current_job = request.get("current_job")
-    
+
     if not worker_id:
         raise HTTPException(status_code=400, detail="Falta worker_id")
-    
+
     # Guardar en Redis con expiración
     redis_conn = redis_client.connection
     redis_conn.setex(
@@ -1212,7 +1261,7 @@ def worker_heartbeat(
             "last_seen": datetime.now().isoformat()
         })
     )
-    
+
     # También guardar en un hash para listar workers activos
     redis_conn.hset(
         "workers:active",
@@ -1223,7 +1272,7 @@ def worker_heartbeat(
             "current_job": current_job
         })
     )
-    
+
     return {
         "success": True,
         "message": f"Heartbeat recibido de {worker_id}",
@@ -1240,13 +1289,13 @@ def save_checkpoint(
     Guarda un checkpoint de un job.
     """
     from app.core.redis_client import redis_client
-    
+
     job_id = request.get("job_id")
     checkpoint_data = request.get("checkpoint", {})
-    
+
     if not job_id:
         raise HTTPException(status_code=400, detail="Falta job_id")
-    
+
     # Guardar en Redis
     redis_conn = redis_client.connection
     redis_conn.setex(
@@ -1257,7 +1306,7 @@ def save_checkpoint(
             "saved_at": datetime.now().isoformat()
         })
     )
-    
+
     # También actualizar en BD
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
     if job:
@@ -1267,7 +1316,7 @@ def save_checkpoint(
             "last_checkpoint": datetime.now().isoformat()
         }
         db_global.commit()
-    
+
     return {
         "success": True,
         "message": f"Checkpoint guardado para job {job_id}",
@@ -1286,28 +1335,28 @@ def get_checkpoint(
     Obtiene el checkpoint de un job.
     """
     from app.core.redis_client import redis_client
-    
+
     # Primero intentar desde Redis
     redis_conn = redis_client.connection
     checkpoint_data = redis_conn.get(f"job:{job_id}:checkpoint")
-    
+
     if checkpoint_data:
         return {
             "success": True,
             "job_id": job_id,
             "checkpoint": json.loads(checkpoint_data)
         }
-    
+
     # Si no está en Redis, intentar desde BD
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
-    
+
     if job and job.checkpoint_data:
         return {
             "success": True,
             "job_id": job_id,
             "checkpoint": job.checkpoint_data
         }
-    
+
     return {
         "success": False,
         "job_id": job_id,
@@ -1325,10 +1374,10 @@ def get_active_workers(
     Obtiene la lista de workers activos.
     """
     from app.core.redis_client import redis_client
-    
+
     redis_conn = redis_client.connection
     workers = redis_conn.hgetall("workers:active")
-    
+
     result = []
     for worker_id, data in workers.items():
         try:
@@ -1339,7 +1388,7 @@ def get_active_workers(
             })
         except:
             continue
-    
+
     return {
         "workers": result,
         "total": len(result),
@@ -1355,26 +1404,55 @@ def register_worker(
     """
     Registra un worker y devuelve un token JWT.
     Usa un usuario de servicio preconfigurado.
+
+    IMPLEMENTACIÓN DEL TODO: antes este endpoint no comparaba worker_secret
+    contra ningún valor de referencia (el comentario decía "opcional"), así
+    que cualquiera podía llamarlo sin credenciales y obtener un token válido
+    de 24 horas para la cuenta de servicio. Ahora se exige que coincida con
+    settings.WORKER_SECRET, usando comparación de tiempo constante.
     """
-    from app.core.security import create_access_token, verify_password
+    from app.core.security import create_access_token
+    from app.core.config import settings
     from app.models.global_models import Usuario
-    
+
+    if not worker_id.startswith("worker_"):
+        raise HTTPException(status_code=403, detail="ID de worker inválido")
+
+    # settings.WORKER_SECRET debe definirse en core/config.py, ver nota al
+    # final de este archivo. Si no está configurado, el registro se rechaza
+    # por completo: nunca se debe aceptar un secreto vacío como válido.
+    secreto_configurado = getattr(settings, "WORKER_SECRET", "") or ""
+    if not secreto_configurado:
+        logger.error(
+            "WORKER_SECRET no está configurado en el servidor; "
+            "se rechaza el registro de workers hasta que se defina."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Registro de workers no disponible: falta configuración del servidor.",
+        )
+
+    if not secrets_module.compare_digest(worker_secret, secreto_configurado):
+        logger.warning(f"Intento de registro de worker '{worker_id}' con secreto inválido")
+        raise HTTPException(status_code=403, detail="Secreto de worker inválido")
+
     # Buscar usuario de servicio por correo
     service_user = db_global.query(Usuario).filter(
         Usuario.correo == "worker@trinnova.local"
     ).first()
-    
+
     if not service_user:
         raise HTTPException(
             status_code=404,
             detail="Usuario de servicio no configurado. Contacta al administrador."
         )
-    
-    # Verificar secreto (opcional - si quieres seguridad adicional)
-    # Por ahora, solo verificamos que el worker_id sea válido
-    if not worker_id.startswith("worker_"):
-        raise HTTPException(status_code=403, detail="ID de worker inválido")
-    
+
+    if not service_user.activo:
+        raise HTTPException(
+            status_code=403,
+            detail="El usuario de servicio del worker está inactivo."
+        )
+
     # Generar token para el worker
     token = create_access_token(
         data={
@@ -1383,20 +1461,23 @@ def register_worker(
             "worker_id": worker_id
         }
     )
-    
-    # Registrar worker activo en Redis
+
+    # Registrar worker activo en Redis. Esta llave es la que ahora consulta
+    # _worker_esta_registrado() antes de permitir /workers/pending y /workers/claim.
     from app.core.redis_client import redis_client
     redis_conn = redis_client.connection
     redis_conn.setex(
         f"worker:{worker_id}:auth",
-        86400,  # 24 horas
+        86400,  # 24 horas, igual que la vigencia del token emitido
         json.dumps({
             "worker_id": worker_id,
             "user_id": service_user.id,
             "registered_at": datetime.now().isoformat()
         })
     )
-    
+
+    logger.info(f"Worker '{worker_id}' registrado correctamente")
+
     return {
         "success": True,
         "worker_id": worker_id,
@@ -1417,20 +1498,20 @@ def verify_checkpoint(
     """
     from app.core.redis_client import redis_client
     from app.api.analisis import _info
-    
+
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Obtener proyecto
     proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
     if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    
+
     # Obtener checkpoint
     redis_conn = redis_client.connection
     checkpoint_data = redis_conn.get(f"job:{job_id}:checkpoint")
-    
+
     if not checkpoint_data:
         # Intentar desde BD
         if job.checkpoint_data:
@@ -1440,14 +1521,14 @@ def verify_checkpoint(
                 "success": False,
                 "mensaje": "No hay checkpoint para este job"
             }
-    
+
     checkpoint = json.loads(checkpoint_data)
-    
+
     # Obtener conexión al proyecto
     db_proyecto = next(get_project_db(proyecto.slug))
     info = _info(proyecto.slug)
     pk = info["pk"]
-    
+
     # Verificar integridad
     es_valido = _verificar_integridad_checkpoint(
         db_proyecto,
@@ -1455,17 +1536,16 @@ def verify_checkpoint(
         proyecto.slug,
         pk
     )
-    
+
     # Contar archivos existentes (si hay ruta local)
     archivos_existentes = 0
     archivos_esperados = checkpoint.get('procesados', 0)
-    
+
     if job.ruta_zip:
-        import os
         job_path = Path(job.ruta_zip)
         if job_path.exists():
             archivos_existentes = len(list(job_path.glob("*.pdf")))
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1490,27 +1570,29 @@ def restore_from_checkpoint(
     El worker llama a este endpoint cuando se reinicia.
     """
     from app.core.redis_client import redis_client
-    
+
     worker_id = request.get("worker_id")
-    
+
     if not worker_id:
         raise HTTPException(status_code=400, detail="Falta worker_id")
-    
+
+    _requerir_worker_registrado(worker_id)
+
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Verificar que el job está en estado processing o pending
     if job.status not in ['processing', 'pending']:
         raise HTTPException(
             status_code=400,
             detail=f"No se puede restaurar un job en estado '{job.status}'"
         )
-    
+
     # Obtener checkpoint
     redis_conn = redis_client.connection
     checkpoint_data = redis_conn.get(f"job:{job_id}:checkpoint")
-    
+
     if not checkpoint_data:
         if job.checkpoint_data:
             checkpoint_data = json.dumps(job.checkpoint_data)
@@ -1521,9 +1603,9 @@ def restore_from_checkpoint(
                 "desde_cero": True,
                 "procesados": 0
             }
-    
+
     checkpoint = json.loads(checkpoint_data)
-    
+
     # Verificar integridad antes de restaurar
     proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
     if proyecto:
@@ -1531,14 +1613,14 @@ def restore_from_checkpoint(
         from app.api.analisis import _info
         info = _info(proyecto.slug)
         pk = info["pk"]
-        
+
         es_valido = _verificar_integridad_checkpoint(
             db_proyecto,
             checkpoint,
             proyecto.slug,
             pk
         )
-        
+
         if not es_valido:
             # Los datos cambiaron, no se puede recuperar
             return {
@@ -1547,24 +1629,24 @@ def restore_from_checkpoint(
                 "desde_cero": True,
                 "procesados": 0
             }
-    
+
     # Actualizar el job con los datos del checkpoint
     job.procesados = checkpoint.get('procesados', 0)
     job.ultimo_pk_procesado = checkpoint.get('ultimo_pk')
-    
+
     # Si hay un último orden, actualizarlo
     if checkpoint.get('ultimo_orden'):
         job.orden_impresion_inicial = checkpoint.get('ultimo_orden') + 1
-    
+
     # Guardar que el worker retomó el job
     redis_conn.setex(
         f"job:{job_id}:worker",
         3600,
         worker_id
     )
-    
+
     db_global.commit()
-    
+
     registrar_log(
         db_global,
         current_user.id,
@@ -1572,7 +1654,7 @@ def restore_from_checkpoint(
         f"Job {job_id} restaurado desde checkpoint: {job.procesados} registros procesados",
         job.id_proyecto
     )
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1595,12 +1677,16 @@ def get_checkpoint_files(
     Obtiene el estado de los archivos generados para un job.
     Útil para recuperación parcial.
     """
-    import os
-    
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
+    # Control de propiedad: antes cualquier usuario autenticado podía
+    # consultar archivos de jobs de otros usuarios/proyectos solo con
+    # adivinar el job_id.
+    if job.id_usuario != current_user.id and current_user.rol.nombre != "superadmin":
+        raise HTTPException(status_code=403, detail="No tienes acceso a este job")
+
     if not job.ruta_zip:
         return {
             "success": True,
@@ -1608,7 +1694,7 @@ def get_checkpoint_files(
             "files_exist": False,
             "mensaje": "El job no tiene archivos generados aún"
         }
-    
+
     job_path = Path(job.ruta_zip)
     if not job_path.exists():
         return {
@@ -1617,11 +1703,11 @@ def get_checkpoint_files(
             "files_exist": False,
             "mensaje": "La carpeta del job no existe"
         }
-    
+
     # Obtener archivos PDF
     pdf_files = list(job_path.glob("*.pdf"))
     total_pdfs = len(pdf_files)
-    
+
     # Obtener metadatos de los archivos
     file_info = []
     for pdf in sorted(pdf_files):
@@ -1632,7 +1718,7 @@ def get_checkpoint_files(
             orden = int(parts[0]) if parts[0].isdigit() else 0
             pk = parts[1] if len(parts) > 1 else name
             size = pdf.stat().st_size
-            
+
             file_info.append({
                 "nombre": pdf.name,
                 "orden": orden,
@@ -1642,7 +1728,7 @@ def get_checkpoint_files(
             })
         except Exception:
             continue
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1663,20 +1749,20 @@ def clear_checkpoint(
     Limpia el checkpoint de un job (útil para reiniciar desde cero).
     """
     from app.core.redis_client import redis_client
-    
+
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Limpiar Redis
     redis_conn = redis_client.connection
     redis_conn.delete(f"job:{job_id}:checkpoint")
     redis_conn.delete(f"job:{job_id}:worker")
-    
+
     # Limpiar BD
     job.checkpoint_data = None
     db_global.commit()
-    
+
     registrar_log(
         db_global,
         current_user.id,
@@ -1684,7 +1770,7 @@ def clear_checkpoint(
         f"Checkpoint del job {job_id} eliminado",
         job.id_proyecto
     )
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1702,21 +1788,21 @@ def get_job_archivos(
     """
     # Verificar acceso
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
+
     job = db_global.query(EmisionJob).filter(
         EmisionJob.id == job_id,
         EmisionJob.id_proyecto == proyecto.id
     ).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Obtener directorio del job
     from app.core.config import settings
     job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
-    
+
     manifest = _obtener_manifiesto_job(job_dir)
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1746,49 +1832,49 @@ def limpiar_archivos_job(
     """
     # Verificar acceso
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
+
     job = db_global.query(EmisionJob).filter(
         EmisionJob.id == job_id,
         EmisionJob.id_proyecto == proyecto.id
     ).first()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    
+
     # Verificar estado
     if job.status not in ['completed', 'failed', 'cancelled']:
         raise HTTPException(
             status_code=400,
             detail=f"No se pueden eliminar archivos de un job en estado '{job.status}'"
         )
-    
+
     if not confirmar:
         raise HTTPException(
             status_code=400,
             detail="Confirmar eliminación con ?confirmar=true"
         )
-    
+
     # Obtener directorio
     from app.core.config import settings
     job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
-    
+
     if not job_dir.exists():
         return {
             "success": True,
             "mensaje": "El directorio del job no existe"
         }
-    
+
     # Contar archivos antes de eliminar
     pdf_files = list(job_dir.glob("*.pdf"))
     total_archivos = len(pdf_files)
     tamaño_total = sum(f.stat().st_size for f in pdf_files) / 1024  # KB
-    
+
     # Eliminar directorio
     try:
         shutil.rmtree(job_dir)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error eliminando archivos: {e}")
-    
+
     # Registrar log
     registrar_log(
         db_global,
@@ -1797,7 +1883,7 @@ def limpiar_archivos_job(
         f"Archivos del job {job_id} eliminados: {total_archivos} archivos, {round(tamaño_total, 2)} KB",
         proyecto.id
     )
-    
+
     return {
         "success": True,
         "job_id": job_id,
@@ -1817,46 +1903,46 @@ def limpieza_sistema(
     """
     from app.core.dependencies import require_superadmin
     require_superadmin(current_user)
-    
+
     from app.core.config import settings
-    
+
     # 1. Limpiar archivos temporales
     temp_path = Path(settings.TEMP_PATH)
     temp_eliminados = _limpiar_archivos_temporales(temp_path, dias_antiguedad)
-    
+
     # 2. Limpiar jobs antiguos (más de X días)
     fecha_limite = datetime.now() - timedelta(days=dias_antiguedad)
-    
+
     jobs_antiguos = db_global.query(EmisionJob).filter(
         EmisionJob.status.in_(['completed', 'failed', 'cancelled']),
         EmisionJob.completed_at < fecha_limite
     ).all()
-    
+
     jobs_eliminados = 0
     espacio_liberado_kb = 0
-    
+
     for job in jobs_antiguos:
         # Obtener proyecto
         proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
         if not proyecto:
             continue
-        
+
         # Obtener directorio
         job_dir = _get_job_directory(proyecto.slug, job.id, Path(settings.EMISIONES_PATH))
-        
+
         if job_dir.exists():
             # Calcular tamaño
             pdf_files = list(job_dir.glob("*.pdf"))
             tamaño = sum(f.stat().st_size for f in pdf_files) / 1024
             espacio_liberado_kb += tamaño
-            
+
             # Eliminar
             try:
                 shutil.rmtree(job_dir)
                 jobs_eliminados += 1
             except Exception as e:
                 logger.error(f"Error eliminando job {job.id}: {e}")
-    
+
     # Registrar log
     registrar_log(
         db_global,
@@ -1865,7 +1951,7 @@ def limpieza_sistema(
         f"Limpieza automática: {temp_eliminados} archivos temporales, {jobs_eliminados} jobs antiguos",
         None
     )
-    
+
     return {
         "success": True,
         "archivos_temporales_eliminados": temp_eliminados,
@@ -1885,19 +1971,19 @@ def get_espacio_disco(
     """
     from app.core.dependencies import require_superadmin
     require_superadmin(current_user)
-    
+
     from app.core.config import settings
-    
+
     # Directorios principales
     emisiones_path = Path(settings.EMISIONES_PATH)
     temp_path = Path(settings.TEMP_PATH)
-    
+
     resultado = {
         "emisiones": None,
         "temp": None,
         "total": None
     }
-    
+
     for name, path in [("emisiones", emisiones_path), ("temp", temp_path)]:
         if path.exists():
             stat = shutil.disk_usage(path)
@@ -1908,7 +1994,7 @@ def get_espacio_disco(
                 "libre_kb": round(stat.free / 1024, 2),
                 "porcentaje_usado": round(((stat.total - stat.free) / stat.total) * 100, 2)
             }
-    
+
     # Calcular total
     if resultado["emisiones"] and resultado["temp"]:
         resultado["total"] = {
@@ -1916,7 +2002,7 @@ def get_espacio_disco(
             "libre_kb": resultado["emisiones"]["libre_kb"],
             "porcentaje_usado": resultado["emisiones"]["porcentaje_usado"]
         }
-    
+
     return resultado
 
 @router.get("/monitoreo/metricas")
@@ -1930,9 +2016,9 @@ def get_metricas(
     # Verificar permisos (solo superadmin y analistas)
     if current_user.rol.nombre not in ['superadmin', 'analista']:
         raise HTTPException(status_code=403, detail="No tienes permisos para ver métricas")
-    
+
     metricas = MonitoreoService.obtener_metricas()
-    
+
     # Obtener métricas adicionales de la BD
     try:
         # Total de jobs por estado
@@ -1940,26 +2026,26 @@ def get_metricas(
             EmisionJob.status,
             func.count(EmisionJob.id)
         ).group_by(EmisionJob.status).all()
-        
+
         metricas["jobs_por_estado"] = [
             {"estado": row[0], "total": row[1]}
             for row in jobs_por_estado
         ]
-        
+
         # Total de PDFs generados
         total_pdfs = db_global.query(
             func.sum(EmisionJob.procesados)
         ).filter(
             EmisionJob.status == 'completed'
         ).scalar() or 0
-        
+
         metricas["total_pdfs_generados"] = total_pdfs
-        
+
         # Últimos 10 jobs
         ultimos_jobs = db_global.query(EmisionJob).order_by(
             EmisionJob.created_at.desc()
         ).limit(10).all()
-        
+
         metricas["ultimos_jobs"] = [
             {
                 "id": j.id,
@@ -1972,10 +2058,10 @@ def get_metricas(
             }
             for j in ultimos_jobs
         ]
-        
+
     except Exception as e:
         logger.error(f"Error obteniendo métricas adicionales: {e}")
-    
+
     return {
         "success": True,
         "metricas": metricas,
@@ -1999,10 +2085,10 @@ def get_logs(
     # Verificar permisos
     if current_user.rol.nombre not in ['superadmin', 'analista']:
         raise HTTPException(status_code=403, detail="No tienes permisos para ver logs")
-    
+
     log_dir = Path(__file__).parent.parent.parent.parent / "Logs"
     log_file = log_dir / "emision_logs.jsonl"
-    
+
     if not log_file.exists():
         return {
             "success": True,
@@ -2010,14 +2096,14 @@ def get_logs(
             "total": 0,
             "mensaje": "No hay logs disponibles"
         }
-    
+
     logs = []
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
                     log_entry = json.loads(line.strip())
-                    
+
                     # Aplicar filtros
                     if nivel and log_entry.get("nivel") != nivel:
                         continue
@@ -2025,7 +2111,7 @@ def get_logs(
                         continue
                     if worker_id and log_entry.get("worker_id") != worker_id:
                         continue
-                    
+
                     # Filtros de fecha
                     if desde:
                         try:
@@ -2035,7 +2121,7 @@ def get_logs(
                                 continue
                         except:
                             pass
-                    
+
                     if hasta:
                         try:
                             fecha_hasta = datetime.fromisoformat(hasta)
@@ -2044,26 +2130,26 @@ def get_logs(
                                 continue
                         except:
                             pass
-                    
+
                     logs.append(log_entry)
-                    
+
                 except json.JSONDecodeError:
                     continue
-        
+
         # Ordenar por timestamp (más reciente primero)
         logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
+
         # Limitar resultados
         total = len(logs)
         logs = logs[:limit]
-        
+
     except Exception as e:
         logger.error(f"Error leyendo logs: {e}")
         return {
             "success": False,
             "error": str(e)
         }
-    
+
     return {
         "success": True,
         "logs": logs,
@@ -2092,10 +2178,10 @@ def enviar_alerta(
     job_id = request.get("job_id")
     worker_id = request.get("worker_id")
     datos_extra = request.get("datos_extra", {})
-    
+
     if not mensaje:
         raise HTTPException(status_code=400, detail="Falta mensaje de alerta")
-    
+
     # Registrar alerta
     MonitoreoService.registrar_log_estructurado(
         nivel=nivel,
@@ -2105,7 +2191,7 @@ def enviar_alerta(
         datos_extra=datos_extra,
         db_global=db_global
     )
-    
+
     # Si es error crítico, guardar en tabla de alertas
     if nivel in ['error', 'critical']:
         try:
@@ -2114,7 +2200,7 @@ def enviar_alerta(
             logger.warning(f"ALERTA {nivel}: {mensaje}")
         except Exception:
             pass
-    
+
     return {
         "success": True,
         "mensaje": "Alerta registrada",
@@ -2131,23 +2217,23 @@ def get_workers_status(
     Obtiene el estado de todos los workers.
     """
     from app.core.redis_client import redis_client
-    
+
     if current_user.rol.nombre not in ['superadmin', 'analista']:
         raise HTTPException(status_code=403, detail="No tienes permisos")
-    
+
     redis_conn = redis_client.connection
-    
+
     # Obtener workers activos de Redis
     workers_data = redis_conn.hgetall("workers:active")
-    
+
     workers = []
     for worker_id, data in workers_data.items():
         try:
             worker_info = json.loads(data)
-            
+
             # Obtener estadísticas del worker desde BD
             stats = MonitoreoService.obtener_estadisticas_worker(worker_id, db_global)
-            
+
             workers.append({
                 "worker_id": worker_id,
                 "status": worker_info.get("status", "unknown"),
@@ -2157,7 +2243,7 @@ def get_workers_status(
             })
         except Exception as e:
             logger.error(f"Error procesando worker {worker_id}: {e}")
-    
+
     return {
         "success": True,
         "workers": workers,
@@ -2174,13 +2260,15 @@ def health_check(
     Health check completo del sistema de emisión.
     """
     from app.core.redis_client import redis_client
-    
+
     health = {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "checks": {}
     }
-    
+
+    redis_conn = None
+
     # 1. Verificar Redis
     try:
         redis_conn = redis_client.connection
@@ -2189,7 +2277,7 @@ def health_check(
     except Exception as e:
         health["checks"]["redis"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
-    
+
     # 2. Verificar BD
     try:
         db_global.execute(text("SELECT 1")).first()
@@ -2197,10 +2285,10 @@ def health_check(
     except Exception as e:
         health["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
-    
+
     # 3. Verificar cola de jobs
     try:
-        queue_length = redis_conn.llen("emision_jobs") if health["checks"].get("redis", {}).get("status") == "healthy" else 0
+        queue_length = redis_conn.llen("emision_jobs") if redis_conn and health["checks"].get("redis", {}).get("status") == "healthy" else 0
         health["checks"]["queue"] = {
             "status": "healthy" if queue_length < 1000 else "warning",
             "length": queue_length,
@@ -2208,10 +2296,10 @@ def health_check(
         }
     except Exception as e:
         health["checks"]["queue"] = {"status": "error", "error": str(e)}
-    
+
     # 4. Verificar workers activos
     try:
-        workers = redis_conn.hgetall("workers:active") if health["checks"].get("redis", {}).get("status") == "healthy" else {}
+        workers = redis_conn.hgetall("workers:active") if redis_conn and health["checks"].get("redis", {}).get("status") == "healthy" else {}
         health["checks"]["workers"] = {
             "status": "healthy" if len(workers) > 0 else "warning",
             "active": len(workers),
@@ -2219,7 +2307,7 @@ def health_check(
         }
     except Exception as e:
         health["checks"]["workers"] = {"status": "error", "error": str(e)}
-    
+
     # 5. Verificar espacio en disco
     try:
         from app.core.config import settings
@@ -2237,7 +2325,7 @@ def health_check(
             health["checks"]["disk"] = {"status": "warning", "message": "Directorio de emisiones no existe"}
     except Exception as e:
         health["checks"]["disk"] = {"status": "error", "error": str(e)}
-    
+
     # Determinar estado general
     for check in health["checks"].values():
         if check.get("status") == "critical":
@@ -2247,5 +2335,5 @@ def health_check(
             health["status"] = "unhealthy"
         elif check.get("status") == "warning" and health["status"] not in ["critical", "unhealthy"]:
             health["status"] = "warning"
-    
+
     return health

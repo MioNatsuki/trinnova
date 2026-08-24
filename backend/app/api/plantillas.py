@@ -252,38 +252,42 @@ def preview_plantilla_pdf(
     current_user: Usuario = Depends(get_current_active_user),
     db: Session = Depends(get_global_db),
 ):
-    """
-    Genera un PDF de preview de la plantilla usando el nuevo motor de renderizado
+    """Genera un PDF de preview de la plantilla"""
+    import asyncio
     
-    - preview_on: False → muestra placeholders resaltados en amarillo
-    - preview_on: True → reemplaza placeholders con datos reales
-    """
-    # Obtener plantilla
     plantilla = _get_plantilla_or_404(db, plantilla_id)
     
-    # Verificar que tiene nombre_archivo
     if not plantilla.nombre_archivo:
         raise HTTPException(
             status_code=400,
-            detail="La plantilla no tiene asociado un archivo HTML. Ejecuta la sincronización primero."
+            detail="La plantilla no tiene asociado un archivo HTML."
         )
     
-    # Obtener slug del proyecto
     proyecto_slug = _slug_from_proyecto_id(db, plantilla.id_proyecto)
-    
-    # Verificar acceso al proyecto
     check_project_access(proyecto_slug, current_user, db)
     
     try:
-        # Generar PDF usando el renderer
-        pdf_bytes = generar_preview_pdf(
-            proyecto_slug=proyecto_slug,
-            nombre_archivo=plantilla.nombre_archivo.split('/')[-1],  # Solo el nombre del archivo
-            placeholders=body.placeholders if body.preview_on else {},
-            preview_mode=not body.preview_on  # Si preview_on=False, resaltar placeholders
-        )
+        # Usar PlantillaRenderer directamente
+        renderer = PlantillaRenderer(proyecto_slug)
         
-        # Convertir a base64 para enviar al frontend
+        # Preparar placeholders
+        placeholders = body.placeholders if body.preview_on else {}
+        
+        # Función asíncrona para generar el PDF
+        async def _generar():
+            await PlantillaRenderer.get_browser()
+            return await renderer.render_pdf(
+                plantilla.nombre_archivo.split('/')[-1],
+                placeholders,
+                codebar=placeholders.get('codebar') if placeholders else None
+            )
+        
+        # Ejecutar en un loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        pdf_bytes = loop.run_until_complete(_generar())
+        loop.close()
+        
         pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
         
         return {
@@ -294,8 +298,6 @@ def preview_plantilla_pdf(
             "nombre_archivo": plantilla.nombre_archivo
         }
         
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=f"Archivo HTML no encontrado: {str(e)}")
     except Exception as e:
         import traceback
         traceback.print_exc()

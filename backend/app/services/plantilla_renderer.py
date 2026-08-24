@@ -8,6 +8,7 @@ import re
 import os
 import base64
 import asyncio
+import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Any, Set
 from datetime import datetime
@@ -298,7 +299,6 @@ class PlantillaRenderer:
                 height=f'{altura_final}px',
                 margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
                 prefer_css_page_size=True,
-                print_background=True,
             )
             return pdf_bytes
         finally:
@@ -420,3 +420,101 @@ def obtener_placeholders_especiales() -> Dict[str, str]:
         '{{_hora_actual}}': 'Hora actual',
         '{{codebar}}': 'Código de barras (Código 39)',
     }
+
+def generar_preview_pdf(
+    proyecto_slug: str,
+    nombre_archivo: str,
+    placeholders: Optional[Dict[str, str]] = None,
+    preview_mode: bool = False
+) -> bytes:
+    """
+    Genera un PDF de preview de la plantilla.
+    Función síncrona para compatibilidad con el código existente.
+    """
+    import asyncio
+    
+    renderer = PlantillaRenderer(proyecto_slug)
+    
+    async def _generar():
+        # Asegurar que el navegador está iniciado
+        await PlantillaRenderer.get_browser()
+        
+        # Preparar placeholders
+        if preview_mode:
+            # Modo preview: usar datos de ejemplo
+            datos_ejemplo = _obtener_datos_ejemplo(proyecto_slug)
+            if datos_ejemplo:
+                placeholders = {**(placeholders or {}), **datos_ejemplo}
+        
+        # Generar código de barras si no existe
+        if placeholders and 'codebar' not in placeholders:
+            from app.services.codebar_service import CodebarService
+            pk = placeholders.get('pk', '12345')
+            placeholders['codebar'] = CodebarService.generar_codebar_completo(pk)
+        
+        return await renderer.render_pdf(
+            nombre_archivo,
+            placeholders or {},
+            codebar=placeholders.get('codebar') if placeholders else None
+        )
+    
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(_generar())
+        loop.close()
+        return result
+    except Exception as e:
+        raise RuntimeError(f"Error generando preview PDF: {e}")
+
+
+def _obtener_datos_ejemplo(proyecto_slug: str) -> Dict[str, str]:
+    """Obtiene datos de ejemplo para el preview."""
+    ejemplos = {
+        'apa_tlajomulco': {
+            'clave_apa': 'APA-12345',
+            'propietario_nombre': 'JUAN PÉREZ GONZÁLEZ',
+            'domicilio': 'Calle Hidalgo 456, Col. Centro',
+            'saldo': '$12,345.67',
+            'adeudo_agua': '$8,900.00',
+            'recargos': '$250.00',
+            'actualizacion': '$150.00',
+            'total_adeudo': '$12,345.67',
+            'pk': '12345'
+        },
+        'estado': {
+            'credito': 'CRED-2024-056',
+            'nombre_razon_social': 'EMPRESA EJEMPLO S.A. DE C.V.',
+            'importe_historico_determinado': '$156,789.00',
+            'calle_numero': 'Blvd. Principal 500',
+            'colonia': 'Empresarial',
+            'codigo_postal': '45010',
+            'municipio': 'Zapopan',
+            'rfc': 'EEJ900101ABC',
+            'pk': 'CRED-2024-056'
+        },
+        'pensiones': {
+            'nombre': 'JUAN PÉREZ GONZÁLEZ',
+            'prestamo': '12345',
+            'adeudo': '$45,678.90',
+            'ultimo_abono': '15/01/2025',
+            'aval_nombre': 'ROBERTO LÓPEZ MARTÍNEZ',
+            'pk': '12345'
+        },
+        'predial_gdl': {
+            'propietario': 'ANA LAURA HERNÁNDEZ',
+            'cuenta': 'GDL-98765',
+            'saldo': '$15,200.00',
+            'folio_req': 'FOL-001',
+            'axo_req': '2025',
+            'pk': 'GDL-98765'
+        },
+        'predial_tlajomulco': {
+            'cuenta': 'PRED-00123',
+            'domicilio': 'Calle Independencia 789',
+            'total_adeudo': '$8,900.00',
+            'nombre_contribuyente': 'MARÍA GARCÍA LÓPEZ',
+            'pk': 'PRED-00123'
+        }
+    }
+    return ejemplos.get(proyecto_slug, {})

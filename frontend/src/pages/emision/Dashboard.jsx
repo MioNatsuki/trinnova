@@ -2,10 +2,10 @@
 import { useState, useEffect } from 'react';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
-import SeleccionCuentas from '../../components/emision/SeleccionCuentas';
-import ModalConfiguracion from '../../components/emision/ModalConfiguracion';
-import Monitoreo from '../../components/emision/Monitoreo';
-import Historial from '../../components/emision/Historial';
+import SeleccionCuentas from './SeleccionCuentas';
+import ModalConfiguracion from './ModalConfiguracion';
+import Monitoreo from './Monitoreo';
+import Historial from './Historial';
 import api from '../../api/auth';
 import './Dashboard.css';
 

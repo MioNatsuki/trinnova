@@ -1,4 +1,5 @@
-# Workers/worker_service.py - VERSIÓN CORREGIDA
+# Workers/worker_service.py - CORREGIDO
+
 import sys
 import os
 import json
@@ -14,6 +15,7 @@ import httpx
 from backend.app.services.monitoreo_service import MonitoreoService
 from backend.app.services.emision_service import EmisionService
 from backend.app.services.codebar_service import CodebarService
+from backend.app.db.session import SessionGlobal 
 
 # ============================================================
 # CONFIGURACIÓN DE PATHS
@@ -278,8 +280,8 @@ class AsyncPlantillaRenderer:
         import base64
         
         # Asegurar que el contexto exista
-        if not self._context:
-            await self.start()
+        if not AsyncPlantillaRenderer._context:
+            await AsyncPlantillaRenderer.start()
 
         ruta_completa = self.base_path / nombre_archivo
         if not ruta_completa.exists():
@@ -307,10 +309,10 @@ class AsyncPlantillaRenderer:
                 except: continue
         
         # USAR EL CONTEXTO GLOBAL
-        page = await self._context.new_page()
+        page = await AsyncPlantillaRenderer._context.new_page()
         try:
             await page.set_content(html_content, wait_until='networkidle')
-            await page.wait_for_timeout(300) # Un poco menos de espera por eficiencia
+            await page.wait_for_timeout(300)
             
             return await page.pdf(
                 print_background=True,
@@ -320,7 +322,7 @@ class AsyncPlantillaRenderer:
                 prefer_css_page_size=True,
             )
         finally:
-            await page.close() # Cerramos solo la pestaña
+            await page.close()
 
 
 # ============================================================
@@ -488,50 +490,51 @@ class TrinnovaWorker:
         
         self.current_job = job_id
         
-        emision_service = EmisionService(
-            job_id=job_id,
-            db_global=self.db_global,  # Necesitas pasar la sesión
-            worker_id=self.worker_id
-        )
-
-        def on_progress(progreso):
-            asyncio.create_task(
-                self.api_client.update_progress(
-                    self.worker_id,
-                    job_id,
-                    procesados=progreso["procesados"],
-                    ultimo_pk=None  # Obtener del servicio
-                )
-            )
-        
-        # Generar emisión
-        resultados = await emision_service.generar_emision(
-            max_concurrent_pages=self.max_concurrent_pages,
-            checkpoint_interval=self.checkpoint_interval,
-            progress_callback=on_progress
-        )
-
-        procesados = 0
-        ultimo_pk = None
-        checkpoint = await self.api_client.get_checkpoint(job_id)
-        
-        if checkpoint:
-            procesados = checkpoint.get('procesados', 0)
-            ultimo_pk = checkpoint.get('ultimo_pk')
-            logger.info(f"Recuperando desde checkpoint: {procesados} registros")
-        
-        job_dir = self._get_job_directory(proyecto_slug, job_id)
-        job_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Carpeta de salida: {job_dir}")
-        
-        renderer = None
-        pdfs_generados = 0
-        fallidos = 0
-        errores = []
-        orden_impresion = claimed_job.get('orden_impresion_inicial', 1)
+        # ✅ Crear sesión de BD para el worker
+        db_session = SessionGlobal()
         
         try:
+            emision_service = EmisionService(
+                job_id=job_id,
+                db_global=db_session,
+                worker_id=self.worker_id
+            )
+
+            def on_progress(progreso):
+                asyncio.create_task(
+                    self.api_client.update_progress(
+                        self.worker_id,
+                        job_id,
+                        procesados=progreso["procesados"],
+                        ultimo_pk=None
+                    )
+                )
+            
+            # Generar emisión
+            resultados = await emision_service.generar_emision(
+                max_concurrent_pages=self.max_concurrent_pages,
+                checkpoint_interval=self.checkpoint_interval,
+                progress_callback=on_progress
+            )
+
+            procesados = 0
+            ultimo_pk = None
+            checkpoint = await self.api_client.get_checkpoint(job_id)
+            
+            if checkpoint:
+                procesados = checkpoint.get('procesados', 0)
+                ultimo_pk = checkpoint.get('ultimo_pk')
+                logger.info(f"Recuperando desde checkpoint: {procesados} registros")
+            
+            job_dir = self._get_job_directory(proyecto_slug, job_id)
+            job_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Carpeta de salida: {job_dir}")
+            
             renderer = AsyncPlantillaRenderer(proyecto_slug)
+            pdfs_generados = 0
+            fallidos = 0
+            errores = []
+            orden_impresion = claimed_job.get('orden_impresion_inicial', 1)
             
             offset = procesados
             plantilla_archivo = claimed_job.get('plantilla_archivo', '').split('/')[-1]
@@ -549,7 +552,7 @@ class TrinnovaWorker:
                 if not registros:
                     break
                 
-                resultados = await self._generar_pdfs_lote(
+                resultados_pdf = await self._generar_pdfs_lote(
                     renderer,
                     plantilla_archivo,
                     registros,
@@ -558,7 +561,7 @@ class TrinnovaWorker:
                     orden_impresion
                 )
                 
-                for resultado in resultados:
+                for resultado in resultados_pdf:
                     if resultado.get('success'):
                         pdfs_generados += 1
                         orden_impresion += 1
@@ -568,8 +571,8 @@ class TrinnovaWorker:
                 
                 offset += len(registros)
                 procesados = offset
-                if resultados:
-                    ultimo_pk = resultados[-1].get('pk_value')
+                if resultados_pdf:
+                    ultimo_pk = resultados_pdf[-1].get('pk_value')
                 
                 if offset % self.checkpoint_interval == 0 or offset >= total:
                     await self.api_client.save_checkpoint(job_id, {
@@ -642,9 +645,8 @@ class TrinnovaWorker:
                 status="failed",
                 error_msg=str(e)
             )
-        
         finally:
-            if renderer:
+            db_session.close()  # ✅ Cerrar sesión de BD
             self.current_job = None
     
     def _get_pk_name(self, proyecto_slug: str) -> str:

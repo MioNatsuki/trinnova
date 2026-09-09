@@ -1,5 +1,6 @@
 // frontend/src/pages/analisis/Complementar.jsx
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
@@ -24,9 +25,37 @@ const EditableCell = memo(({ value, isDirty, col, onChange }) => (
   />
 ));
 
+const formatDateDisplay = (value) => {
+    if (!value) return '';
+    try {
+        // Si es string con formato ISO
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+            const date = new Date(value);
+            if (!isNaN(date.getTime())) {
+                return date.toLocaleDateString('es-MX', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                });
+            }
+        }
+        return value;
+    } catch {
+        return value;
+    }
+};
+
 export default function Complementar() {
-  const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
-  const { setDirty } = useNavigationGuard();
+    const location = useLocation();
+    const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
+    const { setDirty } = useNavigationGuard();
+
+    useEffect(() => {
+        const state = location.state;
+        if (state?.proyectoSlug) {
+            setProyectoSlug(state.proyectoSlug);
+        }
+    }, [location.state, setProyectoSlug]);
 
   const [limit, setLimit]             = useState(20);
   const [data, setData]               = useState({ rows: [], columnas_editables: [], total: 0, pk: null });
@@ -106,6 +135,18 @@ export default function Complementar() {
         : 'Tienes un modal abierto en Complementar.');
     return () => setDirty(false);
   }, [pendingCount, showCsvModal, showGenModal, setDirty]);
+
+  const isDateColumn = (col, slug) => {
+      const DATE_COLS = {
+          pensiones: ['ultimo_abono', 'fecha_alta', 'ultima_aportacion', 'fecha_convenio', 'fecha_asignacion'],
+          apa_tlajomulco: ['fecha_lectura'],
+          licencias_gdl: ['fecemi'],
+          predial_gdl: [],
+          predial_tlajomulco: [],
+          estado: ['fecha_recepcion', 'fecha_documento_determinante', 'fecha_notificacion', 'exigible'],
+      };
+      return (DATE_COLS[slug] || []).includes(col);
+  };
 
   const loadData = useCallback(async () => {
     if (!proyectoSlug) return;
@@ -354,18 +395,22 @@ export default function Complementar() {
                           </td>
                         ))}
                         {columnasEditables.map((col, i) => {
-                          const isDirtyCell = editedRows[pkValue]?.[col] !== undefined;
-                          const value = isDirtyCell ? String(editedRows[pkValue][col]) : String(row[col] ?? '');
-                          return (
-                            <td key={col} className={`comp-td comp-td--editable${i === 0 ? ' comp-td--first' : ''}`}>
-                              <EditableCell
-                                value={value}
-                                isDirty={isDirtyCell}
-                                col={col}
-                                onChange={(newVal) => handleCellEdit(pkValue, col, newVal)}
-                              />
-                            </td>
-                          );
+                            const isDirtyCell = editedRows[pkValue]?.[col] !== undefined;
+                            let value = isDirtyCell ? String(editedRows[pkValue][col]) : String(row[col] ?? '');
+                            if (isDateColumn(col, proyectoSlug)) {
+                                value = formatDateDisplay(value);
+                            }
+                            
+                            return (
+                                <td key={col} className={`comp-td comp-td--editable${i === 0 ? ' comp-td--first' : ''}`}>
+                                    <EditableCell
+                                        value={value}
+                                        isDirty={isDirtyCell}
+                                        col={col}
+                                        onChange={(newVal) => handleCellEdit(pkValue, col, newVal)}
+                                    />
+                                </td>
+                            );
                         })}
                       </tr>
                     );

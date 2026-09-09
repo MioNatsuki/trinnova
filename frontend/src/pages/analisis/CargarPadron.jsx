@@ -1,6 +1,7 @@
 // frontend/src/pages/analisis/CargarPadron.jsx
 // FIX: preview de Excel en cliente usando SheetJS (xlsx ya disponible como dep)
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
@@ -8,14 +9,26 @@ import ProyectoSelector from '../../components/ProyectoSelector';
 import './Analisis.css';
 
 export default function CargarPadron() {
-  const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
-  const [file, setFile]           = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [result, setResult]       = useState(null);
-  const [error, setError]         = useState('');
-  const [preview, setPreview]     = useState(null);   // {headers, rows, total_cols}
-  const [versiones, setVersiones] = useState([]);
-  const [loadingVer, setLoadingVer] = useState(false);
+    const location = useLocation();
+    const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
+    
+    // ============================================================
+    // RECIBIR PROYECTO DESDE NAVEGACIÓN
+    // ============================================================
+    useEffect(() => {
+        const state = location.state;
+        if (state?.proyectoSlug) {
+            setProyectoSlug(state.proyectoSlug);
+        }
+    }, [location.state, setProyectoSlug]);
+
+    const [file, setFile] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState('');
+    const [preview, setPreview] = useState(null);
+    const [versiones, setVersiones] = useState([]);
+    const [loadingVer, setLoadingVer] = useState(false);
 
   useEffect(() => {
     if (!proyectoSlug) { setVersiones([]); return; }

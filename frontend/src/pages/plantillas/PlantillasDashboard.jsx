@@ -1,6 +1,6 @@
 // frontend/src/pages/plantillas/PlantillasDashboard.jsx
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useAuth } from '../../context/AuthContext';
@@ -31,9 +31,10 @@ const ORIGEN_BADGE = {
 };
 
 export default function PlantillasDashboard() {
-  const { proyectoSlug, proyectos, setProyectoSlug } = useProyecto();
-  const { user } = useAuth();
-  const navigate = useNavigate();
+    const location = useLocation();
+    const { proyectoSlug, proyectos, setProyectoSlug } = useProyecto();
+    const { user } = useAuth();
+    const navigate = useNavigate();
 
   const [plantillas,   setPlantillas]   = useState([]);
   const [loading,      setLoading]      = useState(false);
@@ -59,6 +60,13 @@ export default function PlantillasDashboard() {
   const isAnalista = user?.rol === 'analista' || user?.rol === 'superadmin';
   const isSuperadmin = user?.rol === 'superadmin';
 
+  useEffect(() => {
+        const state = location.state;
+        if (state?.proyectoSlug) {
+            setProyectoSlug(state.proyectoSlug);
+        }
+    }, [location.state, setProyectoSlug]);
+    
   const loadPlantillas = useCallback(async () => {
     setLoading(true);
     try {

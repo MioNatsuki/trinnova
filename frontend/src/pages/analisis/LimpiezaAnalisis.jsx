@@ -1,5 +1,6 @@
 // frontend/src/pages/analisis/LimpiezaAnalisis.jsx
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
 import { useNavigationGuard } from '../../context/NavigationGuardContext';
@@ -152,13 +153,16 @@ function SortIcon({ col, sortCol, sortDir }) {
 }
 
 export default function LimpiezaAnalisis() {
-  const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
-  const { setDirty } = useNavigationGuard();
-
-  // ── FIX: TODOS los useState primero, sin excepción ──────────────────────────
-  // Mover los estados CSV al bloque principal evita el TDZ ReferenceError
-  // que ocurría cuando closeCsvModal (useCallback) era evaluado antes de que
-  // csvLoading fuera declarado por su useState.
+    const location = useLocation();
+    const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
+    const { setDirty } = useNavigationGuard();
+    
+    useEffect(() => {
+            const state = location.state;
+            if (state?.proyectoSlug) {
+                setProyectoSlug(state.proyectoSlug);
+            }
+        }, [location.state, setProyectoSlug]);
 
   const [programas,     setProgramas]     = useState([]);
   const [programa,      setPrograma]      = useState('todos');
@@ -680,15 +684,16 @@ export default function LimpiezaAnalisis() {
           </button>
           <span>Página {page} de {totalPages} · {data.total.toLocaleString()} registros</span>
           <select value={pageSize}
-            onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-            style={{
-              padding: '5px 8px', border: '1px solid var(--clr-border)',
-              borderRadius: 6, fontSize: 12, fontFamily: 'Outfit,sans-serif',
-            }}>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
+              onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+              style={{
+                  padding: '5px 8px', border: '1px solid var(--clr-border)',
+                  borderRadius: 6, fontSize: 12, fontFamily: 'Outfit,sans-serif',
+              }}>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>  
+              <option value={200}>200</option> 
           </select>
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
             Siguiente →

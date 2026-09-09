@@ -421,3 +421,44 @@
     min-width: 500px;
   }
 }
+
+.calculos-table td.col-numero {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.calculos-table td.col-monto {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.calculos-table td.col-pk {
+    font-weight: 600;
+    color: var(--clr-accent);
+    font-family: monospace;
+}
+
+.calculos-table td.col-letra {
+    font-size: 11px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calculos-table td.col-codebar {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    font-family: 'Courier New', monospace;
+}
+
+/* Montos negativos */
+.calculos-table td.col-monto.negative {
+    color: #e53e3e;
+}
+
+/* Montos positivos */
+.calculos-table td.col-monto.positive {
+    color: #276749;
+}

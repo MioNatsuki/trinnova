@@ -237,7 +237,8 @@ class PlantillaRenderer:
         pagina_actual: int = 1,
         total_paginas: int = 1,
         codebar: Optional[str] = None,
-        usar_cache: bool = True
+        usar_cache: bool = True,
+        inject_codebar_style: bool = False  # ← NUEVO PARÁMETRO
     ) -> bytes:
         """
         Renderiza un PDF desde una plantilla HTML.
@@ -262,26 +263,26 @@ class PlantillaRenderer:
         html = self._cargar_html(nombre_archivo, force_reload=not usar_cache)
         
         # 3. Reemplazar placeholders
-        # Placeholders especiales
         especiales = self._calcular_placeholders_especiales(
             pagina_actual, total_paginas, codebar or ""
         )
         
-        # Combinar todos los placeholders (prioridad: los pasados por parámetro)
         todos_placeholders = {**especiales, **placeholders}
         
-        # Reemplazar en HTML
         for key, value in todos_placeholders.items():
             if value is None:
                 value = ""
             html = html.replace(f"{{{{{key}}}}}", str(value))
         
-        # 4. Inyectar estilo de código de barras
-        from app.services.codebar_service import CodebarService
-        html = CodebarService.inject_codebar_style(html)
-        
-        # 5. Convertir imágenes a base64
+        # 4. Convertir imágenes a base64
         html = self._convertir_imagenes_a_base64(html)
+        
+        # ============================================================
+        # 5. INYECTAR ESTILO DE CÓDIGO DE BARRAS (SI SE SOLICITA)
+        # ============================================================
+        if inject_codebar_style:
+            from app.services.codebar_service import CodebarService
+            html = CodebarService.inject_codebar_style(html)
         
         # 6. Generar PDF
         altura_final = altura or ALTURAS_ESPECIALES.get(self.proyecto_slug, {}).get(
@@ -455,7 +456,8 @@ def generar_preview_pdf(
         return await renderer.render_pdf(
             nombre_archivo,
             placeholders or {},
-            codebar=placeholders.get('codebar') if placeholders else None
+            codebar=placeholders.get('codebar') if placeholders else None,
+            inject_codebar_style=True 
         )
     
     try:

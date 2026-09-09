@@ -1,3 +1,4 @@
+# backend/app/core/config.py
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from pathlib import Path
@@ -48,6 +49,16 @@ class Settings(BaseSettings):
     # Almacenamiento
     EMISIONES_PATH: str = os.getenv("EMISIONES_PATH", str(BACKEND_DIR.parent / "Emisiones"))
     TEMP_PATH: str = os.getenv("TEMP_PATH", str(BACKEND_DIR.parent / "Temp"))
+
+    # ============================================================
+    # NUEVO: Worker Secret para autenticación de workers
+    # ============================================================
+    WORKER_SECRET: str = os.getenv("WORKER_SECRET", "Admin2024!")
+    
+    # ============================================================
+    # NUEVO: URL del frontend para CORS
+    # ============================================================
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     class Config:
         pass

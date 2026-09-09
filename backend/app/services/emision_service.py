@@ -223,14 +223,27 @@ class EmisionService:
             # Agregar campos calculados
             placeholders['orden_impresion'] = str(orden)
             
-            # Generar código de barras
+            # ============================================================
+            # GENERAR CÓDIGO DE BARRAS - FIRMA CORRECTA
+            # ============================================================
             identificador = placeholders.get('identificador_documento')
             visita = placeholders.get('visita')
+            
             codebar = CodebarService.generar_codebar_completo(
                 pk_value=str(pk_value),
-                identificador=identificador,
+                fecha_emision=datetime.now(),  # O usar self.job.created_at
+                identificador_documento=identificador,
                 visita=visita
             )
+            
+            # También podemos pasar id_documento si está disponible
+            id_documento = placeholders.get('id_documento')
+            if id_documento and not identificador:
+                codebar = CodebarService.generar_codebar_completo(
+                    pk_value=str(pk_value),
+                    fecha_emision=datetime.now(),
+                    id_documento=int(id_documento)
+                )
             
             # Renderizar PDF
             pdf_bytes = await renderer.render_pdf(

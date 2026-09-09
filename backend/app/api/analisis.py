@@ -310,33 +310,221 @@ def _siguiente_version(db_global: Session, proyecto_id: int) -> int:
 
 
 def _parse_fecha(val: Any) -> Any:
+    """
+    Parsea una fecha desde varios formatos posibles.
+    Retorna un objeto datetime o None si no se puede parsear.
+    """
+    if val is None:
+        return None
+    
+    # Si ya es datetime, retornar
+    if isinstance(val, datetime):
+        return val
+    
+    # Si es pd.Timestamp, convertir a datetime
+    if hasattr(val, 'to_pydatetime'):
+        try:
+            return val.to_pydatetime()
+        except Exception:
+            pass
+    
+    # Si es número, puede ser fecha Excel
+    if isinstance(val, (int, float)):
+        try:
+            # Excel fechas: días desde 1899-12-30
+            # Rango típico para fechas modernas: 30000-50000
+            if 30000 < val < 100000:
+                excel_epoch = datetime(1899, 12, 30)
+                return excel_epoch + timedelta(days=float(val))
+        except Exception:
+            pass
+    
+    # Si es string, intentar parsear
     if not isinstance(val, str):
         return None
+    
     val = val.strip()
     if not val:
         return None
-    for fmt in _DATE_FORMATS:
+    
+    # ============================================================
+    # FORMATOS DE FECHA SOPORTADOS (EN ORDEN DE PRIORIDAD)
+    # ============================================================
+    formatos = [
+        # Formato ISO completo
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f",
+        
+        # Fecha ISO simple
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%Y.%m.%d",
+        
+        # Fecha con mes en texto (español)
+        "%d de %B de %Y",
+        "%d de %b de %Y",
+        "%d-%B-%Y",
+        "%d-%b-%Y",
+        "%d/%B/%Y",
+        "%d/%b/%Y",
+        
+        # Fecha con mes en texto (inglés)
+        "%d of %B %Y",
+        "%d of %b %Y",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        
+        # Formato español común
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d-%m-%Y",
+        
+        # Formato americano
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y",
+        "%m-%d-%Y %H:%M:%S",
+        "%m-%d-%Y %H:%M",
+        "%m-%d-%Y",
+        
+        # Formato con año de 2 dígitos
+        "%d/%m/%y",
+        "%d-%m-%y",
+        "%m/%d/%y",
+        "%m-%d-%y",
+        
+        # Formato compacto
+        "%Y%m%d",
+        "%d%m%Y",
+        "%m%d%Y",
+        
+        # Formato con hora
+        "%Y-%m-%d %I:%M:%S %p",
+        "%Y-%m-%d %I:%M %p",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%d/%m/%Y %I:%M %p",
+    ]
+    
+    for fmt in formatos:
         try:
             return datetime.strptime(val, fmt)
         except ValueError:
             continue
+    
+    # Si no se pudo parsear, intentar con dateutil (si está disponible)
+    try:
+        from dateutil import parser
+        return parser.parse(val, fuzzy=True)
+    except (ImportError, ValueError, TypeError):
+        pass
+    
+    # Si todo falla, retornar el valor original
     return None
 
-
-def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
+def _formatear_fecha_para_bd(val: Any) -> Any:
+    """
+    Formatea un valor de fecha para guardar en la base de datos.
+    Retorna el valor original si no es una fecha.
+    """
     if val is None:
         return None
+    
+    if isinstance(val, datetime):
+        return val
+    
+    if hasattr(val, 'to_pydatetime'):
+        try:
+            return val.to_pydatetime()
+        except Exception:
+            return val
+    
+    # Si es string, intentar parsear
+    if isinstance(val, str):
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed
+        return val
+    
+    return val
+
+def _formatear_fecha_respuesta(val: Any) -> Optional[str]:
+    """
+    Formatea una fecha para ser enviada en la respuesta JSON.
+    """
+    if val is None:
+        return None
+    
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d")
+    
+    if hasattr(val, 'strftime'):
+        try:
+            return val.strftime("%Y-%m-%d")
+        except Exception:
+            return str(val)
+    
+    if isinstance(val, str):
+        # Intentar parsear y formatear
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed.strftime("%Y-%m-%d")
+        return val
+    
+    return str(val)
+
+def _safe_value(val: Any, col_name: str = "", slug: str = "") -> Any:
+    """
+    Limpia y convierte valores de forma segura.
+    Especialmente para fechas.
+    """
+    if val is None:
+        return None
+    
+    # Si es pandas NA/NaN
     try:
         if pd.isna(val):
             return None
     except (TypeError, ValueError):
         pass
+    
+    # Si es pandas Timestamp, convertir a datetime
     if isinstance(val, pd.Timestamp):
-        return val.to_pydatetime()
+        try:
+            return val.to_pydatetime()
+        except Exception:
+            return val
+    
+    # Si es datetime, retornar directamente
+    if isinstance(val, datetime):
+        return val
+    
+    # Si es string y es una columna de fecha
     if isinstance(val, str) and col_name in _DATE_COLS.get(slug, []):
-        return _parse_fecha(val)
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed
+        # Si no se pudo parsear, devolver el string original
+        return val
+    
+    # Si es número y podría ser fecha Excel
+    if isinstance(val, (int, float)) and col_name in _DATE_COLS.get(slug, []):
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed
+    
+    # Si es string, limpiar espacios
+    if isinstance(val, str):
+        val = val.strip()
+        if val == "":
+            return None
+        return val
+    
     return val
-
 
 def _normalizar_viabilidad(raw: str) -> Optional[str]:
     if not raw:
@@ -350,17 +538,21 @@ def _normalizar_viabilidad(raw: str) -> Optional[str]:
         return "pendiente"
     return None
 
-
 def _get_tabla_cols(db_session, tabla: str) -> List[str]:
     from sqlalchemy import text
     rows = db_session.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
     return [r[0] for r in rows]
 
-
-def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) -> str:
+def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str], proyecto_slug: str) -> str:
+    """
+    Construye el SQL para insertar datos en tabla_analisis.
+    Maneja correctamente los valores de fecha.
+    """
+    from sqlalchemy import text
+    
     cols_analisis = _get_tabla_cols(db_session, "tabla_analisis")
-    set_padron    = set(_get_tabla_cols(db_session, "tabla_padron"))
-    set_comp      = set(_get_tabla_cols(db_session, "tabla_complementaria"))
+    set_padron = set(_get_tabla_cols(db_session, "tabla_padron"))
+    set_comp = set(_get_tabla_cols(db_session, "tabla_complementaria"))
     set_comp_edit = set(cols_complementaria)
 
     select_parts = []
@@ -368,15 +560,27 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str]) 
         if col == "viabilidad":
             select_parts.append("'pendiente'")
         elif col in set_comp_edit and col in set_comp:
-            select_parts.append(f"c.`{col}`")
+            # ============================================================
+            # PARA FECHAS, USAR CAST PARA ASEGURAR FORMATO CORRECTO
+            # ============================================================
+            if col in _DATE_COLS.get(proyecto_slug, []):
+                select_parts.append(f"CAST(c.`{col}` AS DATETIME)")
+            else:
+                select_parts.append(f"c.`{col}`")
         elif col in set_padron:
-            select_parts.append(f"p.`{col}`")
+            # ============================================================
+            # PARA FECHAS, USAR CAST PARA ASEGURAR FORMATO CORRECTO
+            # ============================================================
+            if col in _DATE_COLS.get(proyecto_slug, []):
+                select_parts.append(f"CAST(p.`{col}` AS DATETIME)")
+            else:
+                select_parts.append(f"p.`{col}`")
         elif col in set_comp:
             select_parts.append(f"c.`{col}`")
         else:
             select_parts.append("NULL")
 
-    cols_str   = ", ".join(f"`{c}`" for c in cols_analisis)
+    cols_str = ", ".join(f"`{c}`" for c in cols_analisis)
     select_str = ", ".join(select_parts)
     return (
         f"INSERT INTO tabla_analisis ({cols_str})\n"
@@ -403,33 +607,15 @@ def _generar_codebar_completo(
     - VISTA: número de visita (ej: 3)
     """
     from datetime import datetime as dt
+    from app.services.codebar_service import CodebarService
 
-    fecha_base_excel = dt(1899, 12, 30)
-
-    # PK COMPLETA - NO TRUNCADA
-    pk_completa = str(pk_value)
-
-    # Fecha serial
-    fecha_str = str((fecha_emision - fecha_base_excel).days)
-
-    # Identificador del documento + visita
-    ident_str = ""
-    if identificador_documento:
-        ident_str = str(identificador_documento).upper()
-
-    visita_str = ""
-    if visita:
-        # Si visita es un número, lo dejamos como está
-        visita_str = str(visita).strip()
-
-    # Combinar identificador + visita (ej: N3, R1, A2)
-    combo_str = f"{ident_str}{visita_str}" if ident_str or visita_str else ""
-
-    # Construir código completo
-    codigo = f"{pk_completa}{fecha_str}{combo_str}"
-
-    # Código 39 con asteriscos
-    return f"*{codigo.upper()}*"
+    return CodebarService.generar_codebar_completo(
+        pk_value=pk_value,
+        fecha_emision=fecha_emision,
+        visita=visita,
+        identificador_documento=identificador_documento,
+        id_documento=id_documento
+    )
 
 
 def _upsert_tabla_dinamica(
@@ -437,7 +623,10 @@ def _upsert_tabla_dinamica(
     pk_name: str,
     pk_value: Any,
     data: Dict[str, Any],
-    cols_existentes: set
+    cols_existentes: set,
+    nombre: Optional[str] = None,
+    adeudo: Optional[float] = None,
+    info: Optional[Dict] = None
 ):
     """
     Inserta o actualiza un registro en tabla_dinamica
@@ -451,6 +640,23 @@ def _upsert_tabla_dinamica(
             continue
         if key in cols_existentes:
             data_filtrada[key] = value
+
+    # ============================================================
+    # AGREGAR CAMPOS DE NOMBRE Y ADEUDO SI NO EXISTEN
+    # ============================================================
+    if nombre is not None and nombre not in data_filtrada:
+        # Buscar la columna de nombre en tabla_dinamica
+        for col_nombre in ['nombre', 'propietario', 'nombre_razon_social', 'propietario_nombre', 'nombre_contribuyente']:
+            if col_nombre in cols_existentes:
+                data_filtrada[col_nombre] = nombre
+                break
+    
+    if adeudo is not None and adeudo not in data_filtrada:
+        # Buscar la columna de adeudo en tabla_dinamica
+        for col_adeudo in ['saldo', 'total_adeudo', 'importe_historico_determinado', 'adeudo', 'total']:
+            if col_adeudo in cols_existentes:
+                data_filtrada[col_adeudo] = adeudo
+                break
 
     if not data_filtrada:
         print(f"⚠️ No hay columnas válidas para guardar {pk_name}={pk_value}")
@@ -759,14 +965,15 @@ async def cargar_padron(
     try:
         for idx, registro in enumerate(registros):
             try:
-                limpio: Dict[str, Any] = {
-                    k: _safe_value_v2(v, col_name=k, slug=proyecto_slug)
-                    for k, v in registro.items()
-                }
+                limpio: Dict[str, Any] = {}
+                for k, v in registro.items():
+                    limpio[k] = _safe_value_v2(v, col_name=k, slug=proyecto_slug)
                 pk_val = limpio.get(pk)
+
                 if pk_val is None:
                     errores.append(f"Fila {idx + 2}: sin valor en '{pk}', se omite.")
                     continue
+                
                 if info["pk_type"] == "int":
                     try:
                         pk_val = int(pk_val); limpio[pk] = pk_val
@@ -845,7 +1052,7 @@ async def cargar_padron(
 def get_complementar(
     proyecto_slug: str,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
     search: Optional[str] = None,
     programa: Optional[str] = Query(None),
     sort_col: Optional[str] = Query(None),
@@ -875,6 +1082,7 @@ def get_complementar(
     where = " AND ".join(conditions)
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
+    
     try:
         total = db_proyecto.execute(
             text(f"SELECT COUNT(*) AS total FROM tabla_padron p WHERE {where}"), params
@@ -1011,7 +1219,7 @@ def generar_analisis(
 
     try:
         previo = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_analisis")).first().c
-        insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"])
+        insert_sql = _build_analisis_insert(db_proyecto, pk, info["columnas_complementaria"], proyecto_slug)
 
         db_proyecto.execute(text("DELETE FROM tabla_analisis"))
         db_proyecto.execute(text(insert_sql))
@@ -1310,6 +1518,10 @@ async def cargar_complemento_csv(
                     v = row[col]
                     if pd.isna(v) or v == "":
                         continue
+                    
+                    if match in _DATE_COLS.get(proyecto_slug, []):
+                        v = _safe_value_v2(v, col_name=match, slug=proyecto_slug)
+                    
                     campos[match] = v
 
                 if not campos:
@@ -1425,7 +1637,7 @@ def get_analisis(
     busqueda: Optional[str] = Query(None, description="Búsqueda general"),
     programa: Optional[str] = Query(None, description="Filtrar por programa"),
     page: int = Query(1, ge=1, description="Número de página"),
-    limit: int = Query(50, ge=1, le=50, description="Registros por página"),
+    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
     sort_col: Optional[str] = Query(None, description="Columna para ordenar"),
     sort_dir: Optional[str] = Query("asc", description="Dirección de ordenamiento (asc/desc)"),
     current_user: Usuario = Depends(get_current_active_user),
@@ -1482,7 +1694,8 @@ def get_analisis(
                 v = row_dict.get(col)
                 if v is not None:
                     try:
-                        adeudo_val = float(v); break
+                        adeudo_val = float(v)
+                        break
                     except (TypeError, ValueError):
                         pass
             row_dict["_adeudo_display"] = adeudo_val
@@ -1490,13 +1703,15 @@ def get_analisis(
             for col in info["col_nombre"]:
                 v = row_dict.get(col)
                 if v:
-                    nombre_val = str(v); break
+                    nombre_val = str(v)
+                    break
             row_dict["_nombre_display"] = nombre_val
             calle_val = ""
             for col in info["col_calle"]:
                 v = row_dict.get(col)
                 if v:
-                    calle_val = str(v); break
+                    calle_val = str(v)
+                    break
             row_dict["_calle_display"] = calle_val
             result.append(row_dict)
 
@@ -1509,17 +1724,49 @@ def get_analisis(
 # ============================================================
 
 def _safe_value_v2(val: Any, col_name: str = "", slug: str = "") -> Any:
+    """
+    Versión mejorada de _safe_value para usar en cálculos.
+    """
     if val is None:
         return None
+    
+    # Si es pandas NA/NaN
     try:
         if pd.isna(val):
             return None
     except (TypeError, ValueError):
         pass
+    
+    # Si es pandas Timestamp
     if isinstance(val, pd.Timestamp):
-        return val.to_pydatetime()
+        try:
+            return val.to_pydatetime()
+        except Exception:
+            return val
+    
+    # Si es datetime
+    if isinstance(val, datetime):
+        return val
+    
+    # Si es string y es columna de fecha
     if isinstance(val, str) and col_name in _DATE_COLS.get(slug, []):
-        return _parse_fecha(val)
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed
+        return val
+    
+    # Si es número y columna de fecha
+    if isinstance(val, (int, float)) and col_name in _DATE_COLS.get(slug, []):
+        parsed = _parse_fecha(val)
+        if parsed:
+            return parsed
+    
+    # Si es string, limpiar
+    if isinstance(val, str):
+        val = val.strip()
+        if val == "":
+            return None
+    
     return val
 
 
@@ -1548,10 +1795,6 @@ def calcular_todas_filas(
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
 
-    # A partir de aquí, TODO el flujo (incluyendo los returns tempranos)
-    # queda envuelto en try/finally para garantizar db_gen.close() siempre,
-    # sin importar por dónde salga la función. Esto es crítico aquí porque
-    # el proceso es largo y masivo (el más propenso a saturar el pool).
     try:
         try:
             db_proyecto.execute(text("SELECT 1 FROM tabla_analisis LIMIT 1"))
@@ -1640,6 +1883,19 @@ def calcular_todas_filas(
                     fecha_inpc_b DATE,
                     periodo_b VARCHAR(7),
                     inpc_b DECIMAL(10,4),
+                    -- ============================================================
+                    -- COLUMNAS PARA NOMBRE Y ADEUDO (AGREGAR SI NO EXISTEN)
+                    -- ============================================================
+                    nombre VARCHAR(255),
+                    propietario VARCHAR(255),
+                    nombre_razon_social VARCHAR(255),
+                    propietario_nombre VARCHAR(255),
+                    nombre_contribuyente VARCHAR(255),
+                    saldo DECIMAL(15,2),
+                    total_adeudo DECIMAL(15,2),
+                    importe_historico_determinado DECIMAL(15,2),
+                    adeudo DECIMAL(15,2),
+                    total DECIMAL(15,2),
                     INDEX idx_codebar (codebar),
                     INDEX idx_fecha_emision (fecha_emision)
                 )
@@ -1654,6 +1910,14 @@ def calcular_todas_filas(
         except Exception:
             pass
 
+        # ============================================================
+        # OBTENER INFO DEL PROYECTO PARA NOMBRE Y ADEUDO
+        # ============================================================
+        from app.api.analisis import _info
+        info = _info(proyecto_slug)
+        col_nombre = info["col_nombre"][0] if info["col_nombre"] else None
+        col_adeudo = info["col_adeudo"][0] if info["col_adeudo"] else None
+
         procesados = 0
         errores = []
         batch_size = 100
@@ -1665,6 +1929,37 @@ def calcular_todas_filas(
             if not pk_value:
                 errores.append(f"Fila {idx}: Sin PK - SKIP")
                 continue
+
+            # ============================================================
+            # EXTRAER NOMBRE Y ADEUDO DEL REGISTRO
+            # ============================================================
+            nombre_valor = None
+            if col_nombre:
+                nombre_valor = row_dict.get(col_nombre)
+                if not nombre_valor:
+                    # Intentar con otras columnas de nombre
+                    for col in info["col_nombre"]:
+                        nombre_valor = row_dict.get(col)
+                        if nombre_valor:
+                            break
+                if nombre_valor:
+                    nombre_valor = str(nombre_valor)
+
+            adeudo_valor = None
+            if col_adeudo:
+                try:
+                    adeudo_valor = float(row_dict.get(col_adeudo, 0))
+                except (TypeError, ValueError):
+                    adeudo_valor = 0
+                if adeudo_valor == 0:
+                    # Intentar con otras columnas de adeudo
+                    for col in info["col_adeudo"]:
+                        try:
+                            adeudo_valor = float(row_dict.get(col, 0))
+                            if adeudo_valor > 0:
+                                break
+                        except (TypeError, ValueError):
+                            continue
 
             try:
                 if proyecto_slug == "estado":
@@ -1689,7 +1984,7 @@ def calcular_todas_filas(
                             errores.append(f"Fila {pk_value}: fecha_notificacion tipo inválido - SKIP")
                             continue
 
-                    importe_historico = row_dict.get('importe_historico_determinado', 0)
+                    importe_historico = adeudo_valor or float(row_dict.get('importe_historico_determinado', 0))
                     try:
                         importe_historico = float(importe_historico)
                     except (ValueError, TypeError):
@@ -1711,7 +2006,6 @@ def calcular_todas_filas(
                     importe_letra = numero_a_letras(total_actualizado)
                     po_valor = pmo or ''
 
-                    # Usar _generar_codebar_completo (definida arriba)
                     codebar = CodebarService.generar_codebar_completo(
                         pk_value=str(pk_value),
                         fecha_emision=fecha_emision_dt,
@@ -1732,7 +2026,6 @@ def calcular_todas_filas(
                         "no_documento": nombre_documento,
                         "importe_letra": importe_letra,
                         "proximo_inpc": ultimo_inpc["periodo"] if ultimo_inpc else None,
-                        # REMOVIDOS LOS float() AQUÍ:
                         "inpc_notificacion": data["inpc_a"],
                         "inpc_requerimiento": data["inpc_b"],
                         "periodo_notificacion": data["periodo_a"],
@@ -1749,15 +2042,143 @@ def calcular_todas_filas(
                         "pk": pk_value
                     }
 
+                    # ============================================================
+                    # GUARDAR CON NOMBRE Y ADEUDO
+                    # ============================================================
                     _upsert_tabla_dinamica(
                         db_proyecto,
                         pk_name,
                         pk_value,
                         data_dict,
-                        cols_dinamica
+                        cols_dinamica,
+                        nombre=nombre_valor,
+                        adeudo=total_actualizado,
+                        info=info
                     )
                     procesados += 1
+                
+                if proyecto_slug == "pensiones":
+                    # ============================================================
+                    # 1. OBTENER DATOS DEL REGISTRO
+                    # ============================================================
+                    pk_value = row_dict.get('prestamo')
+                    if not pk_value:
+                        errores.append(f"Fila {idx}: Sin PK - SKIP")
+                        continue
 
+                    # ============================================================
+                    # 2. OBTENER Y VALIDAR FECHA DE ÚLTIMO ABONO
+                    # ============================================================
+                    ultimo_abono_raw = row_dict.get('ultimo_abono')
+                    ultimo_abono_modificado = None
+                    fecha_ultimo_abono = None
+                    
+                    if ultimo_abono_raw:
+                        try:
+                            # Convertir a datetime si es string
+                            if isinstance(ultimo_abono_raw, str):
+                                # Intentar varios formatos
+                                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d']:
+                                    try:
+                                        fecha_ultimo_abono = datetime.strptime(ultimo_abono_raw, fmt)
+                                        break
+                                    except ValueError:
+                                        continue
+                                # Si no se pudo parsear con los formatos anteriores
+                                if fecha_ultimo_abono is None:
+                                    try:
+                                        from dateutil import parser
+                                        fecha_ultimo_abono = parser.parse(ultimo_abono_raw)
+                                    except (ImportError, ValueError, TypeError):
+                                        pass
+                            elif isinstance(ultimo_abono_raw, datetime):
+                                fecha_ultimo_abono = ultimo_abono_raw
+                            elif hasattr(ultimo_abono_raw, 'to_pydatetime'):
+                                # Si es pandas Timestamp
+                                fecha_ultimo_abono = ultimo_abono_raw.to_pydatetime()
+                            else:
+                                # Intentar convertir a datetime
+                                try:
+                                    fecha_ultimo_abono = datetime.combine(ultimo_abono_raw, datetime.min.time())
+                                except Exception:
+                                    pass
+                            
+                            # ============================================================
+                            # 3. CALCULAR DIFERENCIA EN AÑOS
+                            # ============================================================
+                            if fecha_ultimo_abono:
+                                hoy = datetime.now()
+                                diferencia = hoy - fecha_ultimo_abono
+                                # Calcular años exactos (considerando años bisiestos)
+                                años = diferencia.days / 365.25
+                                
+                                # Si la diferencia es MENOR o IGUAL a 5 años, guardar la fecha
+                                if años <= 5:
+                                    ultimo_abono_modificado = fecha_ultimo_abono.strftime('%Y-%m-%d')
+                                else:
+                                    # Mayor a 5 años → NULL
+                                    ultimo_abono_modificado = None
+                                    
+                        except Exception as e:
+                            logger.warning(f"Error procesando último abono para PK {pk_value}: {e}")
+                            ultimo_abono_modificado = None
+
+                    # ============================================================
+                    # 4. CALCULAR SUB_ESTATUS_ID BASADO EN PROGRAMA
+                    # ============================================================
+                    programa = row_dict.get('programa', '')
+                    sub_estatus_id = None
+                    
+                    if programa:
+                        programa_lower = programa.lower()
+                        if any(palabra in programa_lower for palabra in ['judicial', 'juridico', 'cobranza juridica']):
+                            sub_estatus_id = 'CJ'  # Cobranza Judicial
+                        else:
+                            sub_estatus_id = 'CE'  # Cobranza Extrajudicial
+
+                    # ============================================================
+                    # 5. GENERAR CÓDIGO DE BARRAS
+                    # ============================================================
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento
+                    )
+
+                    # ============================================================
+                    # 6. PREPARAR DATOS PARA GUARDAR
+                    # ============================================================
+                    data_dict = {
+                        "codebar": codebar,
+                        "id_documento": id_documento,
+                        "visita": visita,
+                        "pmo": pmo,
+                        "fecha_emision": fecha_emision_dt,
+                        "id_notificador": id_notificador,
+                        "no_documento": nombre_documento,
+                        "pk": pk_value,
+                        # ============================================================
+                        # NUEVOS CAMPOS PARA PENSIONES
+                        # ============================================================
+                        "ultimo_abono_modificado": ultimo_abono_modificado,
+                        "sub_estatus_id": sub_estatus_id,
+                    }
+
+                    # ============================================================
+                    # 7. GUARDAR EN TABLA_DINAMICA
+                    # ============================================================
+                    _upsert_tabla_dinamica(
+                        db_proyecto,
+                        pk_name,
+                        pk_value,
+                        data_dict,
+                        cols_dinamica,
+                        nombre=nombre_valor,
+                        adeudo=adeudo_valor,
+                        info=info
+                    )
+                    procesados += 1
                 else:
                     codebar = CodebarService.generar_codebar_completo(
                         pk_value=str(pk_value),
@@ -1777,12 +2198,18 @@ def calcular_todas_filas(
                         "pk": pk_value
                     }
 
+                    # ============================================================
+                    # GUARDAR CON NOMBRE Y ADEUDO
+                    # ============================================================
                     _upsert_tabla_dinamica(
                         db_proyecto,
                         pk_name,
                         pk_value,
                         data_dict,
-                        cols_dinamica
+                        cols_dinamica,
+                        nombre=nombre_valor,
+                        adeudo=adeudo_valor,
+                        info=info
                     )
                     procesados += 1
 

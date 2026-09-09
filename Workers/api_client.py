@@ -347,6 +347,41 @@ class WorkerAPIClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error obteniendo datos del job {job_id}: {e}")
             return None
+        
+    def register(self) -> bool:
+        """
+        Registra el worker en el backend.
+        """
+        try:
+            response = self.session.post(
+                f"{self.base_url}/emision/workers/register",
+                params={
+                    "worker_id": self.worker_id,
+                    "worker_secret": self.worker_secret
+                },
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            new_token = data.get("access_token")
+            
+            if new_token:
+                self.token = new_token
+                self.session.headers.update({
+                    'Authorization': f'Bearer {new_token}'
+                })
+                logger.info(f"Worker {self.worker_id} registrado correctamente")
+                return True
+            else:
+                logger.error("No se recibió token de autenticación")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error registrando worker: {e}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Respuesta del servidor: {e.response.text}")
+            return False
 
 
 # ============================================================

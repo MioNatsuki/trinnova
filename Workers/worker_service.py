@@ -734,18 +734,25 @@ class TrinnovaWorker:
                     placeholders['_total_paginas'] = "1"
                     placeholders['orden_impresion'] = str(orden_actual)
                     
+                    # ============================================================
+                    # GENERAR CÓDIGO DE BARRAS - FIRMA CORRECTA
+                    # ============================================================
                     if 'codebar' not in placeholders:
-                        placeholders['codebar'] = CodebarService.generar_codebar_completo(
+                        from backend.app.services.codebar_service import CodebarService
+                        
+                        codebar = CodebarService.generar_codebar_completo(
                             pk_value=str(pk_value),
                             fecha_emision=datetime.now(),
                             visita=job_data.get('visita'),
                             identificador_documento=job_data.get('identificador_documento')
                         )
+                        placeholders['codebar'] = codebar
                     
                     pdf_bytes = await renderer.render_pdf(
                         plantilla_archivo,
                         placeholders,
-                        altura=1286
+                        altura=1286,
+                        inject_codebar_style=True  # ← Para asegurar que el estilo se inyecte
                     )
                     
                     nombre_pdf = f"{orden_actual:05d} - {pk_value}.pdf"

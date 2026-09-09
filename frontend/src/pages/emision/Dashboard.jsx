@@ -1,5 +1,6 @@
 // frontend/src/pages/emision/Dashboard.jsx
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
 import SeleccionCuentas from './SeleccionCuentas';
@@ -10,6 +11,7 @@ import api from '../../api/auth';
 import './Dashboard.css';
 
 export default function DashboardEmision() {
+  const location = useLocation();
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
   const [loading, setLoading] = useState(false);
   const [estadisticas, setEstadisticas] = useState(null);
@@ -22,11 +24,11 @@ export default function DashboardEmision() {
   
   // Cargar datos iniciales
   useEffect(() => {
-    if (proyectoSlug) {
-      cargarDatos();
-      cargarJobsRecientes();
-    }
-  }, [proyectoSlug]);
+        const state = location.state;
+        if (state?.proyectoSlug) {
+            setProyectoSlug(state.proyectoSlug);
+        }
+    }, [location.state, setProyectoSlug]);
   
   const cargarDatos = async () => {
     setLoading(true);

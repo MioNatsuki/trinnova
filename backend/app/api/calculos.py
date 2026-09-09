@@ -193,7 +193,8 @@ def _calcular_campos_apa_tlajomulco(
     fila: Dict[str, Any],
     fecha_emision: datetime,
     visita: Optional[str],
-    pmo: Optional[str]
+    pmo: Optional[str],
+    identificador_documento: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Calcula todos los campos específicos para el proyecto APA Tlajomulco
@@ -246,7 +247,8 @@ def _calcular_campos_genericos(
     fila: Dict[str, Any],
     fecha_emision: datetime,
     visita: Optional[str],
-    pmo: Optional[str]
+    pmo: Optional[str],
+    identificador_documento: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Calcula campos genéricos para cualquier proyecto
@@ -578,7 +580,7 @@ def obtener_ultimo_inpc(
 def get_tabla_dinamica(
     proyecto_slug: str,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -612,13 +614,74 @@ def get_tabla_dinamica(
         }
     
     offset = (page - 1) * limit
+    
+    # ============================================================
+    # OBTENER DATOS CON TODAS LAS COLUMNAS
+    # ============================================================
     total = db_proyecto.execute(text("SELECT COUNT(*) AS total FROM tabla_dinamica")).first().total
+    
+    # Obtener columnas de la tabla
+    cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_dinamica")).fetchall()
+    all_cols = [r[0] for r in cols_result]
+    
+    # Asegurar que las columnas de nombre y adeudo estén incluidas
+    nombre_cols = ['nombre', 'propietario', 'nombre_razon_social', 'propietario_nombre', 'nombre_contribuyente']
+    adeudo_cols = ['saldo', 'total_adeudo', 'importe_historico_determinado', 'adeudo', 'total']
+    
+    # Construir SELECT con todas las columnas
+    select_cols = []
+    for col in all_cols:
+        select_cols.append(f"`{col}`")
+    
+    # Si no hay columnas de nombre, agregarlas como NULL
+    has_nombre = any(col in all_cols for col in nombre_cols)
+    has_adeudo = any(col in all_cols for col in adeudo_cols)
+    
+    if not has_nombre:
+        # Agregar alias para las columnas de nombre
+        for col in nombre_cols:
+            if col not in all_cols:
+                select_cols.append(f"NULL AS `{col}`")
+    
+    if not has_adeudo:
+        # Agregar alias para las columnas de adeudo
+        for col in adeudo_cols:
+            if col not in all_cols:
+                select_cols.append(f"NULL AS `{col}`")
+    
+    select_str = ", ".join(select_cols)
+    
     rows = db_proyecto.execute(
-        text(f"SELECT * FROM tabla_dinamica LIMIT {limit} OFFSET {offset}")
+        text(f"SELECT {select_str} FROM tabla_dinamica LIMIT {limit} OFFSET {offset}")
     ).fetchall()
     
+    # Procesar resultados para asegurar que los campos de nombre y adeudo estén presentes
+    result = []
+    for r in rows:
+        row_dict = dict(r._mapping)
+        
+        # Asegurar que hay al menos un campo de nombre
+        has_name = False
+        for col in nombre_cols:
+            if row_dict.get(col):
+                has_name = True
+                break
+        if not has_name:
+            row_dict['nombre'] = 'Sin nombre'
+        
+        # Asegurar que hay al menos un campo de adeudo
+        has_adeudo_val = False
+        for col in adeudo_cols:
+            if row_dict.get(col) is not None:
+                has_adeudo_val = True
+                break
+        if not has_adeudo_val:
+            row_dict['saldo'] = 0
+        
+        result.append(row_dict)
+    
     return {
-        "rows": [dict(r._mapping) for r in rows],
+        "rows": result,
         "total": total,
         "page": page,
         "limit": limit,

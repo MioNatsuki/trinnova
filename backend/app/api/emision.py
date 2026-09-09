@@ -1,33 +1,47 @@
 from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, Dict, Any, List
 import json
 import logging
-import secrets as secrets_module  # para comparación segura de secretos (evita timing attacks)
-
-from app.db.session import get_global_db
-from app.core.dependencies import get_current_active_user, check_project_access
-from app.models.global_models import Usuario, Proyecto, Plantilla, EmisionJob, EmisionDetalle
-from app.db.router import get_project_db
-from app.services.log_service import registrar_log
-from pydantic import BaseModel, Field
-
+import secrets as secrets_module
 import hashlib
-
 import shutil
 import os
 from datetime import datetime, timedelta
 import zipfile
-
-from app.services.monitoreo_service import MonitoreoService
-
 import tempfile
+
+from app.db.session import get_global_db
+from app.core.dependencies import get_current_active_user, check_project_access
+from app.core.config import settings
+# ============================================================
+# IMPORTACIONES CORRECTAS DE REDIS
+# ============================================================
+from app.core.redis_client import (
+    redis_client,           # ← La instancia del cliente
+    push_job,               # ← Función para publicar jobs
+    get_queue_length,       # ← Función para obtener longitud de cola
+    get_all_queue_jobs,     # ← Función para obtener todos los jobs
+    set_job_status,         # ← Función para actualizar estado
+    get_job_status,         # ← Función para obtener estado
+    set_checkpoint,         # ← Función para guardar checkpoint
+    get_checkpoint,         # ← Función para obtener checkpoint
+    is_worker_registered,   # ← Función para verificar worker registrado
+    get_worker_job,         # ← Función para obtener worker de un job
+    set_worker_job,         # ← Función para asignar worker a un job
+    remove_worker_job,      # ← Función para remover worker de un job
+    clear_job_cache         # ← Función para limpiar cache
+)
+
+from app.models.global_models import Usuario, Proyecto, Plantilla, EmisionJob, EmisionDetalle
+from app.db.router import get_project_db
+from app.services.log_service import registrar_log
+from app.services.monitoreo_service import MonitoreoService
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from sqlalchemy import func
-
 
 logger = logging.getLogger(__name__)
 
@@ -368,21 +382,16 @@ def _limpiar_archivos_temporales(temp_path: Path, dias_antiguedad: int = 7) -> i
 
 def _worker_esta_registrado(worker_id: str) -> bool:
     """
-    Verifica que el worker_id tenga un registro vigente en Redis,
-    generado únicamente por /workers/register tras validar worker_secret.
-
-    Antes esto era un TODO ("por ahora solo validamos token"): cualquier
-    usuario autenticado podía llamar a los endpoints de worker sin que el
-    sistema comprobara que quien llama es realmente un worker dado de alta.
-    Ahora se exige que exista la llave `worker:{worker_id}:auth`, que solo
-    se crea dentro de /workers/register después de validar el secreto.
+    Verifica que el worker_id tenga un registro vigente en Redis.
     """
-    from app.core.redis_client import redis_client
-    redis_conn = redis_client.connection
-    return redis_conn.exists(f"worker:{worker_id}:auth") == 1
+    # Usar la función de conveniencia
+    return is_worker_registered(worker_id)
 
 
 def _requerir_worker_registrado(worker_id: str) -> None:
+    """
+    Requiere que el worker esté registrado. Lanza excepción si no.
+    """
     if not worker_id or not _worker_esta_registrado(worker_id):
         raise HTTPException(
             status_code=403,
@@ -705,7 +714,7 @@ def get_estadisticas_emision(
 def get_cuentas_emision(
     proyecto_slug: str,
     page: int = Query(1, ge=1, description="Número de página"),
-    limit: int = Query(50, ge=1, le=100, description="Registros por página"),
+    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
     viabilidad: Optional[str] = Query(None, description="Filtrar por viabilidad"),
     programa: Optional[str] = Query(None, description="Filtrar por programa"),
     busqueda: Optional[str] = Query(None, description="Búsqueda general"),
@@ -873,30 +882,14 @@ def get_pending_jobs(
 ):
     """
     Obtiene jobs pendientes para el worker.
-
-    Usa Redis como fuente de verdad para la cola.
-    - Verifica que el worker esté registrado (ver _requerir_worker_registrado)
-    - Obtiene job_ids de Redis
-    - Consulta BD para obtener detalles completos
-    - Retorna solo jobs en estado 'pending'
     """
-    from app.core.redis_client import get_queue_length, redis_client
-
-    # Verificar que el worker está registrado.
-    # (Antes era un TODO: solo se validaba el token del usuario, no que
-    # quien llama sea realmente un worker dado de alta vía /workers/register.)
+    # Verificar que el worker está registrado
     _requerir_worker_registrado(worker_id)
 
-    # Obtener todos los job_ids de la cola de Redis
-    queue_length = get_queue_length()
-
-    if queue_length == 0:
-        return {"jobs": [], "total": 0}
-
-    # Obtener todos los jobs de la cola (sin removerlos)
-    # Usamos LRANGE para ver la cola sin popear
-    redis_conn = redis_client.connection
-    job_ids = redis_conn.lrange("emision_jobs", 0, -1)
+    # ============================================================
+    # OBTENER TODOS LOS JOBS DE LA COLA (SIN REMOVERLOS)
+    # ============================================================
+    job_ids = get_all_queue_jobs()  # ← Usar función de conveniencia
 
     jobs = []
     for job_id_str in job_ids:
@@ -911,7 +904,7 @@ def get_pending_jobs(
 
             if not job:
                 # Si el job ya no existe o no está pending, limpiar de Redis
-                redis_conn.lrem("emision_jobs", 0, job_id_str)
+                redis_client.connection.lrem("emision_jobs", 0, job_id_str)
                 continue
 
             # Obtener datos del proyecto y plantilla
@@ -936,7 +929,6 @@ def get_pending_jobs(
             })
 
         except ValueError:
-            # Si no es un número válido, ignorar
             continue
         except Exception as e:
             logger.error(f"Error procesando job {job_id_str}: {e}")
@@ -957,24 +949,14 @@ def claim_job(
 ):
     """
     Toma un job para procesarlo.
-
-    Flujo:
-    1. Verifica que el worker esté registrado
-    2. Verifica que el job existe y está en estado 'pending'
-    3. Lo marca como 'processing' en BD
-    4. Remueve el job de la cola de Redis
-    5. Retorna los datos del job al worker
     """
-    from app.core.redis_client import redis_client
-
     worker_id = request.get("worker_id")
     job_id = request.get("job_id")
 
     if not worker_id or not job_id:
         raise HTTPException(status_code=400, detail="Faltan worker_id o job_id")
 
-    # Mismo control de registro que en /workers/pending: sin esto, cualquier
-    # usuario autenticado podía reclamar jobs ajenos haciéndose pasar por worker.
+    # Verificar que el worker está registrado
     _requerir_worker_registrado(worker_id)
 
     # Obtener job
@@ -1000,12 +982,8 @@ def claim_job(
     job.ultimo_pk_procesado = None
     db_global.commit()
 
-    # Guardar en Redis que está siendo procesado
-    redis_conn.setex(
-        f"job:{job_id}:worker",
-        3600,  # 1 hora
-        worker_id
-    )
+    # Guardar en Redis que está siendo procesado (usar función de conveniencia)
+    set_worker_job(job_id, worker_id)
 
     # Obtener datos del proyecto y plantilla
     proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
@@ -1051,23 +1029,14 @@ def update_progress(
 ):
     """
     Actualiza el progreso de un job.
-
-    Recibe:
-    - procesados: Número de registros procesados
-    - ultimo_pk: Última PK procesada
-    - status: processing | completed | failed
-    - error_msg: Mensaje de error (opcional)
     """
-    from app.core.redis_client import redis_client
-
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
 
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
 
     # Verificar que el worker tiene el job
-    redis_conn = redis_client.connection
-    current_worker = redis_conn.get(f"job:{job_id}:worker")
+    current_worker = get_worker_job(job_id)  # ← Usar función de conveniencia
 
     if current_worker and current_worker != worker_id:
         raise HTTPException(
@@ -1085,7 +1054,6 @@ def update_progress(
     if "status" in request:
         new_status = request["status"]
 
-        # Validar transiciones de estado
         valid_transitions = {
             'processing': ['processing', 'completed', 'failed', 'cancelled'],
             'pending': ['processing', 'cancelled'],
@@ -1101,12 +1069,10 @@ def update_progress(
                 detail=f"Transición inválida: {job.status} -> {new_status}"
             )
 
-        # Si se completa o falla, actualizar fechas
         if new_status in ['completed', 'failed', 'cancelled']:
             job.completed_at = datetime.now()
             # Limpiar de Redis
-            redis_conn.delete(f"job:{job_id}:worker")
-            # Actualizar checkpoint final
+            remove_worker_job(job_id)  # ← Usar función de conveniencia
             if request.get("checkpoint_data"):
                 job.checkpoint_data = request["checkpoint_data"]
 
@@ -1115,17 +1081,15 @@ def update_progress(
 
     db_global.commit()
 
-    # Guardar progreso en Redis (para consultas rápidas)
-    redis_conn.setex(
-        f"job:{job_id}:progress",
-        3600,
-        json.dumps({
+    # Guardar progreso en Redis
+    set_job_status(  # ← Usar función de conveniencia
+        job_id,
+        job.status,
+        {
             "procesados": job.procesados,
             "total": job.total_registros,
-            "status": job.status,
-            "ultimo_pk": job.ultimo_pk_procesado,
-            "updated_at": datetime.now().isoformat()
-        })
+            "ultimo_pk": job.ultimo_pk_procesado
+        }
     )
 
     return {
@@ -1139,6 +1103,7 @@ def update_progress(
             "ultimo_pk_procesado": job.ultimo_pk_procesado
         }
     }
+
 @router.post("/workers/{worker_id}/upload/{job_id}")
 def upload_result(
     worker_id: str,
@@ -1403,13 +1368,6 @@ def register_worker(
 ):
     """
     Registra un worker y devuelve un token JWT.
-    Usa un usuario de servicio preconfigurado.
-
-    IMPLEMENTACIÓN DEL TODO: antes este endpoint no comparaba worker_secret
-    contra ningún valor de referencia (el comentario decía "opcional"), así
-    que cualquiera podía llamarlo sin credenciales y obtener un token válido
-    de 24 horas para la cuenta de servicio. Ahora se exige que coincida con
-    settings.WORKER_SECRET, usando comparación de tiempo constante.
     """
     from app.core.security import create_access_token
     from app.core.config import settings
@@ -1418,15 +1376,10 @@ def register_worker(
     if not worker_id.startswith("worker_"):
         raise HTTPException(status_code=403, detail="ID de worker inválido")
 
-    # settings.WORKER_SECRET debe definirse en core/config.py, ver nota al
-    # final de este archivo. Si no está configurado, el registro se rechaza
-    # por completo: nunca se debe aceptar un secreto vacío como válido.
     secreto_configurado = getattr(settings, "WORKER_SECRET", "") or ""
+    
     if not secreto_configurado:
-        logger.error(
-            "WORKER_SECRET no está configurado en el servidor; "
-            "se rechaza el registro de workers hasta que se defina."
-        )
+        logger.error("WORKER_SECRET no está configurado")
         raise HTTPException(
             status_code=503,
             detail="Registro de workers no disponible: falta configuración del servidor.",
@@ -1436,16 +1389,37 @@ def register_worker(
         logger.warning(f"Intento de registro de worker '{worker_id}' con secreto inválido")
         raise HTTPException(status_code=403, detail="Secreto de worker inválido")
 
-    # Buscar usuario de servicio por correo
+    # Buscar usuario de servicio
     service_user = db_global.query(Usuario).filter(
         Usuario.correo == "worker@trinnova.local"
     ).first()
 
     if not service_user:
-        raise HTTPException(
-            status_code=404,
-            detail="Usuario de servicio no configurado. Contacta al administrador."
+        # Crear usuario de servicio
+        from app.core.security import hash_password
+        from app.models.global_models import Rol
+        
+        rol = db_global.query(Rol).filter(Rol.nombre == "auxiliar").first()
+        if not rol:
+            rol = db_global.query(Rol).first()
+            if not rol:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No se encontró ningún rol para el usuario de servicio"
+                )
+        
+        service_user = Usuario(
+            nombre="Worker",
+            apellidos="Service",
+            correo="worker@trinnova.local",
+            password_hash=hash_password("worker_service_2024_secure"),
+            id_rol=rol.id,
+            activo=True
         )
+        db_global.add(service_user)
+        db_global.commit()
+        db_global.refresh(service_user)
+        logger.info(f"Usuario de servicio creado: {service_user.correo}")
 
     if not service_user.activo:
         raise HTTPException(
@@ -1453,7 +1427,7 @@ def register_worker(
             detail="El usuario de servicio del worker está inactivo."
         )
 
-    # Generar token para el worker
+    # Generar token
     token = create_access_token(
         data={
             "sub": str(service_user.id),
@@ -1462,13 +1436,13 @@ def register_worker(
         }
     )
 
-    # Registrar worker activo en Redis. Esta llave es la que ahora consulta
-    # _worker_esta_registrado() antes de permitir /workers/pending y /workers/claim.
-    from app.core.redis_client import redis_client
+    # ============================================================
+    # REGISTRAR EN REDIS - USAR FUNCIÓN DE CONVENIENCIA
+    # ============================================================
     redis_conn = redis_client.connection
     redis_conn.setex(
         f"worker:{worker_id}:auth",
-        86400,  # 24 horas, igual que la vigencia del token emitido
+        86400,  # 24 horas
         json.dumps({
             "worker_id": worker_id,
             "user_id": service_user.id,

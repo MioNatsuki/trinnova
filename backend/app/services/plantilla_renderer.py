@@ -319,32 +319,41 @@ class PlantillaRenderer:
     ) -> List[bytes]:
         """
         Renderiza múltiples PDFs en paralelo.
-        
+
         Args:
             nombre_archivo: Nombre del archivo HTML
             placeholders_list: Lista de placeholders para cada PDF
             max_concurrent: Número máximo de páginas concurrentes
             altura: Altura personalizada
             codebar_prefix: Prefijo para códigos de barras (opcional)
-        
+
         Returns:
             List[bytes]: Lista de PDFs
         """
         semaphore = asyncio.Semaphore(max_concurrent)
-        
-        async def render_one(placeholders: Dict[str, str], idx: int) -> bytes:
+
+        async def render_one(
+            placeholders: Dict[str, str],
+            idx: int
+        ) -> bytes:
             async with semaphore:
+
                 # Generar código de barras si se solicitó
                 codebar = None
+
                 if codebar_prefix:
                     from app.services.codebar_service import CodebarService
+
                     pk = placeholders.get('pk', str(idx))
+
                     codebar = CodebarService.generar_codebar_completo(
                         pk_value=pk,
-                        identificador=placeholders.get('identificador_documento'),
+                        identificador_documento=placeholders.get(
+                            'identificador_documento'
+                        ),
                         visita=placeholders.get('visita')
                     )
-                
+
                 return await self.render_pdf(
                     nombre_archivo,
                     placeholders,
@@ -353,9 +362,14 @@ class PlantillaRenderer:
                     total_paginas=len(placeholders_list),
                     codebar=codebar
                 )
-        
-        tasks = [render_one(p, i) for i, p in enumerate(placeholders_list)]
+
+        tasks = [
+            render_one(placeholders, idx)
+            for idx, placeholders in enumerate(placeholders_list)
+        ]
+
         resultados = await asyncio.gather(*tasks)
+
         return resultados
     
     # ============================================================

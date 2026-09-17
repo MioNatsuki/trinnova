@@ -79,32 +79,59 @@ def get_dashboard(
     no_viables = 0
 
     if es_superadmin or es_analista:
+        from app.db.router import get_project_db
+
         for proyecto in proyectos:
+            db_gen = None
+
             try:
-                from app.db.router import get_project_db
-                db_proyecto = next(get_project_db(proyecto.slug))
-                
-                try:
-                    v = db_proyecto.execute(
-                        text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'viable'")
-                    ).first()
-                    viables += v.total if v else 0
-                    
-                    p = db_proyecto.execute(
-                        text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'pendiente'")
-                    ).first()
-                    pendientes += p.total if p else 0
-                    
-                    nv = db_proyecto.execute(
-                        text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'no_viable'")
-                    ).first()
-                    no_viables += nv.total if nv else 0
-                except Exception:
-                    pass
-                finally:
-                    db_proyecto.close()
+                db_gen = get_project_db(proyecto.slug)
+                db_proyecto = next(db_gen)
+
+                v = db_proyecto.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM tabla_analisis
+                        WHERE viabilidad = 'viable'
+                        """
+                    )
+                ).first()
+
+                viables += v.total if v else 0
+
+                p = db_proyecto.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM tabla_analisis
+                        WHERE viabilidad = 'pendiente'
+                        """
+                    )
+                ).first()
+
+                pendientes += p.total if p else 0
+
+                nv = db_proyecto.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM tabla_analisis
+                        WHERE viabilidad = 'no_viable'
+                        """
+                    )
+                ).first()
+
+                no_viables += nv.total if nv else 0
+
             except Exception:
+                # Un proyecto sin tabla_analisis no debe romper
+                # todo el dashboard.
                 pass
+
+            finally:
+                if db_gen is not None:
+                    db_gen.close()
 
     # --- Emisiones por mes y proyecto (últimos 6 meses) ---
     emisiones_raw = (

@@ -448,25 +448,66 @@ def preparar_emision(
     condiciones = ["viabilidad = 'viable'"]
     params = {}
 
-    if request.filtros.get("programa") and request.filtros["programa"] != "todos":
-        condiciones.append("programa = :programa")
+    if (
+        request.filtros.get("programa")
+        and request.filtros["programa"] != "todos"
+    ):
+        condiciones.append(
+            "programa = :programa"
+        )
+
         params["programa"] = request.filtros["programa"]
 
-    if request.filtros.get("ids") and isinstance(request.filtros["ids"], list):
-        placeholders = ", ".join([f":id{i}" for i in range(len(request.filtros["ids"]))])
-        condiciones.append(f"{pk} IN ({placeholders})")
+    if (
+        request.filtros.get("ids")
+        and isinstance(request.filtros["ids"], list)
+    ):
+        placeholders = ", ".join(
+            f":id{i}"
+            for i in range(len(request.filtros["ids"]))
+        )
+
+        condiciones.append(
+            f"`{pk}` IN ({placeholders})"
+        )
+
         for i, id_val in enumerate(request.filtros["ids"]):
             params[f"id{i}"] = id_val
 
-    if request.filtros.get("cuenta_inicial") and request.filtros.get("cuenta_final"):
-        condiciones.append(f"{pk} BETWEEN :inicio AND :fin")
+    if (
+        request.filtros.get("cuenta_inicial")
+        and request.filtros.get("cuenta_final")
+    ):
+        condiciones.append(
+            f"`{pk}` BETWEEN :inicio AND :fin"
+        )
+
         params["inicio"] = request.filtros["cuenta_inicial"]
         params["fin"] = request.filtros["cuenta_final"]
 
     where = " AND ".join(condiciones)
 
-    count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
-    total = db_proyecto.execute(count_query, params).first().total
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        count_query = text(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM tabla_analisis
+            WHERE {where}
+            """
+        )
+
+        count_result = db_proyecto.execute(
+            count_query,
+            params
+        ).first()
+
+        total = count_result.total if count_result else 0
+
+    finally:
+        db_gen.close()
 
     if total == 0:
         raise HTTPException(
@@ -671,25 +712,89 @@ def get_estadisticas_emision(
     """Obtiene estadísticas para emisión."""
     from sqlalchemy import text
 
-    check_project_access(proyecto_slug, current_user, db_global)
-    db_proyecto = next(get_project_db(proyecto_slug))
+    check_project_access(
+        proyecto_slug,
+        current_user,
+        db_global
+    )
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
     try:
-        total_viables = db_proyecto.execute(
-            text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'viable'")
-        ).first().total
+        total_viables_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'viable'
+                """
+            )
+        ).first()
 
-        total_no_viables = db_proyecto.execute(
-            text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'no_viable'")
-        ).first().total
+        total_no_viables_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'no_viable'
+                """
+            )
+        ).first()
 
-        total_pendientes = db_proyecto.execute(
-            text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = 'pendiente'")
-        ).first().total
+        total_pendientes_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'pendiente'
+                """
+            )
+        ).first()
 
-        total_general = db_proyecto.execute(
-            text("SELECT COUNT(*) AS total FROM tabla_analisis")
-        ).first().total
+        total_general_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                """
+            )
+        ).first()
+
+        total_viables = (
+            total_viables_row.total
+            if total_viables_row
+            else 0
+        )
+
+        total_no_viables = (
+            total_no_viables_row.total
+            if total_no_viables_row
+            else 0
+        )
+
+        total_pendientes = (
+            total_pendientes_row.total
+            if total_pendientes_row
+            else 0
+        )
+
+        total_general = (
+            total_general_row.total
+            if total_general_row
+            else 0
+        )
+
+        return {
+            "total_viables": total_viables,
+            "total_no_viables": total_no_viables,
+            "total_pendientes": total_pendientes,
+            "total_general": total_general,
+            "mensaje": (
+                f"{total_viables} registros "
+                "viables para emisión"
+            )
+        }
 
     except Exception as e:
         return {
@@ -697,17 +802,15 @@ def get_estadisticas_emision(
             "total_no_viables": 0,
             "total_pendientes": 0,
             "total_general": 0,
-            "mensaje": "La tabla de análisis aún no existe. Genera el análisis primero.",
+            "mensaje": (
+                "La tabla de análisis aún no existe. "
+                "Genera el análisis primero."
+            ),
             "error": str(e)
         }
 
-    return {
-        "total_viables": total_viables,
-        "total_no_viables": total_no_viables,
-        "total_pendientes": total_pendientes,
-        "total_general": total_general,
-        "mensaje": f"{total_viables} registros viables para emisión"
-    }
+    finally:
+        db_gen.close()
 
 
 @router.get("/{proyecto_slug}/cuentas")
@@ -730,98 +833,107 @@ def get_cuentas_emision(
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    db_proyecto = next(get_project_db(proyecto_slug))
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
 
-    conditions = []
-    params = {}
-
-    if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
-        conditions.append("viabilidad = :viabilidad")
-        params["viabilidad"] = viabilidad
-
-    if programa and programa != "todos":
-        conditions.append("programa = :programa")
-        params["programa"] = programa
-
-    if busqueda:
-        search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
-        parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
-        conditions.append("(" + " OR ".join(parts) + ")")
-        params["busqueda"] = f"%{busqueda}%"
-
-    where = " AND ".join(conditions) if conditions else "1=1"
-
-    # Columnas válidas para ordenamiento
     try:
-        cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-        cols_validas = {r[0] for r in cols_result}
-    except Exception:
-        cols_validas = set()
+        conditions = []
+        params = {}
 
-    order_col = pk
-    if sort_col and sort_col in cols_validas:
-        order_col = sort_col
-    order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+            conditions.append("viabilidad = :viabilidad")
+            params["viabilidad"] = viabilidad
 
-    # Contar total
-    count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
-    total = db_proyecto.execute(count_query, params).first().total
+        if programa and programa != "todos":
+            conditions.append("programa = :programa")
+            params["programa"] = programa
 
-    # Obtener datos
-    offset = (page - 1) * limit
-    data_query = text(f"""
-        SELECT * FROM tabla_analisis
-        WHERE {where}
-        ORDER BY `{order_col}` {order_dir}
-        LIMIT {limit} OFFSET {offset}
-    """)
-    rows = db_proyecto.execute(data_query, params).fetchall()
+        if busqueda:
+            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
+            parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
+            conditions.append("(" + " OR ".join(parts) + ")")
+            params["busqueda"] = f"%{busqueda}%"
 
-    # Procesar resultados
-    result = []
-    for r in rows:
-        row_dict = dict(r._mapping)
+        where = " AND ".join(conditions) if conditions else "1=1"
 
-        # Adeudo
-        adeudo_val = 0
-        for col in info["col_adeudo"]:
-            v = row_dict.get(col)
-            if v is not None:
-                try:
-                    adeudo_val = float(v)
+        # Columnas válidas para ordenamiento
+        try:
+            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
+            cols_validas = {r[0] for r in cols_result}
+        except Exception:
+            cols_validas = set()
+
+        order_col = pk
+        if sort_col and sort_col in cols_validas:
+            order_col = sort_col
+        order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+
+        # Contar total
+        count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
+        total = db_proyecto.execute(count_query, params).first().total
+
+        # Obtener datos
+        offset = (page - 1) * limit
+        data_query = text(f"""
+            SELECT * FROM tabla_analisis
+            WHERE {where}
+            ORDER BY `{order_col}` {order_dir}
+            LIMIT {limit} OFFSET {offset}
+        """)
+        rows = db_proyecto.execute(data_query, params).fetchall()
+
+        # Procesar resultados
+        result = []
+        for r in rows:
+            row_dict = dict(r._mapping)
+
+            # Adeudo
+            adeudo_val = 0
+            for col in info["col_adeudo"]:
+                v = row_dict.get(col)
+                if v is not None:
+                    try:
+                        adeudo_val = float(v)
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            row_dict["_adeudo_display"] = adeudo_val
+
+            # Nombre
+            nombre_val = ""
+            for col in info["col_nombre"]:
+                v = row_dict.get(col)
+                if v:
+                    nombre_val = str(v)
                     break
-                except (TypeError, ValueError):
-                    pass
-        row_dict["_adeudo_display"] = adeudo_val
+            row_dict["_nombre_display"] = nombre_val
 
-        # Nombre
-        nombre_val = ""
-        for col in info["col_nombre"]:
-            v = row_dict.get(col)
-            if v:
-                nombre_val = str(v)
-                break
-        row_dict["_nombre_display"] = nombre_val
+            # Calle
+            calle_val = ""
+            for col in info["col_calle"]:
+                v = row_dict.get(col)
+                if v:
+                    calle_val = str(v)
+                    break
+            row_dict["_calle_display"] = calle_val
 
-        # Calle
-        calle_val = ""
-        for col in info["col_calle"]:
-            v = row_dict.get(col)
-            if v:
-                calle_val = str(v)
-                break
-        row_dict["_calle_display"] = calle_val
+            result.append(row_dict)
 
-        result.append(row_dict)
+        return {
+            "rows": result,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+            "total_pages": (
+                (total + limit - 1) // limit
+                if total > 0
+                else 1
+            )
+        }
 
-    return {
-        "rows": result,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "pk": pk,
-        "total_pages": (total + limit - 1) // limit if total > 0 else 1
-    }
+    finally:
+        db_gen.close()
 
 
 # ============================================================
@@ -1499,17 +1611,22 @@ def verify_checkpoint(
     checkpoint = json.loads(checkpoint_data)
 
     # Obtener conexión al proyecto
-    db_proyecto = next(get_project_db(proyecto.slug))
     info = _info(proyecto.slug)
     pk = info["pk"]
 
-    # Verificar integridad
-    es_valido = _verificar_integridad_checkpoint(
-        db_proyecto,
-        checkpoint,
-        proyecto.slug,
-        pk
-    )
+    db_gen = get_project_db(proyecto.slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        es_valido = _verificar_integridad_checkpoint(
+            db_proyecto,
+            checkpoint,
+            proyecto.slug,
+            pk
+        )
+
+    finally:
+        db_gen.close()
 
     # Contar archivos existentes (si hay ruta local)
     archivos_existentes = 0
@@ -1583,23 +1700,33 @@ def restore_from_checkpoint(
     # Verificar integridad antes de restaurar
     proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
     if proyecto:
-        db_proyecto = next(get_project_db(proyecto.slug))
         from app.api.analisis import _info
+
         info = _info(proyecto.slug)
         pk = info["pk"]
 
-        es_valido = _verificar_integridad_checkpoint(
-            db_proyecto,
-            checkpoint,
-            proyecto.slug,
-            pk
-        )
+        db_gen = get_project_db(proyecto.slug)
+        db_proyecto = next(db_gen)
+
+        try:
+            es_valido = _verificar_integridad_checkpoint(
+                db_proyecto,
+                checkpoint,
+                proyecto.slug,
+                pk
+            )
+
+        finally:
+            db_gen.close()
 
         if not es_valido:
-            # Los datos cambiaron, no se puede recuperar
             return {
                 "success": False,
-                "mensaje": "Los datos originales han cambiado. No se puede recuperar. Reiniciando desde cero.",
+                "mensaje": (
+                    "Los datos originales han cambiado. "
+                    "No se puede recuperar. "
+                    "Reiniciando desde cero."
+                ),
                 "desde_cero": True,
                 "procesados": 0
             }

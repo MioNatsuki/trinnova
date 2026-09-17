@@ -114,6 +114,47 @@ const TableCell = ({ col, row, pk, proyectoSlug }) => {
     if (isPrimaryKeyColumn(col.key, proyectoSlug, pk)) {
         return <td key={col.key} className="col-pk">{value ?? '—'}</td>;
     }
+
+    if (col.key === 'sub_estatus_id' && value) {
+        const isCJ = value === 'CJ';
+        const isCE = value === 'CE';
+        let label = value;
+        let className = 'col-sub-estatus';
+        
+        if (isCJ) {
+            className += ' cj';
+            label = '⚖️ CJ - Judicial';
+        } else if (isCE) {
+            className += ' ce';
+            label = '📄 CE - Extrajudicial';
+        }
+        
+        return (
+            <td key={col.key} className={className}>
+                {label}
+            </td>
+        );
+    }
+    
+    // ============================================================
+    // NUEVO: ÚLTIMO ABONO MODIFICADO (PENSIONES)
+    // ============================================================
+        if (col.key === 'ultimo_abono_modificado') {
+            if (!value) {
+                return (
+                    <td key={col.key} className="col-ultimo-abono">
+                        <span className="fecha-null">— ( &gt; 5 años )</span>
+                    </td>
+                );
+            }
+            // Formatear fecha
+            const formatted = formatDate(value);
+            return (
+                <td key={col.key} className="col-ultimo-abono">
+                    <span className="fecha-valida">{formatted}</span>
+                </td>
+            );
+        }
     
     // Código de barras
     if (col.key === 'codebar' && value) {
@@ -472,6 +513,11 @@ export default function Calculos() {
                 { key: 'prestamo', label: 'Préstamo', isPk: true },
                 { key: 'nombre', label: 'Nombre' },
                 { key: 'adeudo', label: 'Adeudo', isMonto: true },
+                // ============================================================
+                // NUEVAS COLUMNAS PARA PENSIONES
+                // ============================================================
+                { key: 'ultimo_abono_modificado', label: 'Último Abono Modificado' },
+                { key: 'sub_estatus_id', label: 'Sub-Estatus' },
                 { key: 'codebar', label: 'Código de Barras' },
             ];
         }

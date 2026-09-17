@@ -6,7 +6,7 @@ Maneja la conexión a Redis para la cola de trabajos.
 import redis
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from app.core.config import settings
 

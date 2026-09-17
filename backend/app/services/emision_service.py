@@ -158,35 +158,68 @@ class EmisionService:
             db_proyecto.close()
     
     def _count_registros(self) -> int:
-        """Cuenta el total de registros a procesar."""
-        db_proyecto = next(get_project_db(self.proyecto_slug))
-        
+        """
+        Cuenta el total de registros a procesar.
+        """
+        db_gen = get_project_db(self.proyecto_slug)
+        db_proyecto = next(db_gen)
+
         try:
-            filtros = json.loads(self.job.filtros) if self.job.filtros else {}
-            conditions = ["viabilidad = 'viable'"]
+            filtros = (
+                json.loads(self.job.filtros)
+                if self.job.filtros
+                else {}
+            )
+
+            conditions = [
+                "viabilidad = 'viable'"
+            ]
+
             params = {}
-            
-            if filtros.get("programa") and filtros["programa"] != "todos":
-                conditions.append("programa = :programa")
+
+            if (
+                filtros.get("programa")
+                and filtros["programa"] != "todos"
+            ):
+                conditions.append(
+                    "programa = :programa"
+                )
+
                 params["programa"] = filtros["programa"]
-            
-            if filtros.get("ids") and isinstance(filtros["ids"], list):
-                placeholders = ", ".join([f":id{i}" for i in range(len(filtros["ids"]))])
-                conditions.append(f"{self.pk} IN ({placeholders})")
+
+            if (
+                filtros.get("ids")
+                and isinstance(filtros["ids"], list)
+            ):
+                placeholders = ", ".join(
+                    f":id{i}"
+                    for i in range(len(filtros["ids"]))
+                )
+
+                conditions.append(
+                    f"`{self.pk}` IN ({placeholders})"
+                )
+
                 for i, id_val in enumerate(filtros["ids"]):
                     params[f"id{i}"] = id_val
-            
-            where = " AND ".join(conditions) if conditions else "1=1"
-            
+
+            where = " AND ".join(conditions)
+
             result = db_proyecto.execute(
-                text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"),
+                text(
+                    f"""
+                    SELECT COUNT(*) AS total
+                    FROM tabla_analisis
+                    WHERE {where}
+                    """
+                ),
                 params
             ).first()
-            
+
             return result.total if result else 0
-            
+
         finally:
-            db_proyecto.close()
+            db_gen.close()
     
     # ============================================================
     # GENERACIÓN DE PDFs INDIVIDUALES (3.2)
@@ -328,9 +361,10 @@ class EmisionService:
             
             # Generar código de barras del paquete
             pk_principal = registros[0].get(self.pk) if registros else "PAQUETE"
+
             codebar = CodebarService.generar_codebar_completo(
                 pk_value=str(pk_principal),
-                identificador="PAQ"
+                identificador_documento="PAQ"
             )
             
             # Renderizar PDF

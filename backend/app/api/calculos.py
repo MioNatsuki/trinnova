@@ -382,97 +382,144 @@ def calcular_fila(
     db_global: Session = Depends(get_global_db),
 ):
     """
-    Calcula todos los campos necesarios para una fila del proyecto
+    Calcula todos los campos necesarios para una fila del proyecto.
     """
     from sqlalchemy import text
-    
+
     # Verificar acceso al proyecto
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
-    
-    # Obtener conexión a la base de datos del proyecto
-    db_proyecto = next(get_project_db(proyecto_slug))
-    
-    # Obtener fecha de emisión
-    fecha_emision = request.fecha_emision
-    if fecha_emision:
-        try:
-            fecha_emision_dt = datetime.strptime(fecha_emision, '%Y-%m-%d')
-        except ValueError:
-            return CalcularFilaResponse(
-                success=False,
-                error=f"Formato de fecha inválido: {fecha_emision}"
-            )
-    else:
-        fecha_emision_dt = datetime.now()
-    
-    visita = request.visita
-    pmo = request.pmo
-    
-    # Obtener la fila completa de la tabla_analisis
-    pk_value = request.pk_value
-    pk_name = None
-    
-    # Determinar la PK según el proyecto
-    pks = {
-        "apa_tlajomulco": "clave_APA",
-        "predial_tlajomulco": "cuenta",
-        "licencias_gdl": "licencia",
-        "predial_gdl": "cuenta_n",
-        "estado": "credito",
-        "pensiones": "prestamo",
-    }
-    pk_name = pks.get(proyecto_slug, "id")
-    
+    proyecto = check_project_access(
+        proyecto_slug,
+        current_user,
+        db_global
+    )
+
+    # Mantener referencia al generador para garantizar su cierre
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
     try:
-        # Obtener la fila de análisis
-        query = text(f"SELECT * FROM tabla_analisis WHERE `{pk_name}` = :pk")
-        result = db_proyecto.execute(query, {"pk": pk_value}).first()
-        
+        # Obtener fecha de emisión
+        fecha_emision = request.fecha_emision
+
+        if fecha_emision:
+            try:
+                fecha_emision_dt = datetime.strptime(
+                    fecha_emision,
+                    "%Y-%m-%d"
+                )
+            except ValueError:
+                return CalcularFilaResponse(
+                    success=False,
+                    error=f"Formato de fecha inválido: {fecha_emision}"
+                )
+        else:
+            fecha_emision_dt = datetime.now()
+
+        visita = request.visita
+        pmo = request.pmo
+
+        # Obtener la fila completa de tabla_analisis
+        pk_value = request.pk_value
+
+        pks = {
+            "apa_tlajomulco": "clave_APA",
+            "predial_tlajomulco": "cuenta",
+            "licencias_gdl": "licencia",
+            "predial_gdl": "cuenta_n",
+            "estado": "credito",
+            "pensiones": "prestamo",
+        }
+
+        pk_name = pks.get(proyecto_slug, "id")
+
+        query = text(
+            f"""
+            SELECT *
+            FROM tabla_analisis
+            WHERE `{pk_name}` = :pk
+            """
+        )
+
+        result = db_proyecto.execute(
+            query,
+            {"pk": pk_value}
+        ).first()
+
         if not result:
             return CalcularFilaResponse(
                 success=False,
                 error=f"No se encontró la fila con {pk_name}={pk_value}"
             )
-        
+
         fila = dict(result._mapping)
-        
-        # Calcular según el proyecto
+
+        # Calcular según proyecto
         if proyecto_slug == "estado":
             calculado = _calcular_campos_estado(
-                db_global, fila, fecha_emision_dt, visita, pmo
+                db_global,
+                fila,
+                fecha_emision_dt,
+                visita,
+                pmo
             )
+
         elif proyecto_slug == "apa_tlajomulco":
             calculado = _calcular_campos_apa_tlajomulco(
-                fila, fecha_emision_dt, visita, pmo
+                fila,
+                fecha_emision_dt,
+                visita,
+                pmo
             )
+
         else:
             calculado = _calcular_campos_genericos(
-                fila, fecha_emision_dt, visita, pmo
+                fila,
+                fecha_emision_dt,
+                visita,
+                pmo
             )
-        
+
         if "error" in calculado:
-            return CalcularFilaResponse(success=False, error=calculado["error"])
-        
-        # Actualizar la tabla_analisis con los campos calculados
+            return CalcularFilaResponse(
+                success=False,
+                error=calculado["error"]
+            )
+
+        # Actualizar tabla_analisis
         update_fields = []
-        update_params = {"pk": pk_value}
-        
+        update_params = {
+            "pk": pk_value
+        }
+
         for key, value in calculado.items():
-            # Ignorar campos que no son columnas de la tabla
-            if key in ['periodo_notificacion', 'periodo_requerimiento']:
+            if key in [
+                "periodo_notificacion",
+                "periodo_requerimiento"
+            ]:
                 continue
-            update_fields.append(f"`{key}` = :{key}")
+
+            update_fields.append(
+                f"`{key}` = :{key}"
+            )
+
             update_params[key] = value
-        
+
         if update_fields:
             update_query = text(
-                f"UPDATE tabla_analisis SET {', '.join(update_fields)} "
-                f"WHERE `{pk_name}` = :pk"
+                f"""
+                UPDATE tabla_analisis
+                SET {", ".join(update_fields)}
+                WHERE `{pk_name}` = :pk
+                """
             )
-            db_proyecto.execute(update_query, update_params)
+
+            db_proyecto.execute(
+                update_query,
+                update_params
+            )
+
             db_proyecto.commit()
-        
-        # Registrar log
+
         registrar_log(
             db_global,
             current_user.id,
@@ -480,18 +527,22 @@ def calcular_fila(
             f"Cálculo realizado para {pk_name}={pk_value} en {proyecto_slug}",
             proyecto.id
         )
-        
+
         return CalcularFilaResponse(
             success=True,
             data=calculado
         )
-        
+
     except Exception as e:
         db_proyecto.rollback()
+
         return CalcularFilaResponse(
             success=False,
             error=f"Error al calcular: {str(e)}"
         )
+
+    finally:
+        db_gen.close()
 
 @router.post("/inpc/sincronizar")
 def sincronizar_inpc(
@@ -580,17 +631,29 @@ def obtener_ultimo_inpc(
 def get_tabla_dinamica(
     proyecto_slug: str,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Registros por página (máx 200)"
+    ),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """Obtiene los datos de tabla_dinamica para la pantalla de Cálculos"""
+    """
+    Obtiene los datos de tabla_dinamica para la pantalla de Cálculos.
+    """
     from sqlalchemy import text
-    
-    check_project_access(proyecto_slug, current_user, db_global)
-    db_proyecto = next(get_project_db(proyecto_slug))
-    
-    # Determinar la PK
+
+    check_project_access(
+        proyecto_slug,
+        current_user,
+        db_global
+    )
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
     pks = {
         "apa_tlajomulco": "clave_APA",
         "predial_tlajomulco": "cuenta",
@@ -599,94 +662,150 @@ def get_tabla_dinamica(
         "estado": "credito",
         "pensiones": "prestamo",
     }
+
     pk = pks.get(proyecto_slug, "id")
-    
+
     try:
-        db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
-    except Exception:
+        # Verificar existencia de tabla_dinamica
+        try:
+            db_proyecto.execute(
+                text(
+                    "SELECT 1 FROM tabla_dinamica LIMIT 1"
+                )
+            )
+
+        except Exception:
+            return {
+                "rows": [],
+                "total": 0,
+                "page": page,
+                "limit": limit,
+                "pk": pk,
+                "error": (
+                    "No hay datos calculados. "
+                    "Ejecuta 'Calcular Todas' primero."
+                )
+            }
+
+        offset = (page - 1) * limit
+
+        total_row = db_proyecto.execute(
+            text(
+                "SELECT COUNT(*) AS total "
+                "FROM tabla_dinamica"
+            )
+        ).first()
+
+        total = total_row.total if total_row else 0
+
+        # Obtener columnas
+        cols_result = db_proyecto.execute(
+            text(
+                "SHOW COLUMNS FROM tabla_dinamica"
+            )
+        ).fetchall()
+
+        all_cols = [
+            row[0]
+            for row in cols_result
+        ]
+
+        nombre_cols = [
+            "nombre",
+            "propietario",
+            "nombre_razon_social",
+            "propietario_nombre",
+            "nombre_contribuyente",
+        ]
+
+        adeudo_cols = [
+            "saldo",
+            "total_adeudo",
+            "importe_historico_determinado",
+            "adeudo",
+            "total",
+        ]
+
+        select_cols = [
+            f"`{col}`"
+            for col in all_cols
+        ]
+
+        has_nombre = any(
+            col in all_cols
+            for col in nombre_cols
+        )
+
+        has_adeudo = any(
+            col in all_cols
+            for col in adeudo_cols
+        )
+
+        if not has_nombre:
+            for col in nombre_cols:
+                if col not in all_cols:
+                    select_cols.append(
+                        f"NULL AS `{col}`"
+                    )
+
+        if not has_adeudo:
+            for col in adeudo_cols:
+                if col not in all_cols:
+                    select_cols.append(
+                        f"NULL AS `{col}`"
+                    )
+
+        select_str = ", ".join(select_cols)
+
+        rows = db_proyecto.execute(
+            text(
+                f"""
+                SELECT {select_str}
+                FROM tabla_dinamica
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {
+                "limit": limit,
+                "offset": offset,
+            }
+        ).fetchall()
+
+        result = []
+
+        for row in rows:
+            row_dict = dict(row._mapping)
+
+            # Nombre
+            has_name = any(
+                row_dict.get(col)
+                for col in nombre_cols
+            )
+
+            if not has_name:
+                row_dict["nombre"] = "Sin nombre"
+
+            # Adeudo
+            has_adeudo_val = any(
+                row_dict.get(col) is not None
+                for col in adeudo_cols
+            )
+
+            if not has_adeudo_val:
+                row_dict["saldo"] = 0
+
+            result.append(row_dict)
+
         return {
-            "rows": [],
-            "total": 0,
+            "rows": result,
+            "total": total,
             "page": page,
             "limit": limit,
-            "pk": pk,
-            "error": "No hay datos calculados. Ejecuta 'Calcular Todas' primero."
+            "pk": pk
         }
-    
-    offset = (page - 1) * limit
-    
-    # ============================================================
-    # OBTENER DATOS CON TODAS LAS COLUMNAS
-    # ============================================================
-    total = db_proyecto.execute(text("SELECT COUNT(*) AS total FROM tabla_dinamica")).first().total
-    
-    # Obtener columnas de la tabla
-    cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_dinamica")).fetchall()
-    all_cols = [r[0] for r in cols_result]
-    
-    # Asegurar que las columnas de nombre y adeudo estén incluidas
-    nombre_cols = ['nombre', 'propietario', 'nombre_razon_social', 'propietario_nombre', 'nombre_contribuyente']
-    adeudo_cols = ['saldo', 'total_adeudo', 'importe_historico_determinado', 'adeudo', 'total']
-    
-    # Construir SELECT con todas las columnas
-    select_cols = []
-    for col in all_cols:
-        select_cols.append(f"`{col}`")
-    
-    # Si no hay columnas de nombre, agregarlas como NULL
-    has_nombre = any(col in all_cols for col in nombre_cols)
-    has_adeudo = any(col in all_cols for col in adeudo_cols)
-    
-    if not has_nombre:
-        # Agregar alias para las columnas de nombre
-        for col in nombre_cols:
-            if col not in all_cols:
-                select_cols.append(f"NULL AS `{col}`")
-    
-    if not has_adeudo:
-        # Agregar alias para las columnas de adeudo
-        for col in adeudo_cols:
-            if col not in all_cols:
-                select_cols.append(f"NULL AS `{col}`")
-    
-    select_str = ", ".join(select_cols)
-    
-    rows = db_proyecto.execute(
-        text(f"SELECT {select_str} FROM tabla_dinamica LIMIT {limit} OFFSET {offset}")
-    ).fetchall()
-    
-    # Procesar resultados para asegurar que los campos de nombre y adeudo estén presentes
-    result = []
-    for r in rows:
-        row_dict = dict(r._mapping)
-        
-        # Asegurar que hay al menos un campo de nombre
-        has_name = False
-        for col in nombre_cols:
-            if row_dict.get(col):
-                has_name = True
-                break
-        if not has_name:
-            row_dict['nombre'] = 'Sin nombre'
-        
-        # Asegurar que hay al menos un campo de adeudo
-        has_adeudo_val = False
-        for col in adeudo_cols:
-            if row_dict.get(col) is not None:
-                has_adeudo_val = True
-                break
-        if not has_adeudo_val:
-            row_dict['saldo'] = 0
-        
-        result.append(row_dict)
-    
-    return {
-        "rows": result,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "pk": pk
-    }
+
+    finally:
+        db_gen.close()
 
 @router.get("/{proyecto_slug}/catalogo/documentos")
 def get_catalogo_documentos(

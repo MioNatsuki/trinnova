@@ -74,19 +74,43 @@ def _slug_from_proyecto_id(db: Session, proyecto_id: int) -> str:
 
 def _get_campos_analisis(slug: str) -> List[str]:
     """
-    FIX: Busca primero tabla_analisis (que siempre existe si hay padrón cargado).
+    Busca primero tabla_analisis.
     Si no existe, intenta tabla_temporal como fallback.
     """
-    for tabla in ("tabla_analisis", "tabla_temporal"):
+    from sqlalchemy import text
+
+    for tabla in (
+        "tabla_analisis",
+        "tabla_temporal"
+    ):
+        db_gen = None
+
         try:
-            db = next(get_project_db(slug))
-            from sqlalchemy import text
-            rows = db.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
-            campos = [r[0] for r in rows if not r[0].startswith("_")]
+            db_gen = get_project_db(slug)
+            db = next(db_gen)
+
+            rows = db.execute(
+                text(
+                    f"SHOW COLUMNS FROM `{tabla}`"
+                )
+            ).fetchall()
+
+            campos = [
+                row[0]
+                for row in rows
+                if not row[0].startswith("_")
+            ]
+
             if campos:
                 return campos
+
         except Exception:
             continue
+
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
     return []
 
 # ============================================

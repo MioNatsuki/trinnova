@@ -450,7 +450,7 @@ export default function Complementar() {
             {genInfo?.previo > 0 && (
               <p className="comp-modal-warn">Se sobreescribirán <strong>{genInfo.previo.toLocaleString()}</strong> registros.</p>
             )}
-            <p className="comp-modal-desc">Se reconstruirá tabla_analisis (padrón + complementaria).</p>
+            <p className="comp-modal-desc">Se reconstruirá tabla_analisis.</p>
             <div className="comp-modal-footer">
               <button className="btn-save" onClick={closeGenModal}>Cancelar</button>
               <button className="btn-primary" onClick={handleConfirmGenerar}>Confirmar y generar</button>

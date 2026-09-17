@@ -462,3 +462,42 @@
 .calculos-table td.col-monto.positive {
     color: #276749;
 }
+
+/* frontend/src/pages/analisis/Calculos.css */
+/* AGREGAR AL FINAL DEL ARCHIVO */
+
+/* ============================================================
+   ESTILOS PARA COLUMNAS DE PENSIONES
+   ============================================================ */
+
+.calculos-table td.col-sub-estatus {
+    font-weight: 600;
+    text-align: center;
+}
+
+.calculos-table td.col-sub-estatus.cj {
+    color: #9b2c2c;
+    background: #fff5f5;
+    border-radius: 4px;
+}
+
+.calculos-table td.col-sub-estatus.ce {
+    color: #276749;
+    background: #f0fff4;
+    border-radius: 4px;
+}
+
+.calculos-table td.col-ultimo-abono {
+    text-align: center;
+}
+
+.calculos-table td.col-ultimo-abono .fecha-null {
+    color: #a0aec0;
+    font-style: italic;
+    font-size: 12px;
+}
+
+.calculos-table td.col-ultimo-abono .fecha-valida {
+    color: #2d3748;
+    font-weight: 500;
+}

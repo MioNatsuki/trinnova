@@ -436,52 +436,16 @@ def obtener_placeholders_especiales() -> Dict[str, str]:
         '{{codebar}}': 'Código de barras (Código 39)',
     }
 
-def generar_preview_pdf(
-    proyecto_slug: str,
-    nombre_archivo: str,
-    placeholders: Optional[Dict[str, str]] = None,
-    preview_mode: bool = False
-) -> bytes:
+def generar_preview_pdf(*args, **kwargs):
     """
-    Genera un PDF de preview de la plantilla.
-    Función síncrona para compatibilidad con el código existente.
+    DEPRECATED: usar el endpoint async POST /plantillas/{id}/preview.
+    Esta función creaba un event loop nuevo, lo cual rompe Playwright
+    (BrowserContext.new_page -> 'NoneType' object has no attribute 'send').
     """
-    import asyncio
-    
-    renderer = PlantillaRenderer(proyecto_slug)
-    
-    async def _generar():
-        # Asegurar que el navegador está iniciado
-        await PlantillaRenderer.get_browser()
-        
-        # Preparar placeholders
-        if preview_mode:
-            # Modo preview: usar datos de ejemplo
-            datos_ejemplo = _obtener_datos_ejemplo(proyecto_slug)
-            if datos_ejemplo:
-                placeholders = {**(placeholders or {}), **datos_ejemplo}
-        
-        # Generar código de barras si no existe
-        if placeholders and 'codebar' not in placeholders:
-            from app.services.codebar_service import CodebarService
-            pk = placeholders.get('pk', '12345')
-            placeholders['codebar'] = CodebarService.generar_codebar_completo(pk)
-        
-        return await renderer.render_pdf(
-            nombre_archivo,
-            placeholders or {},
-            codebar=placeholders.get('codebar') if placeholders else None,
-            inject_codebar_style=True 
-        )
-    
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_generar())
-        loop.close()
-        return result
-    except Exception as e:
-        raise RuntimeError(f"Error generando preview PDF: {e}")
+    raise RuntimeError(
+        "generar_preview_pdf está deprecada. "
+        "Usa el endpoint async POST /api/v1/plantillas/{id}/preview."
+    )
 
 
 def _obtener_datos_ejemplo(proyecto_slug: str) -> Dict[str, str]:

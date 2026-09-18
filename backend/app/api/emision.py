@@ -135,6 +135,22 @@ class LimpiezaResultado(BaseModel):
     directorios_eliminados: int
     mensaje: str
 
+class ContinuarEmisionResponse(BaseModel):
+    success: bool
+    total: int
+    message: str
+    insertados: int = 0
+    errores: int = 0
+
+class PrepararTablaTemporalRequest(BaseModel):
+    ids: List[Any] = Field(default_factory=list)
+    orden_map: Dict[str, int] = Field(default_factory=dict)
+
+class ResolverDuplicadoRequest(BaseModel):
+    error_id: int
+    accion: str   # 'reemplazar' | 'agregar_sufijo' | 'descartar'
+    sufijo: Optional[int] = None
+
 # ============================================================
 # FUNCIONES AUXILIARES
 # ============================================================
@@ -376,17 +392,12 @@ def _limpiar_archivos_temporales(temp_path: Path, dias_antiguedad: int = 7) -> i
 
     return eliminados
 
-# ============================================================
-# HELPERS DE AUTENTICACIÓN DE WORKERS (implementación del TODO)
-# ============================================================
-
 def _worker_esta_registrado(worker_id: str) -> bool:
     """
     Verifica que el worker_id tenga un registro vigente en Redis.
     """
     # Usar la función de conveniencia
     return is_worker_registered(worker_id)
-
 
 def _requerir_worker_registrado(worker_id: str) -> None:
     """
@@ -401,176 +412,399 @@ def _requerir_worker_registrado(worker_id: str) -> None:
             ),
         )
 
-# ============================================================
-# ENDPOINT: PREPARAR EMISIÓN
-# ============================================================
+def _get_columnas_tabla(db_proyecto, tabla: str) -> list:
+    from sqlalchemy import text
+    rows = db_proyecto.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
+    return [r[0] for r in rows]
 
-@router.post("/{proyecto_slug}/preparar", response_model=PrepararEmisionResponse)
-def preparar_emision(
-    proyecto_slug: str,
-    request: PrepararEmisionRequest,
-    background_tasks: BackgroundTasks,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
+def _poblar_tabla_temporal(
+    db_proyecto,
+    clave_origen: str,
+    ids_seleccionados: list,
+    orden_map: dict = None,
 ):
     """
-    Prepara una emisión masiva de documentos.
+    Puebla tabla_temporal desde tabla_dinamica JOIN tabla_analisis.
 
-    1. Valida que el proyecto y plantilla existen
-    2. Cuenta los registros a procesar según los filtros
-    3. Crea un job en la base de datos (status: pending)
-    4. Lo pone en la cola de Redis para que un worker lo procese
-    5. Retorna el ID del job para seguimiento
+    Reglas:
+    - codebar es PK de tabla_temporal y se genera aquí.
+    - La unión con tabla_dinamica/analisis es vía clave_origen.
+    - Solo se copian columnas comunes.
+    - Colisiones de codebar → tabla_temporal_errores (no abortan).
     """
-    from app.api.analisis import _info
+    from sqlalchemy import text
+    from app.services.codebar_service import CodebarService
+    from datetime import datetime
+    import json
 
-    # 1. VALIDAR ACCESO AL PROYECTO
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    if not ids_seleccionados:
+        db_proyecto.execute(text("DELETE FROM tabla_temporal"))
+        db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
+        db_proyecto.commit()
+        return {"insertados": 0, "errores": 0, "total_errores": 0}
 
-    # 2. VALIDAR PLANTILLA
-    plantilla = db_global.query(Plantilla).filter(
-        Plantilla.id == request.id_plantilla,
-        Plantilla.id_proyecto == proyecto.id,
-        Plantilla.activa == True
-    ).first()
+    # 1. Columnas comunes (excluir control)
+    cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
+    cols_din  = _get_columnas_tabla(db_proyecto, "tabla_dinamica")
 
-    if not plantilla:
+    cols_excluir = {"codebar", "orden_impresion", "seleccionada", "id_temporal"}
+    cols_comunes = [
+        c for c in cols_temp
+        if c in cols_din and c not in cols_excluir
+    ]
+
+    if clave_origen not in cols_comunes:
         raise HTTPException(
-            status_code=404,
-            detail=f"Plantilla no encontrada o inactiva. ID: {request.id_plantilla}"
+            status_code=500,
+            detail=f"La clave '{clave_origen}' no existe en tabla_temporal."
         )
 
-    # 3. OBTENER REGISTROS A PROCESAR
-    db_proyecto = next(get_project_db(proyecto_slug))
-    info = _info(proyecto_slug)
-    pk = info["pk"]
+    # 2. Limpiar
+    db_proyecto.execute(text("DELETE FROM tabla_temporal"))
+    db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
 
-    condiciones = ["viabilidad = 'viable'"]
-    params = {}
+    # 3. Traer filas desde dinamica
+    placeholders = ", ".join(f":id{i}" for i in range(len(ids_seleccionados)))
+    params = {f"id{i}": v for i, v in enumerate(ids_seleccionados)}
 
-    if (
-        request.filtros.get("programa")
-        and request.filtros["programa"] != "todos"
-    ):
-        condiciones.append(
-            "programa = :programa"
+    cols_str = ", ".join(f"`{c}`" for c in cols_comunes)
+    rows = db_proyecto.execute(text(f"""
+        SELECT {cols_str}
+        FROM tabla_dinamica
+        WHERE `{clave_origen}` IN ({placeholders})
+        ORDER BY `{clave_origen}` ASC
+    """), params).fetchall()
+
+    if not rows:
+        db_proyecto.commit()
+        return {"insertados": 0, "errores": 0, "total_errores": 0}
+
+    # 4. Insertar fila por fila
+    fecha_emision = datetime.now()
+    orden_secuencial = 0
+    insertados = 0
+    errores = 0
+
+    for row in rows:
+        row_dict = dict(row._mapping)
+        pk_val = row_dict.get(clave_origen)
+        if pk_val is None:
+            continue
+
+        # Determinar orden
+        if orden_map and str(pk_val) in orden_map:
+            orden = int(orden_map[str(pk_val)])
+        else:
+            orden_secuencial += 1
+            orden = orden_secuencial
+
+        # Generar codebar
+        try:
+            codebar = CodebarService.generar_codebar_completo(
+                pk_value=str(pk_val),
+                fecha_emision=fecha_emision,
+            )
+        except Exception as e:
+            errores += 1
+            db_proyecto.execute(text("""
+                INSERT INTO tabla_temporal_errores
+                    (clave_origen, codebar_intento, motivo, payload_json)
+                VALUES (:c, :cb, :m, :p)
+            """), {
+                "c": str(pk_val),
+                "cb": "",
+                "m": f"Error generando codebar: {str(e)[:200]}",
+                "p": json.dumps(row_dict, default=str)[:60000],
+            })
+            continue
+
+        insert_cols = list(cols_comunes) + ["codebar", "orden_impresion"]
+        insert_vals = [f":{c}" for c in cols_comunes] + [":codebar", ":orden_impresion"]
+
+        insert_params = {**row_dict}
+        insert_params["codebar"] = codebar
+        insert_params["orden_impresion"] = orden
+
+        try:
+            db_proyecto.execute(text(f"""
+                INSERT INTO tabla_temporal
+                    ({", ".join(f"`{c}`" for c in insert_cols)})
+                VALUES ({", ".join(insert_vals)})
+            """), insert_params)
+            insertados += 1
+        except Exception as e:
+            errores += 1
+            motivo = str(e)[:200]
+            db_proyecto.execute(text("""
+                INSERT INTO tabla_temporal_errores
+                    (clave_origen, codebar_intento, motivo, payload_json)
+                VALUES (:c, :cb, :m, :p)
+            """), {
+                "c": str(pk_val),
+                "cb": codebar,
+                "m": motivo,
+                "p": json.dumps(row_dict, default=str)[:60000],
+            })
+
+    db_proyecto.commit()
+
+    total_err = db_proyecto.execute(text(
+        "SELECT COUNT(*) AS c FROM tabla_temporal_errores"
+    )).first().c
+
+    return {
+        "insertados": insertados,
+        "errores": errores,
+        "total_errores": total_err,
+    }
+
+CAMPO_MONTO_POR_PROYECTO = {
+    "apa_tlajomulco":     "total_adeudo",
+    "predial_tlajomulco": "total_adeudo",
+    "predial_gdl":        "total_adeudo",
+    "licencias_gdl":      "total",
+    "estado":             "importe_historico_determinado",
+    "pensiones":          "liquidacion",
+}
+
+def _ensure_tabla_errores_tiene_estatus(db_proyecto):
+    """
+    Asegura que tabla_temporal_errores tenga las columnas estatus y codebar_original.
+    Idempotente: no falla si ya existen.
+    """
+    from sqlalchemy import text
+    columnas = _get_columnas_tabla(db_proyecto, "tabla_temporal_errores")
+
+    if "estatus" not in columnas:
+        db_proyecto.execute(text(
+            "ALTER TABLE tabla_temporal_errores "
+            "ADD COLUMN estatus VARCHAR(20) DEFAULT 'pendiente'"
+        ))
+    if "codebar_original" not in columnas:
+        db_proyecto.execute(text(
+            "ALTER TABLE tabla_temporal_errores "
+            "ADD COLUMN codebar_original VARCHAR(25) DEFAULT NULL"
+        ))
+    db_proyecto.commit()
+
+def _traspasar_temporal_a_historica(
+    db_proyecto,
+    proyecto_slug: str,
+    clave_origen: str,
+    id_job: int,
+    id_usuario: int,
+    worker_id: str,
+):
+    """
+    Traspasa tabla_temporal → tabla_historica con validaciones.
+
+    Retorna dict:
+      {
+        "insertados": int,
+        "duplicados_exactos": int,
+        "conflictos": int,
+        "limpio": bool   # True si todo OK y se puede vaciar temporal
+      }
+    """
+    from sqlalchemy import text
+    import json
+
+    _ensure_tabla_errores_tiene_estatus(db_proyecto)
+
+    # Limpiar errores previos de este job
+    db_proyecto.execute(text(
+        "DELETE FROM tabla_temporal_errores WHERE motivo IS NULL OR motivo NOT LIKE 'job_%'"
+    ))
+    db_proyecto.commit()
+
+    campo_monto = CAMPO_MONTO_POR_PROYECTO.get(proyecto_slug)
+
+    # Columnas comunes entre temporal e historica
+    cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
+    cols_hist = _get_columnas_tabla(db_proyecto, "tabla_historica")
+
+    cols_extra_hist = {
+        "fecha_registro", "id_job", "id_usuario", "worker_id",
+        "ruta_pdf", "estatus", "observaciones_preparacion"
+    }
+    cols_comunes = [
+        c for c in cols_temp
+        if c in cols_hist and c not in cols_extra_hist
+    ]
+
+    # Traer todas las filas de temporal
+    filas = db_proyecto.execute(text(
+        "SELECT * FROM tabla_temporal ORDER BY orden_impresion ASC"
+    )).fetchall()
+
+    insertados = 0
+    duplicados_exactos = 0
+    conflictos = 0
+
+    for fila in filas:
+        row_dict = dict(fila._mapping)
+        codebar = row_dict.get("codebar")
+        clave_val = row_dict.get(clave_origen)
+
+        if not codebar:
+            # Sin codebar no se puede traspasar
+            conflictos += 1
+            _registrar_error_traspaso(
+                db_proyecto, clave_val, codebar or "",
+                f"job_{id_job}: fila sin codebar",
+                "revision", row_dict
+            )
+            continue
+
+        # Verificar si ya existe en histórico
+        existente = db_proyecto.execute(text(
+            "SELECT * FROM tabla_historica WHERE codebar = :cb LIMIT 1"
+        ), {"cb": codebar}).first()
+
+        if not existente:
+            # Caso 1: nuevo → insertar
+            _insertar_en_historica(
+                db_proyecto, row_dict, cols_comunes,
+                id_job, id_usuario, worker_id
+            )
+            insertados += 1
+            continue
+
+        # Existe: comparar
+        exist_dict = dict(existente._mapping)
+
+        fecha_temp  = row_dict.get("fecha_emision")
+        fecha_hist  = exist_dict.get("fecha_emision")
+        orden_temp  = row_dict.get("orden_impresion")
+        orden_hist  = exist_dict.get("orden_impresion")
+        monto_temp  = row_dict.get(campo_monto) if campo_monto else None
+        monto_hist  = exist_dict.get(campo_monto) if campo_monto else None
+
+        # Normalizar para comparar (Decimal vs float, None vs None)
+        def _norm_fecha(v):
+            if v is None: return None
+            return str(v)[:19] if hasattr(v, 'isoformat') else str(v)
+
+        def _norm_monto(v):
+            if v is None: return None
+            try:
+                return round(float(v), 2)
+            except (TypeError, ValueError):
+                return None
+
+        mismo = (
+            _norm_fecha(fecha_temp) == _norm_fecha(fecha_hist) and
+            orden_temp == orden_hist and
+            _norm_monto(monto_temp) == _norm_monto(monto_hist)
         )
 
-        params["programa"] = request.filtros["programa"]
+        if mismo:
+            # Caso 2: duplicado exacto
+            duplicados_exactos += 1
+            _registrar_error_traspaso(
+                db_proyecto, clave_val, codebar,
+                f"job_{id_job}: duplicado exacto (mismo codebar, fecha, orden y monto)",
+                "duplicado_exacto", row_dict
+            )
+        else:
+            # Caso 3: conflicto
+            conflictos += 1
+            _registrar_error_traspaso(
+                db_proyecto, clave_val, codebar,
+                f"job_{id_job}: conflicto - codebar igual pero datos distintos",
+                "revision", row_dict
+            )
 
-    if (
-        request.filtros.get("ids")
-        and isinstance(request.filtros["ids"], list)
-    ):
-        placeholders = ", ".join(
-            f":id{i}"
-            for i in range(len(request.filtros["ids"]))
-        )
+    db_proyecto.commit()
 
-        condiciones.append(
-            f"`{pk}` IN ({placeholders})"
-        )
+    limpio = (duplicados_exactos == 0 and conflictos == 0)
 
-        for i, id_val in enumerate(request.filtros["ids"]):
-            params[f"id{i}"] = id_val
+    return {
+        "insertados": insertados,
+        "duplicados_exactos": duplicados_exactos,
+        "conflictos": conflictos,
+        "limpio": limpio,
+    }
 
-    if (
-        request.filtros.get("cuenta_inicial")
-        and request.filtros.get("cuenta_final")
-    ):
-        condiciones.append(
-            f"`{pk}` BETWEEN :inicio AND :fin"
-        )
+def _insertar_en_historica(
+    db_proyecto,
+    row_dict: dict,
+    cols_comunes: list,
+    id_job: int,
+    id_usuario: int,
+    worker_id: str,
+):
+    """Inserta una fila de temporal en histórica con las columnas extra."""
+    from sqlalchemy import text
+    from datetime import datetime
 
-        params["inicio"] = request.filtros["cuenta_inicial"]
-        params["fin"] = request.filtros["cuenta_final"]
+    cols_insert = list(cols_comunes) + [
+        "id_job", "id_usuario", "worker_id", "estatus", "fecha_registro"
+    ]
+    vals_insert = [f":{c}" for c in cols_comunes] + [
+        ":id_job", ":id_usuario", ":worker_id", ":estatus", ":fecha_registro"
+    ]
 
-    where = " AND ".join(condiciones)
+    params = {c: row_dict.get(c) for c in cols_comunes}
+    params.update({
+        "id_job": id_job,
+        "id_usuario": id_usuario,
+        "worker_id": worker_id,
+        "estatus": "emitida",
+        "fecha_registro": datetime.now(),
+    })
 
-    db_gen = get_project_db(proyecto_slug)
-    db_proyecto = next(db_gen)
+    db_proyecto.execute(text(f"""
+        INSERT INTO tabla_historica
+            ({", ".join(f"`{c}`" for c in cols_insert)})
+        VALUES ({", ".join(vals_insert)})
+    """), params)
 
-    try:
-        count_query = text(
-            f"""
-            SELECT COUNT(*) AS total
-            FROM tabla_analisis
-            WHERE {where}
-            """
-        )
+def _registrar_error_traspaso(
+    db_proyecto,
+    clave_val,
+    codebar: str,
+    motivo: str,
+    estatus: str,
+    row_dict: dict,
+):
+    """Registra una fila problemática en tabla_temporal_errores."""
+    from sqlalchemy import text
+    import json
 
-        count_result = db_proyecto.execute(
-            count_query,
-            params
-        ).first()
+    db_proyecto.execute(text("""
+        INSERT INTO tabla_temporal_errores
+            (clave_origen, codebar_intento, codebar_original, motivo, estatus, payload_json)
+        VALUES (:c, :cb, :cbo, :m, :e, :p)
+    """), {
+        "c": str(clave_val),
+        "cb": codebar,
+        "cbo": codebar,
+        "m": motivo[:255],
+        "e": estatus,
+        "p": json.dumps(row_dict, default=str)[:60000],
+    })
 
-        total = count_result.total if count_result else 0
+def _generar_codebar_con_sufijo(codebar: str, sufijo: int = 1) -> str:
+    """
+    Agrega un sufijo antes del último asterisco.
+    *ABC*       -> *ABCDX*
+    *ABC*       -> *ABCDX2*
+    """
+    if not codebar:
+        return codebar
 
-    finally:
-        db_gen.close()
+    limpio = codebar.strip()
+    if limpio.startswith("*") and limpio.endswith("*"):
+        cuerpo = limpio[1:-1]
+        tag = "DX" if sufijo == 1 else f"DX{sufijo}"
+        return f"*{cuerpo}{tag}*"
 
-    if total == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay registros viables para emitir con los filtros seleccionados"
-        )
-
-    # 4. CREAR JOB EN LA BASE DE DATOS
-    job = EmisionJob(
-        id_proyecto=proyecto.id,
-        id_plantilla=plantilla.id,
-        id_usuario=current_user.id,
-        nombre_job=request.nombre_job or f"Emisión {proyecto.nombre} - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-        modo=request.modo,
-        cuentas_por_lote=request.cuentas_por_lote,
-        orden_impresion_inicial=request.orden_impresion_inicial,
-        status='pending',
-        total_registros=total,
-        filtros=json.dumps(request.filtros),
-        created_by=current_user.id
-    )
-
-    db_global.add(job)
-    db_global.commit()
-    db_global.refresh(job)
-
-    # 5. REGISTRAR EN LOG
-    registrar_log(
-        db_global,
-        current_user.id,
-        "preparar_emision",
-        f"Emisión preparada: {total} registros, job_id={job.id}, plantilla={plantilla.nombre}",
-        proyecto.id
-    )
-
-    # 6. PONER EN COLA DE REDIS
-    from app.core.redis_client import push_job
-    publicado = push_job(job.id)
-
-    if not publicado:
-        logger.warning(f"Job {job.id} creado pero NO publicado en Redis")
-
-    from app.core.redis_client import set_job_status
-    set_job_status(
-        job.id,
-        'pending',
-        {
-            'total': total,
-            'proyecto': proyecto.nombre,
-            'usuario': current_user.nombre
-        }
-    )
-
-    return PrepararEmisionResponse(
-        success=True,
-        job_id=job.id,
-        total_registros=total,
-        message=f"Emisión preparada. {total} registros en cola para procesamiento."
-    )
-
+    tag = "DX" if sufijo == 1 else f"DX{sufijo}"
+    return f"{limpio}{tag}"
 
 # ============================================================
-# ENDPOINT: ESTADO DE JOB
+# JOBS: /jobs/...
 # ============================================================
 
 @router.get("/jobs/{job_id}/estado", response_model=JobEstadoResponse)
@@ -615,11 +849,6 @@ def get_job_estado(
         estimado_restante=estimado
     )
 
-
-# ============================================================
-# ENDPOINT: CANCELAR JOB
-# ============================================================
-
 @router.post("/jobs/{job_id}/cancelar", response_model=CancelarEmisionResponse)
 def cancelar_job(
     job_id: int,
@@ -657,288 +886,6 @@ def cancelar_job(
         success=True,
         message=f"Job {job_id} cancelado correctamente"
     )
-
-
-# ============================================================
-# ENDPOINTS DE CATÁLOGOS PARA EMISIÓN
-# ============================================================
-
-@router.get("/{proyecto_slug}/plantillas")
-def get_plantillas_emision(
-    proyecto_slug: str,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """
-    Obtiene las plantillas disponibles para emisión en un proyecto.
-    """
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
-
-    plantillas = db_global.query(Plantilla).filter(
-        Plantilla.id_proyecto == proyecto.id,
-        Plantilla.activa == True
-    ).all()
-
-    return [
-        {
-            "id": p.id,
-            "nombre": p.nombre,
-            "nombre_archivo": p.nombre_archivo,
-            "descripcion": p.descripcion,
-            "total_campos": len(p.campos) if p.campos else 0,
-            "created_at": p.created_at
-        }
-        for p in plantillas
-    ]
-
-
-@router.get("/{proyecto_slug}/programas")
-def get_programas_emision(
-    proyecto_slug: str,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """Obtiene los programas disponibles para emisión."""
-    from app.api.analisis import get_programas
-    return get_programas(proyecto_slug, current_user, db_global)
-
-
-@router.get("/{proyecto_slug}/estadisticas-emision")
-def get_estadisticas_emision(
-    proyecto_slug: str,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """Obtiene estadísticas para emisión."""
-    from sqlalchemy import text
-
-    check_project_access(
-        proyecto_slug,
-        current_user,
-        db_global
-    )
-
-    db_gen = get_project_db(proyecto_slug)
-    db_proyecto = next(db_gen)
-
-    try:
-        total_viables_row = db_proyecto.execute(
-            text(
-                """
-                SELECT COUNT(*) AS total
-                FROM tabla_analisis
-                WHERE viabilidad = 'viable'
-                """
-            )
-        ).first()
-
-        total_no_viables_row = db_proyecto.execute(
-            text(
-                """
-                SELECT COUNT(*) AS total
-                FROM tabla_analisis
-                WHERE viabilidad = 'no_viable'
-                """
-            )
-        ).first()
-
-        total_pendientes_row = db_proyecto.execute(
-            text(
-                """
-                SELECT COUNT(*) AS total
-                FROM tabla_analisis
-                WHERE viabilidad = 'pendiente'
-                """
-            )
-        ).first()
-
-        total_general_row = db_proyecto.execute(
-            text(
-                """
-                SELECT COUNT(*) AS total
-                FROM tabla_analisis
-                """
-            )
-        ).first()
-
-        total_viables = (
-            total_viables_row.total
-            if total_viables_row
-            else 0
-        )
-
-        total_no_viables = (
-            total_no_viables_row.total
-            if total_no_viables_row
-            else 0
-        )
-
-        total_pendientes = (
-            total_pendientes_row.total
-            if total_pendientes_row
-            else 0
-        )
-
-        total_general = (
-            total_general_row.total
-            if total_general_row
-            else 0
-        )
-
-        return {
-            "total_viables": total_viables,
-            "total_no_viables": total_no_viables,
-            "total_pendientes": total_pendientes,
-            "total_general": total_general,
-            "mensaje": (
-                f"{total_viables} registros "
-                "viables para emisión"
-            )
-        }
-
-    except Exception as e:
-        return {
-            "total_viables": 0,
-            "total_no_viables": 0,
-            "total_pendientes": 0,
-            "total_general": 0,
-            "mensaje": (
-                "La tabla de análisis aún no existe. "
-                "Genera el análisis primero."
-            ),
-            "error": str(e)
-        }
-
-    finally:
-        db_gen.close()
-
-
-@router.get("/{proyecto_slug}/cuentas")
-def get_cuentas_emision(
-    proyecto_slug: str,
-    page: int = Query(1, ge=1, description="Número de página"),
-    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
-    viabilidad: Optional[str] = Query(None, description="Filtrar por viabilidad"),
-    programa: Optional[str] = Query(None, description="Filtrar por programa"),
-    busqueda: Optional[str] = Query(None, description="Búsqueda general"),
-    sort_col: Optional[str] = Query(None, description="Columna para ordenar"),
-    sort_dir: Optional[str] = Query("asc", description="Dirección de ordenamiento"),
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """Obtiene cuentas para selección en emisión."""
-    from sqlalchemy import text
-    from app.api.analisis import _info
-
-    check_project_access(proyecto_slug, current_user, db_global)
-    info = _info(proyecto_slug)
-    pk = info["pk"]
-    db_gen = get_project_db(proyecto_slug)
-    db_proyecto = next(db_gen)
-
-    try:
-        conditions = []
-        params = {}
-
-        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
-            conditions.append("viabilidad = :viabilidad")
-            params["viabilidad"] = viabilidad
-
-        if programa and programa != "todos":
-            conditions.append("programa = :programa")
-            params["programa"] = programa
-
-        if busqueda:
-            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
-            parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
-            conditions.append("(" + " OR ".join(parts) + ")")
-            params["busqueda"] = f"%{busqueda}%"
-
-        where = " AND ".join(conditions) if conditions else "1=1"
-
-        # Columnas válidas para ordenamiento
-        try:
-            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-            cols_validas = {r[0] for r in cols_result}
-        except Exception:
-            cols_validas = set()
-
-        order_col = pk
-        if sort_col and sort_col in cols_validas:
-            order_col = sort_col
-        order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
-
-        # Contar total
-        count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
-        total = db_proyecto.execute(count_query, params).first().total
-
-        # Obtener datos
-        offset = (page - 1) * limit
-        data_query = text(f"""
-            SELECT * FROM tabla_analisis
-            WHERE {where}
-            ORDER BY `{order_col}` {order_dir}
-            LIMIT {limit} OFFSET {offset}
-        """)
-        rows = db_proyecto.execute(data_query, params).fetchall()
-
-        # Procesar resultados
-        result = []
-        for r in rows:
-            row_dict = dict(r._mapping)
-
-            # Adeudo
-            adeudo_val = 0
-            for col in info["col_adeudo"]:
-                v = row_dict.get(col)
-                if v is not None:
-                    try:
-                        adeudo_val = float(v)
-                        break
-                    except (TypeError, ValueError):
-                        pass
-            row_dict["_adeudo_display"] = adeudo_val
-
-            # Nombre
-            nombre_val = ""
-            for col in info["col_nombre"]:
-                v = row_dict.get(col)
-                if v:
-                    nombre_val = str(v)
-                    break
-            row_dict["_nombre_display"] = nombre_val
-
-            # Calle
-            calle_val = ""
-            for col in info["col_calle"]:
-                v = row_dict.get(col)
-                if v:
-                    calle_val = str(v)
-                    break
-            row_dict["_calle_display"] = calle_val
-
-            result.append(row_dict)
-
-        return {
-            "rows": result,
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "pk": pk,
-            "total_pages": (
-                (total + limit - 1) // limit
-                if total > 0
-                else 1
-            )
-        }
-
-    finally:
-        db_gen.close()
-
-
-# ============================================================
-# ENDPOINT: LISTAR JOBS DEL USUARIO
-# ============================================================
 
 @router.get("/jobs")
 def listar_jobs_usuario(
@@ -983,7 +930,7 @@ def listar_jobs_usuario(
     }
 
 # ============================================================
-# ENDPOINTS PARA WORKERS (Fase 6 - Comunicación Worker-Backend)
+# WORKERS: /workers/...
 # ============================================================
 
 @router.get("/workers/pending")
@@ -1227,18 +1174,20 @@ def upload_result(
     """
     Recibe la confirmación de que el worker completó el job.
 
-    NO recibe ZIP (cambio de paradigma).
-    Solo registra la ruta local y el manifiesto.
+    Además de marcar el job como completed, ejecuta el traspaso
+    de tabla_temporal → tabla_historica. Solo si el traspaso queda
+    limpio, vacía tabla_temporal.
     """
     from app.core.redis_client import redis_client
     from app.core.config import settings
+    from app.api.analisis import _info
 
     job = db_global.query(EmisionJob).filter(EmisionJob.id == job_id).first()
 
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
 
-    # Verificar que el worker tiene el job
+    # Verificar worker
     redis_conn = redis_client.connection
     current_worker = redis_conn.get(f"job:{job_id}:worker")
 
@@ -1248,7 +1197,7 @@ def upload_result(
             detail=f"Job está siendo procesado por otro worker: {current_worker}"
         )
 
-    # Obtener datos del manifiesto
+    # Datos del manifiesto
     manifest = request.get("manifest", {})
     ruta_local = manifest.get("ruta_local")
     total_generados = manifest.get("generados", 0)
@@ -1257,10 +1206,7 @@ def upload_result(
     if not ruta_local:
         raise HTTPException(status_code=400, detail="Falta ruta_local en el manifiesto")
 
-    # Validar que ruta_local esté contenida dentro de EMISIONES_PATH.
-    # Sin esto, un worker (o cualquiera que logre autenticarse como uno)
-    # podía apuntar a cualquier carpeta del servidor y luego listarla
-    # vía /workers/checkpoint/{job_id}/files.
+    # Validar ruta dentro de EMISIONES_PATH
     base_emisiones = Path(settings.EMISIONES_PATH).resolve()
     ruta_resuelta = Path(ruta_local).resolve()
     if base_emisiones not in ruta_resuelta.parents and ruta_resuelta != base_emisiones:
@@ -1269,41 +1215,81 @@ def upload_result(
             detail="ruta_local debe estar dentro del directorio de emisiones configurado",
         )
 
-    # Actualizar job
+    # ============================================================
+    # TRASPASO TEMPORAL → HISTÓRICA
+    # ============================================================
+    proyecto = db_global.query(Proyecto).filter(Proyecto.id == job.id_proyecto).first()
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    info = _info(proyecto.slug)
+    clave = info["pk"]
+
+    resultado_traspaso = {
+        "insertados": 0,
+        "duplicados_exactos": 0,
+        "conflictos": 0,
+        "limpio": False,
+    }
+
+    db_gen = get_project_db(proyecto.slug)
+    db_proyecto = next(db_gen)
+    try:
+        resultado_traspaso = _traspasar_temporal_a_historica(
+            db_proyecto,
+            proyecto.slug,
+            clave,
+            id_job=job.id,
+            id_usuario=job.id_usuario,
+            worker_id=worker_id,
+        )
+
+        # Solo limpiar si el traspaso quedó limpio
+        if resultado_traspaso["limpio"]:
+            db_proyecto.execute(text("DELETE FROM tabla_temporal"))
+            db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
+            db_proyecto.commit()
+    finally:
+        db_gen.close()
+
+    # ============================================================
+    # ACTUALIZAR JOB
+    # ============================================================
     job.status = 'completed'
     job.completed_at = datetime.now()
-    job.ruta_zip = str(ruta_resuelta)  # Ahora es la ruta local, no un ZIP
+    job.ruta_zip = str(ruta_resuelta)
     job.procesados = total_generados
-
-    # Guardar manifiesto completo en checkpoint_data
     job.checkpoint_data = {
         "manifest": manifest,
         "worker_id": worker_id,
-        "completed_at": datetime.now().isoformat()
+        "completed_at": datetime.now().isoformat(),
+        "traspaso": resultado_traspaso,
     }
-
     db_global.commit()
 
     # Limpiar Redis
     redis_conn.delete(f"job:{job_id}:worker")
     redis_conn.delete(f"job:{job_id}:progress")
 
-    # Registrar log
     registrar_log(
         db_global,
         current_user.id,
         "job_completed",
-        f"Job {job_id} completado por worker {worker_id}: {total_generados} PDFs generados",
+        f"Job {job_id}: {total_generados} PDFs, "
+        f"traspaso={resultado_traspaso['insertados']} insertados, "
+        f"{resultado_traspaso['duplicados_exactos']} duplicados, "
+        f"{resultado_traspaso['conflictos']} conflictos",
         job.id_proyecto
     )
 
     return {
         "success": True,
-        "message": f"Job {job_id} completado exitosamente",
+        "message": f"Job {job_id} completado",
         "job_id": job_id,
         "ruta_local": str(ruta_resuelta),
         "generados": total_generados,
-        "fallidos": total_fallidos
+        "fallidos": total_fallidos,
+        "traspaso": resultado_traspaso,
     }
 
 @router.post("/workers/heartbeat")
@@ -1401,7 +1387,6 @@ def save_checkpoint(
         "checkpoint": checkpoint_data
     }
 
-
 @router.get("/workers/checkpoint/{job_id}")
 def get_checkpoint(
     job_id: int,
@@ -1440,7 +1425,6 @@ def get_checkpoint(
         "checkpoint": None,
         "message": "No hay checkpoint para este job"
     }
-
 
 @router.get("/workers/active")
 def get_active_workers(
@@ -1877,121 +1861,10 @@ def clear_checkpoint(
         "job_id": job_id,
         "mensaje": "Checkpoint eliminado correctamente"
     }
-@router.get("/{proyecto_slug}/jobs/{job_id}/archivos")
-def get_job_archivos(
-    proyecto_slug: str,
-    job_id: int,
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """
-    Obtiene el manifiesto de archivos de un job.
-    """
-    # Verificar acceso
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
 
-    job = db_global.query(EmisionJob).filter(
-        EmisionJob.id == job_id,
-        EmisionJob.id_proyecto == proyecto.id
-    ).first()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job no encontrado")
-
-    # Obtener directorio del job
-    from app.core.config import settings
-    job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
-
-    manifest = _obtener_manifiesto_job(job_dir)
-
-    return {
-        "success": True,
-        "job_id": job_id,
-        "proyecto_slug": proyecto_slug,
-        "manifest": manifest,
-        "job_info": {
-            "nombre_job": job.nombre_job,
-            "status": job.status,
-            "total_registros": job.total_registros,
-            "procesados": job.procesados,
-            "created_at": job.created_at,
-            "completed_at": job.completed_at
-        }
-    }
-
-@router.post("/{proyecto_slug}/jobs/{job_id}/archivos/limpiar")
-def limpiar_archivos_job(
-    proyecto_slug: str,
-    job_id: int,
-    confirmar: bool = Query(False, description="Confirmar eliminación"),
-    current_user: Usuario = Depends(get_current_active_user),
-    db_global: Session = Depends(get_global_db),
-):
-    """
-    Elimina los archivos generados por un job.
-    Solo permite eliminar si está completado.
-    """
-    # Verificar acceso
-    proyecto = check_project_access(proyecto_slug, current_user, db_global)
-
-    job = db_global.query(EmisionJob).filter(
-        EmisionJob.id == job_id,
-        EmisionJob.id_proyecto == proyecto.id
-    ).first()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job no encontrado")
-
-    # Verificar estado
-    if job.status not in ['completed', 'failed', 'cancelled']:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pueden eliminar archivos de un job en estado '{job.status}'"
-        )
-
-    if not confirmar:
-        raise HTTPException(
-            status_code=400,
-            detail="Confirmar eliminación con ?confirmar=true"
-        )
-
-    # Obtener directorio
-    from app.core.config import settings
-    job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
-
-    if not job_dir.exists():
-        return {
-            "success": True,
-            "mensaje": "El directorio del job no existe"
-        }
-
-    # Contar archivos antes de eliminar
-    pdf_files = list(job_dir.glob("*.pdf"))
-    total_archivos = len(pdf_files)
-    tamaño_total = sum(f.stat().st_size for f in pdf_files) / 1024  # KB
-
-    # Eliminar directorio
-    try:
-        shutil.rmtree(job_dir)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error eliminando archivos: {e}")
-
-    # Registrar log
-    registrar_log(
-        db_global,
-        current_user.id,
-        "limpiar_archivos_job",
-        f"Archivos del job {job_id} eliminados: {total_archivos} archivos, {round(tamaño_total, 2)} KB",
-        proyecto.id
-    )
-
-    return {
-        "success": True,
-        "job_id": job_id,
-        "archivos_eliminados": total_archivos,
-        "espacio_liberado_kb": round(tamaño_total, 2),
-        "mensaje": f"Eliminados {total_archivos} archivos"
-    }
+# ============================================================
+# SISTEMA: /sistema/...
+# ============================================================
 
 @router.post("/sistema/limpieza")
 def limpieza_sistema(
@@ -2105,6 +1978,10 @@ def get_espacio_disco(
         }
 
     return resultado
+
+# ============================================================
+# MONITOREO: /monitoreo/...
+# ============================================================
 
 @router.get("/monitoreo/metricas")
 def get_metricas(
@@ -2438,3 +2315,1007 @@ def health_check(
             health["status"] = "warning"
 
     return health
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/preparar-tabla-temporal
+# ============================================================
+
+@router.post("/{proyecto_slug}/preparar-tabla-temporal",
+             response_model=ContinuarEmisionResponse)
+def preparar_tabla_temporal(
+    proyecto_slug: str,
+    request: PrepararEmisionRequest,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    from app.api.analisis import _info
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    clave = info["pk"]     # ← clave foránea (clave_APA, credito, ...)
+
+    if not request.ids:
+        raise HTTPException(status_code=400, detail="No se enviaron cuentas.")
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        orden_map = {str(k): int(v) for k, v in (request.orden_map or {}).items()}
+
+        resultado = _poblar_tabla_temporal(
+            db_proyecto,
+            clave,
+            request.ids,
+            orden_map,
+        )
+
+        registrar_log(
+            db_global, current_user.id, "preparar_tabla_temporal",
+            f"tabla_temporal: {resultado['insertados']} insertados, "
+            f"{resultado['errores']} errores en {proyecto_slug}",
+            proyecto.id,
+        )
+
+        return ContinuarEmisionResponse(
+            success=True,
+            total=resultado["insertados"],
+            insertados=resultado["insertados"],
+            errores=resultado["errores"],
+            message=(
+                f"{resultado['insertados']} registros listos para emisión."
+                + (f" {resultado['errores']} quedaron en errores."
+                   if resultado["errores"] > 0 else "")
+            ),
+        )
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/tabla-temporal
+# ============================================================
+
+@router.get("/{proyecto_slug}/tabla-temporal")
+def get_tabla_temporal(
+    proyecto_slug: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Devuelve el contenido actual de tabla_temporal.
+    PK real = codebar. Clave foránea = la de _info (clave_APA, credito, ...).
+    """
+    from sqlalchemy import text
+    from app.api.analisis import _info
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    clave = info["pk"]
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        try:
+            total = db_proyecto.execute(text(
+                "SELECT COUNT(*) AS c FROM tabla_temporal"
+            )).first().c
+        except Exception:
+            return {
+                "rows": [], "total": 0,
+                "page": page, "limit": limit,
+                "pk": "codebar", "clave": clave,
+            }
+
+        offset = (page - 1) * limit
+        rows = db_proyecto.execute(text("""
+            SELECT * FROM tabla_temporal
+            ORDER BY orden_impresion ASC, `codebar` ASC
+            LIMIT :limit OFFSET :offset
+        """), {"limit": limit, "offset": offset}).fetchall()
+
+        return {
+            "rows": [dict(r._mapping) for r in rows],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pk": "codebar",       # ← PK real
+            "clave": clave,        # ← clave foránea (por si el front la quiere)
+        }
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/tabla-temporal-errores
+# ============================================================
+
+@router.get("/{proyecto_slug}/tabla-temporal-errores")
+def get_tabla_temporal_errores(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Lista los errores/conflictos del último traspaso."""
+    from sqlalchemy import text
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        try:
+            rows = db_proyecto.execute(text("""
+                SELECT id, clave_origen, codebar_intento, codebar_original,
+                       motivo, estatus, created_at
+                FROM tabla_temporal_errores
+                ORDER BY id ASC
+            """)).fetchall()
+        except Exception:
+            return {"errores": [], "total": 0}
+
+        return {
+            "errores": [dict(r._mapping) for r in rows],
+            "total": len(rows),
+        }
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/resolver-duplicados
+# ============================================================ 
+
+@router.post("/{proyecto_slug}/resolver-duplicado")
+def resolver_duplicado(
+    proyecto_slug: str,
+    request: ResolverDuplicadoRequest,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Resuelve un conflicto de traspaso:
+    - reemplazar:      actualiza la fila existente en histórica
+    - agregar_sufijo:  inserta con codebar+N-DX
+    - descartar:       elimina la fila de temporal_errores y de temporal
+    """
+    from sqlalchemy import text
+    import json
+    from app.api.analisis import _info
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    clave = info["pk"]
+    campo_monto = CAMPO_MONTO_POR_PROYECTO.get(proyecto_slug)
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        err = db_proyecto.execute(text(
+            "SELECT * FROM tabla_temporal_errores WHERE id = :id LIMIT 1"
+        ), {"id": request.error_id}).first()
+
+        if not err:
+            raise HTTPException(status_code=404, detail="Error no encontrado")
+
+        err_dict = dict(err._mapping)
+        row_dict = json.loads(err_dict["payload_json"] or "{}")
+        codebar_original = err_dict["codebar_original"] or err_dict["codebar_intento"]
+        clave_val = err_dict["clave_origen"]
+
+        accion = request.accion
+
+        if accion == "descartar":
+            db_proyecto.execute(text("DELETE FROM tabla_temporal_errores WHERE id = :id"),
+                                {"id": request.error_id})
+            db_proyecto.execute(text(
+                f"DELETE FROM tabla_temporal WHERE `{clave}` = :c AND codebar = :cb"
+            ), {"c": clave_val, "cb": codebar_original})
+            db_proyecto.commit()
+            return {"success": True, "message": "Descartado"}
+
+        if accion == "reemplazar":
+            # Actualizar fila existente en histórica con los datos de temporal
+            cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
+            cols_hist = _get_columnas_tabla(db_proyecto, "tabla_historica")
+            cols_extra = {"fecha_registro", "id_job", "id_usuario", "worker_id",
+                          "ruta_pdf", "estatus", "observaciones_preparacion"}
+            cols_comunes = [c for c in cols_temp if c in cols_hist and c not in cols_extra]
+
+            set_parts = [f"`{c}` = :{c}" for c in cols_comunes if c != "codebar"]
+            params = {c: row_dict.get(c) for c in cols_comunes if c != "codebar"}
+            params["cb"] = codebar_original
+
+            db_proyecto.execute(text(
+                f"UPDATE tabla_historica SET {', '.join(set_parts)} WHERE codebar = :cb"
+            ), params)
+            db_proyecto.execute(text("DELETE FROM tabla_temporal_errores WHERE id = :id"),
+                                {"id": request.error_id})
+            db_proyecto.execute(text(
+                f"DELETE FROM tabla_temporal WHERE `{clave}` = :c AND codebar = :cb"
+            ), {"c": clave_val, "cb": codebar_original})
+            db_proyecto.commit()
+            return {"success": True, "message": "Reemplazado"}
+
+        if accion == "agregar_sufijo":
+            # Insertar con codebar + DX (y probar DX2, DX3... si sigue chocando)
+            cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
+            cols_hist = _get_columnas_tabla(db_proyecto, "tabla_historica")
+            cols_extra = {"fecha_registro", "id_job", "id_usuario", "worker_id",
+                          "ruta_pdf", "estatus", "observaciones_preparacion"}
+            cols_comunes = [c for c in cols_temp if c in cols_hist and c not in cols_extra]
+
+            insertados = False
+            sufijo = request.sufijo or 1
+            codebar_nuevo = None
+
+            for intento in range(sufijo, sufijo + 20):
+                candidato = _generar_codebar_con_sufijo(codebar_original, intento)
+                # Verificar unicidad
+                existe = db_proyecto.execute(text(
+                    "SELECT 1 FROM tabla_historica WHERE codebar = :cb LIMIT 1"
+                ), {"cb": candidato}).first()
+                if existe:
+                    continue
+
+                cols_insert = list(cols_comunes) + [
+                    "id_job", "id_usuario", "worker_id", "estatus", "fecha_registro"
+                ]
+                vals_insert = [f":{c}" for c in cols_comunes] + [
+                    ":id_job", ":id_usuario", ":worker_id", ":estatus", ":fecha_registro"
+                ]
+                params = {c: row_dict.get(c) for c in cols_comunes}
+                params["codebar"] = candidato
+                params.update({
+                    "id_job": None,
+                    "id_usuario": current_user.id,
+                    "worker_id": None,
+                    "estatus": "emitida_revision",
+                    "fecha_registro": datetime.now(),
+                })
+
+                # codebar no está en cols_comunes porque ya lo seteamos aparte
+                cols_final = [c if c != "codebar" else "codebar" for c in cols_insert]
+                db_proyecto.execute(text(f"""
+                    INSERT INTO tabla_historica
+                        ({", ".join(f"`{c}`" for c in cols_final)})
+                    VALUES ({", ".join(vals_insert)})
+                """), params)
+
+                codebar_nuevo = candidato
+                insertados = True
+                break
+
+            if not insertados:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No se pudo generar un codebar único después de 20 intentos."
+                )
+
+            db_proyecto.execute(text("DELETE FROM tabla_temporal_errores WHERE id = :id"),
+                                {"id": request.error_id})
+            db_proyecto.execute(text(
+                f"DELETE FROM tabla_temporal WHERE `{clave}` = :c AND codebar = :cb"
+            ), {"c": clave_val, "cb": codebar_original})
+            db_proyecto.commit()
+
+            return {
+                "success": True,
+                "message": f"Insertado con codebar {codebar_nuevo}",
+                "codebar_nuevo": codebar_nuevo,
+            }
+
+        raise HTTPException(status_code=400, detail=f"Acción desconocida: {accion}")
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/resolver-duplicados
+# ============================================================ 
+
+@router.post("/{proyecto_slug}/tabla-temporal/finalizar-traspaso")
+def finalizar_traspaso(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Verifica que no queden errores pendientes. Si todo está resuelto,
+    vacía tabla_temporal y tabla_temporal_errores.
+    """
+    from sqlalchemy import text
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        pendientes = db_proyecto.execute(text(
+            "SELECT COUNT(*) AS c FROM tabla_temporal_errores WHERE estatus != 'resuelto'"
+        )).first().c
+
+        if pendientes > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Hay {pendientes} conflictos sin resolver. Resuélvelos primero."
+            )
+
+        db_proyecto.execute(text("DELETE FROM tabla_temporal"))
+        db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
+        db_proyecto.commit()
+
+        registrar_log(
+            db_global, current_user.id, "finalizar_traspaso",
+            f"Traspaso cerrado en {proyecto_slug}",
+            proyecto.id
+        )
+
+        return {"success": True, "message": "Temporal vaciada correctamente."}
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/seleccionar-cuentas-csv
+# ============================================================
+
+@router.post("/{proyecto_slug}/seleccionar-cuentas-csv")
+async def seleccionar_cuentas_csv(
+    proyecto_slug: str,
+    file: UploadFile = File(...),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Lee un CSV/Excel con:
+      - columna de PK (obligatoria)
+      - columna de orden_impresion (opcional)
+
+    Devuelve:
+      - ids:       lista de PKs (como vienen en el archivo)
+      - orden_map: dict {pk_str: orden}
+      - pk:        nombre de la columna PK en tabla_analisis
+      - total:     cantidad de ids
+
+    NO escribe en BD. Solo parsea.
+    """
+    import pandas as pd
+    import io
+    from app.api.analisis import _info
+
+    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Formato no soportado. Usa CSV o Excel.")
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+
+    contents = await file.read()
+    try:
+        if file.filename.lower().endswith(".csv"):
+            try:
+                df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", sep=None, engine="python")
+            except UnicodeDecodeError:
+                df = pd.read_csv(io.BytesIO(contents), encoding="latin-1", sep=None, engine="python")
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el archivo: {e}")
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+
+    # Normalizar nombres de columnas
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    # Detectar columna PK
+    pk_col = None
+    for cand in [pk.lower(), "pk", "cuenta", "prestamo", "licencia", "credito", "clave_apa", "cuenta_n"]:
+        if cand in df.columns:
+            pk_col = cand
+            break
+
+    if pk_col is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se encontró columna de PK. Columnas detectadas: {list(df.columns)[:10]}"
+        )
+
+    # Detectar columna de orden (opcional)
+    orden_col = None
+    for cand in ["orden", "orden_impresion", "order", "no", "num"]:
+        if cand in df.columns:
+            orden_col = cand
+            break
+
+    ids: list = []
+    orden_map: dict = {}
+
+    for idx, row in df.iterrows():
+        pk_val = row[pk_col]
+        if pd.isna(pk_val):
+            continue
+
+        if info["pk_type"] == "int":
+            try:
+                pk_val = int(pk_val)
+            except (ValueError, TypeError):
+                continue
+        else:
+            pk_val = str(pk_val).strip()
+
+        ids.append(pk_val)
+
+        if orden_col is not None and not pd.isna(row[orden_col]):
+            try:
+                orden_map[str(pk_val)] = int(row[orden_col])
+            except (ValueError, TypeError):
+                pass
+
+    return {
+        "success": True,
+        "ids": ids,
+        "orden_map": orden_map,
+        "total": len(ids),
+        "pk": pk,
+    }
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/preparar
+# ============================================================
+
+@router.post("/{proyecto_slug}/preparar", response_model=PrepararEmisionResponse)
+def preparar_emision(
+    proyecto_slug: str,
+    request: PrepararEmisionRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Prepara una emisión masiva de documentos.
+
+    1. Valida que el proyecto y plantilla existen
+    2. Cuenta los registros a procesar según los filtros
+    3. Crea un job en la base de datos (status: pending)
+    4. Lo pone en la cola de Redis para que un worker lo procese
+    5. Retorna el ID del job para seguimiento
+    """
+    from app.api.analisis import _info
+
+    # 1. VALIDAR ACCESO AL PROYECTO
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+
+    # 2. VALIDAR PLANTILLA
+    plantilla = db_global.query(Plantilla).filter(
+        Plantilla.id == request.id_plantilla,
+        Plantilla.id_proyecto == proyecto.id,
+        Plantilla.activa == True
+    ).first()
+
+    if not plantilla:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Plantilla no encontrada o inactiva. ID: {request.id_plantilla}"
+        )
+
+    # 3. OBTENER REGISTROS A PROCESAR
+    db_proyecto = next(get_project_db(proyecto_slug))
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+
+    condiciones = ["viabilidad = 'viable'"]
+    params = {}
+
+    if (
+        request.filtros.get("programa")
+        and request.filtros["programa"] != "todos"
+    ):
+        condiciones.append(
+            "programa = :programa"
+        )
+
+        params["programa"] = request.filtros["programa"]
+
+    if (
+        request.filtros.get("ids")
+        and isinstance(request.filtros["ids"], list)
+    ):
+        placeholders = ", ".join(
+            f":id{i}"
+            for i in range(len(request.filtros["ids"]))
+        )
+
+        condiciones.append(
+            f"`{pk}` IN ({placeholders})"
+        )
+
+        for i, id_val in enumerate(request.filtros["ids"]):
+            params[f"id{i}"] = id_val
+
+    if (
+        request.filtros.get("cuenta_inicial")
+        and request.filtros.get("cuenta_final")
+    ):
+        condiciones.append(
+            f"`{pk}` BETWEEN :inicio AND :fin"
+        )
+
+        params["inicio"] = request.filtros["cuenta_inicial"]
+        params["fin"] = request.filtros["cuenta_final"]
+
+    where = " AND ".join(condiciones)
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        count_query = text(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM tabla_analisis
+            WHERE {where}
+            """
+        )
+
+        count_result = db_proyecto.execute(
+            count_query,
+            params
+        ).first()
+
+        total = count_result.total if count_result else 0
+
+    finally:
+        db_gen.close()
+
+    if total == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay registros viables para emitir con los filtros seleccionados"
+        )
+
+    # 4. CREAR JOB EN LA BASE DE DATOS
+    job = EmisionJob(
+        id_proyecto=proyecto.id,
+        id_plantilla=plantilla.id,
+        id_usuario=current_user.id,
+        nombre_job=request.nombre_job or f"Emisión {proyecto.nombre} - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        modo=request.modo,
+        cuentas_por_lote=request.cuentas_por_lote,
+        orden_impresion_inicial=request.orden_impresion_inicial,
+        status='pending',
+        total_registros=total,
+        filtros=json.dumps(request.filtros),
+        created_by=current_user.id
+    )
+
+    db_global.add(job)
+    db_global.commit()
+    db_global.refresh(job)
+
+    # 5. REGISTRAR EN LOG
+    registrar_log(
+        db_global,
+        current_user.id,
+        "preparar_emision",
+        f"Emisión preparada: {total} registros, job_id={job.id}, plantilla={plantilla.nombre}",
+        proyecto.id
+    )
+
+    # 6. PONER EN COLA DE REDIS
+    from app.core.redis_client import push_job
+    publicado = push_job(job.id)
+
+    if not publicado:
+        logger.warning(f"Job {job.id} creado pero NO publicado en Redis")
+
+    from app.core.redis_client import set_job_status
+    set_job_status(
+        job.id,
+        'pending',
+        {
+            'total': total,
+            'proyecto': proyecto.nombre,
+            'usuario': current_user.nombre
+        }
+    )
+
+    return PrepararEmisionResponse(
+        success=True,
+        job_id=job.id,
+        total_registros=total,
+        message=f"Emisión preparada. {total} registros en cola para procesamiento."
+    )
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/plantillas
+# ============================================================
+
+@router.get("/{proyecto_slug}/plantillas")
+def get_plantillas_emision(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Obtiene las plantillas disponibles para emisión en un proyecto.
+    """
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+
+    plantillas = db_global.query(Plantilla).filter(
+        Plantilla.id_proyecto == proyecto.id,
+        Plantilla.activa == True
+    ).all()
+
+    return [
+        {
+            "id": p.id,
+            "nombre": p.nombre,
+            "nombre_archivo": p.nombre_archivo,
+            "descripcion": p.descripcion,
+            "total_campos": len(p.campos) if p.campos else 0,
+            "created_at": p.created_at
+        }
+        for p in plantillas
+    ]
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/programas
+# ============================================================
+
+@router.get("/{proyecto_slug}/programas")
+def get_programas_emision(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Obtiene los programas disponibles para emisión."""
+    from app.api.analisis import get_programas
+    return get_programas(proyecto_slug, current_user, db_global)
+
+# ============================================================
+# RESTO DE ENDPOINTS DE PROYECTO
+# ============================================================
+
+@router.get("/{proyecto_slug}/estadisticas-emision")
+def get_estadisticas_emision(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Obtiene estadísticas para emisión."""
+    from sqlalchemy import text
+
+    check_project_access(
+        proyecto_slug,
+        current_user,
+        db_global
+    )
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        total_viables_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'viable'
+                """
+            )
+        ).first()
+
+        total_no_viables_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'no_viable'
+                """
+            )
+        ).first()
+
+        total_pendientes_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                WHERE viabilidad = 'pendiente'
+                """
+            )
+        ).first()
+
+        total_general_row = db_proyecto.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM tabla_analisis
+                """
+            )
+        ).first()
+
+        total_viables = (
+            total_viables_row.total
+            if total_viables_row
+            else 0
+        )
+
+        total_no_viables = (
+            total_no_viables_row.total
+            if total_no_viables_row
+            else 0
+        )
+
+        total_pendientes = (
+            total_pendientes_row.total
+            if total_pendientes_row
+            else 0
+        )
+
+        total_general = (
+            total_general_row.total
+            if total_general_row
+            else 0
+        )
+
+        return {
+            "total_viables": total_viables,
+            "total_no_viables": total_no_viables,
+            "total_pendientes": total_pendientes,
+            "total_general": total_general,
+            "mensaje": (
+                f"{total_viables} registros "
+                "viables para emisión"
+            )
+        }
+
+    except Exception as e:
+        return {
+            "total_viables": 0,
+            "total_no_viables": 0,
+            "total_pendientes": 0,
+            "total_general": 0,
+            "mensaje": (
+                "La tabla de análisis aún no existe. "
+                "Genera el análisis primero."
+            ),
+            "error": str(e)
+        }
+
+    finally:
+        db_gen.close()
+
+@router.get("/{proyecto_slug}/cuentas")
+def get_cuentas_emision(
+    proyecto_slug: str,
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(50, ge=1, le=200, description="Registros por página (máx 200)"),
+    viabilidad: Optional[str] = Query(None, description="Filtrar por viabilidad"),
+    programa: Optional[str] = Query(None, description="Filtrar por programa"),
+    busqueda: Optional[str] = Query(None, description="Búsqueda general"),
+    sort_col: Optional[str] = Query(None, description="Columna para ordenar"),
+    sort_dir: Optional[str] = Query("asc", description="Dirección de ordenamiento"),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Obtiene cuentas para selección en emisión."""
+    from sqlalchemy import text
+    from app.api.analisis import _info
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        conditions = []
+        params = {}
+
+        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+            conditions.append("viabilidad = :viabilidad")
+            params["viabilidad"] = viabilidad
+
+        if programa and programa != "todos":
+            conditions.append("programa = :programa")
+            params["programa"] = programa
+
+        if busqueda:
+            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
+            parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
+            conditions.append("(" + " OR ".join(parts) + ")")
+            params["busqueda"] = f"%{busqueda}%"
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+
+        # Columnas válidas para ordenamiento
+        try:
+            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
+            cols_validas = {r[0] for r in cols_result}
+        except Exception:
+            cols_validas = set()
+
+        order_col = pk
+        if sort_col and sort_col in cols_validas:
+            order_col = sort_col
+        order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+
+        # Contar total
+        count_query = text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}")
+        total = db_proyecto.execute(count_query, params).first().total
+
+        # Obtener datos
+        offset = (page - 1) * limit
+        data_query = text(f"""
+            SELECT * FROM tabla_analisis
+            WHERE {where}
+            ORDER BY `{order_col}` {order_dir}
+            LIMIT {limit} OFFSET {offset}
+        """)
+        rows = db_proyecto.execute(data_query, params).fetchall()
+
+        # Procesar resultados
+        result = []
+        for r in rows:
+            row_dict = dict(r._mapping)
+
+            # Adeudo
+            adeudo_val = 0
+            for col in info["col_adeudo"]:
+                v = row_dict.get(col)
+                if v is not None:
+                    try:
+                        adeudo_val = float(v)
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            row_dict["_adeudo_display"] = adeudo_val
+
+            # Nombre
+            nombre_val = ""
+            for col in info["col_nombre"]:
+                v = row_dict.get(col)
+                if v:
+                    nombre_val = str(v)
+                    break
+            row_dict["_nombre_display"] = nombre_val
+
+            # Calle
+            calle_val = ""
+            for col in info["col_calle"]:
+                v = row_dict.get(col)
+                if v:
+                    calle_val = str(v)
+                    break
+            row_dict["_calle_display"] = calle_val
+
+            result.append(row_dict)
+
+        return {
+            "rows": result,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+            "total_pages": (
+                (total + limit - 1) // limit
+                if total > 0
+                else 1
+            )
+        }
+
+    finally:
+        db_gen.close()
+
+@router.get("/{proyecto_slug}/jobs/{job_id}/archivos")
+def get_job_archivos(
+    proyecto_slug: str,
+    job_id: int,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Obtiene el manifiesto de archivos de un job.
+    """
+    # Verificar acceso
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+
+    job = db_global.query(EmisionJob).filter(
+        EmisionJob.id == job_id,
+        EmisionJob.id_proyecto == proyecto.id
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado")
+
+    # Obtener directorio del job
+    from app.core.config import settings
+    job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
+
+    manifest = _obtener_manifiesto_job(job_dir)
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "proyecto_slug": proyecto_slug,
+        "manifest": manifest,
+        "job_info": {
+            "nombre_job": job.nombre_job,
+            "status": job.status,
+            "total_registros": job.total_registros,
+            "procesados": job.procesados,
+            "created_at": job.created_at,
+            "completed_at": job.completed_at
+        }
+    }
+
+@router.post("/{proyecto_slug}/jobs/{job_id}/archivos/limpiar")
+def limpiar_archivos_job(
+    proyecto_slug: str,
+    job_id: int,
+    confirmar: bool = Query(False, description="Confirmar eliminación"),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Elimina los archivos generados por un job.
+    Solo permite eliminar si está completado.
+    """
+    # Verificar acceso
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+
+    job = db_global.query(EmisionJob).filter(
+        EmisionJob.id == job_id,
+        EmisionJob.id_proyecto == proyecto.id
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado")
+
+    # Verificar estado
+    if job.status not in ['completed', 'failed', 'cancelled']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pueden eliminar archivos de un job en estado '{job.status}'"
+        )
+
+    if not confirmar:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirmar eliminación con ?confirmar=true"
+        )
+
+    # Obtener directorio
+    from app.core.config import settings
+    job_dir = _get_job_directory(proyecto_slug, job_id, Path(settings.EMISIONES_PATH))
+
+    if not job_dir.exists():
+        return {
+            "success": True,
+            "mensaje": "El directorio del job no existe"
+        }
+
+    # Contar archivos antes de eliminar
+    pdf_files = list(job_dir.glob("*.pdf"))
+    total_archivos = len(pdf_files)
+    tamaño_total = sum(f.stat().st_size for f in pdf_files) / 1024  # KB
+
+    # Eliminar directorio
+    try:
+        shutil.rmtree(job_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error eliminando archivos: {e}")
+
+    # Registrar log
+    registrar_log(
+        db_global,
+        current_user.id,
+        "limpiar_archivos_job",
+        f"Archivos del job {job_id} eliminados: {total_archivos} archivos, {round(tamaño_total, 2)} KB",
+        proyecto.id
+    )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "archivos_eliminados": total_archivos,
+        "espacio_liberado_kb": round(tamaño_total, 2),
+        "mensaje": f"Eliminados {total_archivos} archivos"
+    }

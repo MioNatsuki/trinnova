@@ -270,58 +270,51 @@ def guardar_mapeo(
 # ============================================
 
 @router.post("/{plantilla_id}/preview")
-def preview_plantilla_pdf(
+async def preview_plantilla_pdf(
     plantilla_id: int,
     body: PreviewRequest,
     current_user: Usuario = Depends(get_current_active_user),
     db: Session = Depends(get_global_db),
 ):
-    """Genera un PDF de preview de la plantilla"""
-    import asyncio
-    
+    """Genera un PDF de preview de la plantilla (async, sin crear loops nuevos)."""
     plantilla = _get_plantilla_or_404(db, plantilla_id)
-    
+
     if not plantilla.nombre_archivo:
         raise HTTPException(
             status_code=400,
             detail="La plantilla no tiene asociado un archivo HTML."
         )
-    
+
     proyecto_slug = _slug_from_proyecto_id(db, plantilla.id_proyecto)
     check_project_access(proyecto_slug, current_user, db)
-    
+
     try:
-        # Usar PlantillaRenderer directamente
         renderer = PlantillaRenderer(proyecto_slug)
-        
-        # Preparar placeholders
+
         placeholders = body.placeholders if body.preview_on else {}
-        
-        # Función asíncrona para generar el PDF
-        async def _generar():
-            await PlantillaRenderer.get_browser()
-            return await renderer.render_pdf(
-                plantilla.nombre_archivo.split('/')[-1],
-                placeholders,
-                codebar=placeholders.get('codebar') if placeholders else None
-            )
-        
-        # Ejecutar en un loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        pdf_bytes = loop.run_until_complete(_generar())
-        loop.close()
-        
+
+        # Asegurar browser (singleton) — se crea en el loop actual
+        await PlantillaRenderer.get_browser()
+
+        nombre_archivo = plantilla.nombre_archivo.split('/')[-1]
+
+        pdf_bytes = await renderer.render_pdf(
+            nombre_archivo,
+            placeholders,
+            codebar=placeholders.get('codebar') if placeholders else None,
+            inject_codebar_style=True,   # ← para que el codebar se vea en preview
+        )
+
         pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
-        
+
         return {
             "success": True,
             "pdf_base64": pdf_base64,
             "preview_on": body.preview_on,
             "plantilla_id": plantilla_id,
-            "nombre_archivo": plantilla.nombre_archivo
+            "nombre_archivo": plantilla.nombre_archivo,
         }
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -461,6 +454,55 @@ def obtener_placeholders_especiales_endpoint(
     """
     return obtener_placeholders_especiales()
 
+@router.get("/{plantilla_id}/preview-mapeo")
+def preview_mapeo(
+    plantilla_id: int,
+    current_user: Usuario = Depends(get_current_active_user),
+    db: Session = Depends(get_global_db),
+):
+    """
+    Devuelve:
+      - campos_actuales: placeholders ya guardados en plantilla_campos con su campo_bd
+      - campos_disponibles: columnas reales de tabla_analisis del proyecto
+    Es lo que el frontend usa para pintar la tabla de mapeo.
+    """
+    plantilla = _get_plantilla_or_404(db, plantilla_id)
+    slug = _slug_from_proyecto_id(db, plantilla.id_proyecto)
+    check_project_access(slug, current_user, db)
+
+    # Campos ya mapeados
+    campos_db = (
+        db.query(PlantillaCampo)
+        .filter(PlantillaCampo.id_plantilla == plantilla_id)
+        .order_by(PlantillaCampo.orden)
+        .all()
+    )
+
+    campos_actuales = [
+        {
+            "placeholder": c.placeholder,
+            "campo_bd": c.campo_bd,
+            "orden": c.orden,
+        }
+        for c in campos_db
+    ]
+
+    # Columnas disponibles del proyecto (tabla_analisis)
+    columnas = _get_campos_analisis(slug)
+
+    # Incluir también placeholders especiales del sistema por si acaso
+    especiales = list(obtener_placeholders_especiales().keys())
+
+    campos_disponibles = sorted(set(columnas + especiales))
+
+    return {
+        "plantilla_id": plantilla_id,
+        "nombre": plantilla.nombre,
+        "nombre_archivo": plantilla.nombre_archivo,
+        "campos_actuales": campos_actuales,
+        "campos_disponibles": campos_disponibles,
+    }
+    
 @router.get("/{plantilla_id}/placeholders")
 def obtener_placeholders_plantilla(
     plantilla_id: int,

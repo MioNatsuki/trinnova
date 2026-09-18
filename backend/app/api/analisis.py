@@ -18,7 +18,6 @@ from app.services.log_service import registrar_log
 from app.services.inpc_service import INPCService
 from app.services.numero_a_letras import numero_a_letras
 from pydantic import BaseModel
-from app.services.codebar_service import CodebarService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -609,15 +608,8 @@ def _generar_codebar_completo(
     - VISTA: número de visita (ej: 3)
     """
     from datetime import datetime as dt
-    from app.services.codebar_service import CodebarService
 
-    return CodebarService.generar_codebar_completo(
-        pk_value=pk_value,
-        fecha_emision=fecha_emision,
-        visita=visita,
-        identificador_documento=identificador_documento,
-        id_documento=id_documento
-    )
+    return codebar = str(pk_value)
 
 
 def _upsert_tabla_dinamica(
@@ -2206,12 +2198,7 @@ def calcular_todas_filas(
 
                     po_valor = pmo or ''
 
-                    codebar = CodebarService.generar_codebar_completo(
-                        pk_value=str(pk_value),
-                        fecha_emision=fecha_emision_dt,
-                        visita=visita,
-                        identificador_documento=identificador_documento
-                    )
+                    codebar = str(pk_value)
 
                     ultimo_inpc = (
                         INPCService.obtener_ultimo_registro(
@@ -2316,12 +2303,7 @@ def calcular_todas_filas(
                     # ============================================================
                     # 4. GENERAR CÓDIGO DE BARRAS
                     # ============================================================
-                    codebar = CodebarService.generar_codebar_completo(
-                        pk_value=str(pk_value),
-                        fecha_emision=fecha_emision_dt,
-                        visita=visita,
-                        identificador_documento=identificador_documento
-                    )
+                    codebar = str(pk_value)
 
                     # ============================================================
                     # 5. PREPARAR DATOS PARA GUARDAR
@@ -2539,7 +2521,6 @@ from app.services.log_service import registrar_log
 from app.services.inpc_service import INPCService
 from app.services.numero_a_letras import numero_a_letras
 from pydantic import BaseModel
-from app.services.codebar_service import CodebarService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -3130,15 +3111,8 @@ def _generar_codebar_completo(
     - VISTA: número de visita (ej: 3)
     """
     from datetime import datetime as dt
-    from app.services.codebar_service import CodebarService
 
-    return CodebarService.generar_codebar_completo(
-        pk_value=pk_value,
-        fecha_emision=fecha_emision,
-        visita=visita,
-        identificador_documento=identificador_documento,
-        id_documento=id_documento
-    )
+    return codebar = str(pk_value)
 
 
 def _upsert_tabla_dinamica(
@@ -4727,12 +4701,7 @@ def calcular_todas_filas(
 
                     po_valor = pmo or ''
 
-                    codebar = CodebarService.generar_codebar_completo(
-                        pk_value=str(pk_value),
-                        fecha_emision=fecha_emision_dt,
-                        visita=visita,
-                        identificador_documento=identificador_documento
-                    )
+                    codebar = str(pk_value)
 
                     ultimo_inpc = (
                         INPCService.obtener_ultimo_registro(
@@ -4837,12 +4806,7 @@ def calcular_todas_filas(
                     # ============================================================
                     # 4. GENERAR CÓDIGO DE BARRAS
                     # ============================================================
-                    codebar = CodebarService.generar_codebar_completo(
-                        pk_value=str(pk_value),
-                        fecha_emision=fecha_emision_dt,
-                        visita=visita,
-                        identificador_documento=identificador_documento
-                    )
+                    codebar = str(pk_value)
 
                     # ============================================================
                     # 5. PREPARAR DATOS PARA GUARDAR

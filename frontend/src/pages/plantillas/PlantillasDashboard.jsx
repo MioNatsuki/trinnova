@@ -234,14 +234,40 @@ export default function PlantillasDashboard() {
   const openMapeo = async (p) => {
     setMapModal(p);
     setMapEdits({});
+    setMapData({ campos_actuales: [], campos_disponibles: [] });
+
     try {
       const res = await api.get(`/plantillas/${p.id}/preview-mapeo`);
-      setMapData(res.data);
+
+      const actuales = res.data?.campos_actuales || [];
+      const disponibles = res.data?.campos_disponibles || [];
+
+      setMapData({
+        campos_actuales: actuales,
+        campos_disponibles: disponibles,
+      });
+
       const edits = {};
-      res.data.campos_actuales.forEach(c => { edits[c.placeholder] = c.campo_bd; });
+      actuales.forEach(c => { edits[c.placeholder] = c.campo_bd || ''; });
       setMapEdits(edits);
-    } catch { setMapData({ campos_actuales: [], campos_disponibles: [] }); }
-  };
+
+      if (actuales.length === 0) {
+        showMsg('error',
+          'La plantilla no tiene placeholders registrados. ' +
+          'Ejecuta "Sincronizar" primero.');
+      }
+      if (disponibles.length === 0) {
+        showMsg('error',
+          'No se encontraron columnas en tabla_analisis del proyecto. ' +
+          'Genera el análisis primero.');
+      }
+    } catch (err) {
+      showMsg('error',
+        err.response?.data?.detail ||
+        'Error cargando mapeo de la plantilla.');
+      setMapData({ campos_actuales: [], campos_disponibles: [] });
+    }
+};
 
   const handleMapSave = async () => {
     setMapSaving(true);
@@ -513,13 +539,20 @@ export default function PlantillasDashboard() {
                 <span>Placeholder</span><span>Campo en BD</span>
               </div>
               {Object.keys(mapEdits).length === 0 ? (
-                <p className="pl-map-empty">Sin placeholders.</p>
+                <p className="pl-map-empty">
+                  Esta plantilla no tiene placeholders. Sincroniza las plantillas primero.
+                </p>
               ) : (
                 Object.entries(mapEdits).map(([ph, campo]) => (
                   <div key={ph} className="pl-map-row">
                     <span className="pl-map-ph">{ph}</span>
-                    <select className="pl-select pl-map-select" value={campo || ''}
-                      onChange={e => setMapEdits(prev => ({ ...prev, [ph]: e.target.value }))}>
+                    <select
+                      className="pl-select pl-map-select"
+                      value={campo || ''}
+                      onChange={e =>
+                        setMapEdits(prev => ({ ...prev, [ph]: e.target.value }))
+                      }
+                    >
                       <option value="">— Sin mapear —</option>
                       {mapData.campos_disponibles.map(c => (
                         <option key={c} value={c}>{c}</option>

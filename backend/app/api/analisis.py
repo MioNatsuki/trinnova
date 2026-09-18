@@ -2344,16 +2344,7 @@ def calcular_todas_filas(
                 # RESTO DE PROYECTOS
                 # ============================================================
                 else:
-                    codebar = (
-                        CodebarService.generar_codebar_completo(
-                            pk_value=str(pk_value),
-                            fecha_emision=fecha_emision_dt,
-                            visita=visita,
-                            identificador_documento=(
-                                identificador_documento
-                            )
-                        )
-                    )
+                    codebar = str(pk_value)
 
                     data_dict = {
                         "codebar": codebar,
@@ -4847,16 +4838,7 @@ def calcular_todas_filas(
                 # RESTO DE PROYECTOS
                 # ============================================================
                 else:
-                    codebar = (
-                        CodebarService.generar_codebar_completo(
-                            pk_value=str(pk_value),
-                            fecha_emision=fecha_emision_dt,
-                            visita=visita,
-                            identificador_documento=(
-                                identificador_documento
-                            )
-                        )
-                    )
+                    codebar = str(pk_value)
 
                     data_dict = {
                         "codebar": codebar,

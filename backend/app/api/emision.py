@@ -151,6 +151,17 @@ class ResolverDuplicadoRequest(BaseModel):
     accion: str   # 'reemplazar' | 'agregar_sufijo' | 'descartar'
     sufijo: Optional[int] = None
 
+class PrepararEspecialRequest(BaseModel):
+    codebars: List[str] = Field(..., min_length=1)
+    nombre_job: Optional[str] = None
+    cuentas_por_lote: int = Field(50, ge=1, le=500)
+    orden_impresion_inicial: int = Field(1, ge=1)
+
+class BuscarHistoricoResponse(BaseModel):
+    success: bool
+    total: int
+    resultados: List[Dict[str, Any]]
+
 # ============================================================
 # FUNCIONES AUXILIARES
 # ============================================================
@@ -803,6 +814,103 @@ def _generar_codebar_con_sufijo(codebar: str, sufijo: int = 1) -> str:
     tag = "DX" if sufijo == 1 else f"DX{sufijo}"
     return f"{limpio}{tag}"
 
+def _resolver_plantilla_original(
+    db_global: Session,
+    db_proyecto,
+    proyecto_id: int,
+    codebars: list,
+):
+    """
+    Determina la plantilla a usar para reimprimir.
+
+    Estrategia:
+      1. Buscar el id_job más reciente en tabla_historica para esos codebars.
+      2. Desde ese job, obtener id_plantilla.
+      3. Si no hay job (histórico viejo), usar la última plantilla activa del proyecto.
+    """
+    from sqlalchemy import text
+
+    placeholders = ", ".join(f":cb{i}" for i in range(len(codebars)))
+    params = {f"cb{i}": cb for i, cb in enumerate(codebars)}
+
+    row = db_proyecto.execute(text(f"""
+        SELECT id_job
+        FROM tabla_historica
+        WHERE codebar IN ({placeholders}) AND id_job IS NOT NULL
+        ORDER BY fecha_registro DESC
+        LIMIT 1
+    """), params).first()
+
+    id_plantilla = None
+    if row and row.id_job:
+        job = db_global.query(EmisionJob).filter(EmisionJob.id == row.id_job).first()
+        if job:
+            id_plantilla = job.id_plantilla
+
+    if id_plantilla is None:
+        # Fallback: última plantilla activa del proyecto
+        plantilla = (
+            db_global.query(Plantilla)
+            .filter(Plantilla.id_proyecto == proyecto_id, Plantilla.activa == True)
+            .order_by(Plantilla.created_at.desc())
+            .first()
+        )
+        if plantilla:
+            id_plantilla = plantilla.id
+
+    return id_plantilla
+
+def _registrar_emision_especial(
+    db_proyecto,
+    codebars: list,
+    id_job: int,
+    id_usuario: int,
+    worker_id: str,
+    ruta_base: Path,
+) -> int:
+    """
+    Copia filas de tabla_historica a tabla_historica_especiales.
+    Agrega motivo='reimpresion' y el usuario solicitante.
+    """
+    from sqlalchemy import text
+    from datetime import datetime
+
+    if not codebars:
+        return 0
+
+    placeholders = ", ".join(f":cb{i}" for i in range(len(codebars)))
+    params = {f"cb{i}": cb for i, cb in enumerate(codebars)}
+
+    cols_hist = _get_columnas_tabla(db_proyecto, "tabla_historica")
+    cols_esp = _get_columnas_tabla(db_proyecto, "tabla_historica_especiales")
+
+    # Columnas comunes, excluyendo id_historico (auto) y las específicas de especiales
+    cols_excluir = {"id_historico", "motivo", "id_usuario_solicita"}
+    cols_comunes = [
+        c for c in cols_hist
+        if c in cols_esp and c not in cols_excluir
+    ]
+
+    cols_str = ", ".join(f"`{c}`" for c in cols_comunes)
+    select_str = ", ".join(f"`{c}`" for c in cols_comunes)
+
+    db_proyecto.execute(text(f"""
+        INSERT INTO tabla_historica_especiales
+            ({cols_str}, motivo, id_usuario_solicita)
+        SELECT {select_str}, 'reimpresion', :id_usuario
+        FROM tabla_historica
+        WHERE codebar IN ({placeholders})
+    """), {**params, "id_usuario": id_usuario})
+
+    db_proyecto.commit()
+
+    total = db_proyecto.execute(text(
+        "SELECT COUNT(*) AS c FROM tabla_historica_especiales "
+        "WHERE motivo = 'reimpresion' AND id_usuario_solicita = :u"
+    ), {"u": id_usuario}).first().c
+
+    return total
+
 # ============================================================
 # JOBS: /jobs/...
 # ============================================================
@@ -1222,6 +1330,9 @@ def upload_result(
     if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
+    filtros_job = json.loads(job.filtros) if job.filtros else {}
+    fuente = filtros_job.get("fuente", "temporal")
+
     info = _info(proyecto.slug)
     clave = info["pk"]
 
@@ -1230,25 +1341,40 @@ def upload_result(
         "duplicados_exactos": 0,
         "conflictos": 0,
         "limpio": False,
+        "fuente": fuente,
     }
 
     db_gen = get_project_db(proyecto.slug)
     db_proyecto = next(db_gen)
     try:
-        resultado_traspaso = _traspasar_temporal_a_historica(
-            db_proyecto,
-            proyecto.slug,
-            clave,
-            id_job=job.id,
-            id_usuario=job.id_usuario,
-            worker_id=worker_id,
-        )
-
-        # Solo limpiar si el traspaso quedó limpio
-        if resultado_traspaso["limpio"]:
-            db_proyecto.execute(text("DELETE FROM tabla_temporal"))
-            db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
-            db_proyecto.commit()
+        if fuente == "historico":
+            # Emisión Especial: NO toca tabla_historica ni temporal.
+            # Solo registra la reimpresión en tabla_historica_especiales.
+            codebars = filtros_job.get("codebars", [])
+            insertados = _registrar_emision_especial(
+                db_proyecto,
+                codebars,
+                id_job=job.id,
+                id_usuario=job.id_usuario,
+                worker_id=worker_id,
+                ruta_base=ruta_resuelta,
+            )
+            resultado_traspaso["insertados"] = insertados
+            resultado_traspaso["limpio"] = True
+        else:
+            # Flujo normal: traspaso temporal → histórica
+            resultado_traspaso = _traspasar_temporal_a_historica(
+                db_proyecto,
+                proyecto.slug,
+                clave,
+                id_job=job.id,
+                id_usuario=job.id_usuario,
+                worker_id=worker_id,
+            )
+            if resultado_traspaso["limpio"]:
+                db_proyecto.execute(text("DELETE FROM tabla_temporal"))
+                db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
+                db_proyecto.commit()
     finally:
         db_gen.close()
 
@@ -2755,6 +2881,212 @@ async def seleccionar_cuentas_csv(
         "total": len(ids),
         "pk": pk,
     }
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/emision-especial-buscar
+# ============================================================
+
+@router.get("/{proyecto_slug}/emision-especial/buscar",
+            response_model=BuscarHistoricoResponse)
+def buscar_en_historico(
+    proyecto_slug: str,
+    q: str = Query(..., min_length=1, description="codebar exacto o cuenta (parcial)"),
+    limit: int = Query(200, ge=1, le=500),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Busca en tabla_historica por:
+      - codebar (match exacto, sin asteriscos)
+      - cuenta/clave (match parcial LIKE)
+    """
+    from sqlalchemy import text
+    from app.api.analisis import _info
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    clave = info["pk"]
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        q_limpio = q.strip()
+        # Normalizar codebar: si el usuario escribió con asteriscos, quitarlos
+        q_codebar = q_limpio.strip("*")
+
+        # Detectar columnas disponibles para no romper con proyectos viejos
+        cols_hist = _get_columnas_tabla(db_proyecto, "tabla_historica")
+
+        nombre_col = None
+        for cand in ["nombre", "propietario", "nombre_razon_social", "propietariotitular_n"]:
+            if cand in cols_hist:
+                nombre_col = cand
+                break
+
+        campos = ["codebar", clave, "orden_impresion", "fecha_registro", "estatus"]
+        if nombre_col:
+            campos.append(nombre_col)
+        if "ruta_pdf" in cols_hist:
+            campos.append("ruta_pdf")
+        if "id_job" in cols_hist:
+            campos.append("id_job")
+
+        select_str = ", ".join(f"`{c}`" for c in campos)
+
+        rows = db_proyecto.execute(text(f"""
+            SELECT {select_str}
+            FROM tabla_historica
+            WHERE codebar = :qcb
+               OR codebar LIKE :qlike
+               OR CAST(`{clave}` AS CHAR) LIKE :qlike2
+            ORDER BY fecha_registro DESC
+            LIMIT :lim
+        """), {
+            "qcb": q_codebar,
+            "qlike": f"%{q_codebar}%",
+            "qlike2": f"%{q_limpio}%",
+            "lim": limit,
+        }).fetchall()
+
+        resultados = [dict(r._mapping) for r in rows]
+
+        return BuscarHistoricoResponse(
+            success=True,
+            total=len(resultados),
+            resultados=resultados,
+        )
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/emision-especial-{codebar}
+# ============================================================
+
+@router.get("/{proyecto_slug}/emision-especial/{codebar}")
+def detalle_historico(
+    proyecto_slug: str,
+    codebar: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Devuelve la fila completa de tabla_historica para un codebar."""
+    from sqlalchemy import text
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        row = db_proyecto.execute(text(
+            "SELECT * FROM tabla_historica WHERE codebar = :cb LIMIT 1"
+        ), {"cb": codebar.strip("*")}).first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Codebar no encontrado")
+
+        return {"success": True, "registro": dict(row._mapping)}
+    finally:
+        db_gen.close()
+
+# ============================================================
+# PROYECTO: /{proyecto_slug}/preparar-especiales
+# ============================================================
+
+@router.post("/{proyecto_slug}/emision-especial/preparar",
+             response_model=PrepararEmisionResponse)
+def preparar_emision_especial(
+    proyecto_slug: str,
+    request: PrepararEspecialRequest,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Crea un EmisionJob con filtros.fuente = 'historico'.
+    La plantilla se toma del job original o, si no existe, de la última activa.
+    """
+    from sqlalchemy import text
+    from app.core.redis_client import push_job, set_job_status
+
+    proyecto = check_project_access(proyecto_slug, current_user, db_global)
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        # 1. Validar que todos los codebars existan en histórico
+        placeholders = ", ".join(f":cb{i}" for i in range(len(request.codebars)))
+        params = {f"cb{i}": cb.strip("*") for i, cb in enumerate(request.codebars)}
+
+        existentes = db_proyecto.execute(text(f"""
+            SELECT codebar FROM tabla_historica
+            WHERE codebar IN ({placeholders})
+        """), params).fetchall()
+
+        existentes_set = {r[0] for r in existentes}
+        faltantes = [cb for cb in request.codebars if cb.strip("*") not in existentes_set]
+
+        if faltantes:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{len(faltantes)} codebar(s) no encontrados en histórico: {faltantes[:5]}"
+            )
+
+        # 2. Resolver plantilla
+        id_plantilla = _resolver_plantilla_original(
+            db_global, db_proyecto, proyecto.id, request.codebars
+        )
+
+        if not id_plantilla:
+            raise HTTPException(
+                status_code=400,
+                detail="No se pudo determinar la plantilla original. Verifica que existan plantillas activas."
+            )
+
+        # 3. Crear EmisionJob
+        total = len(request.codebars)
+        job = EmisionJob(
+            id_proyecto=proyecto.id,
+            id_plantilla=id_plantilla,
+            id_usuario=current_user.id,
+            nombre_job=request.nombre_job or f"Reimpresión {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            modo="lotes",
+            cuentas_por_lote=request.cuentas_por_lote,
+            orden_impresion_inicial=request.orden_impresion_inicial,
+            status="pending",
+            total_registros=total,
+            filtros=json.dumps({
+                "fuente": "historico",
+                "codebars": [cb.strip("*") for cb in request.codebars],
+            }),
+            created_by=current_user.id,
+        )
+        db_global.add(job)
+        db_global.commit()
+        db_global.refresh(job)
+
+        # 4. Encolar en Redis
+        push_job(job.id)
+        set_job_status(job.id, "pending", {
+            "total": total,
+            "proyecto": proyecto.nombre,
+            "usuario": current_user.nombre,
+            "fuente": "historico",
+        })
+
+        registrar_log(
+            db_global, current_user.id, "preparar_emision_especial",
+            f"Emisión especial: {total} codebars, job_id={job.id}",
+            proyecto.id,
+        )
+
+        return PrepararEmisionResponse(
+            success=True,
+            job_id=job.id,
+            total_registros=total,
+            message=f"Reimpresión preparada: {total} codebar(s) en cola.",
+        )
+    finally:
+        db_gen.close()
 
 # ============================================================
 # PROYECTO: /{proyecto_slug}/preparar

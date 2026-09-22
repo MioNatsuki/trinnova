@@ -535,59 +535,30 @@ class TrinnovaWorker:
             
             offset = procesados
             plantilla_archivo = claimed_job.get('plantilla_archivo', '').split('/')[-1]
-            pk = self._get_pk_name(proyecto_slug)
-            
+            filtros = claimed_job.get('filtros', {})
+    
+            if isinstance(filtros, str):
+                filtros = json.loads(filtros)
+
+            fuente = filtros.get("fuente", "temporal")
+            codebars_especiales = filtros.get("codebars", []) if fuente == "historico" else []
+
             while offset < total and self.running:
-                registros = await self._get_registros_batch(
-                    proyecto_slug,
-                    claimed_job.get('filtros', {}),
-                    offset,
-                    self.batch_size,
-                    pk
-                )
-                
-                if not registros:
-                    break
-                
-                resultados_pdf = await self._generar_pdfs_lote(
-                    renderer,
-                    plantilla_archivo,
-                    registros,
-                    claimed_job,
-                    job_dir,
-                    orden_impresion
-                )
-                
-                for resultado in resultados_pdf:
-                    if resultado.get('success'):
-                        pdfs_generados += 1
-                        orden_impresion += 1
-                    else:
-                        fallidos += 1
-                        errores.append(resultado.get('error', 'Error desconocido'))
-                
-                offset += len(registros)
-                procesados = offset
-                if resultados_pdf:
-                    ultimo_pk = resultados_pdf[-1].get('pk_value')
-                
-                if offset % self.checkpoint_interval == 0 or offset >= total:
-                    await self.api_client.save_checkpoint(job_id, {
-                        "procesados": offset,
-                        "ultimo_pk": ultimo_pk,
-                        "pdfs_generados": pdfs_generados,
-                        "fallidos": fallidos,
-                        "ultimo_orden": orden_impresion - 1
-                    })
-                    
-                    await self.api_client.update_progress(
-                        self.worker_id,
-                        job_id,
-                        procesados=offset,
-                        ultimo_pk=ultimo_pk
+                if fuente == "historico":
+                    registros = await self._get_registros_historico(
+                        proyecto_slug,
+                        codebars_especiales,
+                        offset,
+                        self.batch_size,
                     )
-                    
-                    logger.info(f"Progreso: {offset}/{total} ({round(offset/total*100, 1)}%) | PDFs: {pdfs_generados} | Fallidos: {fallidos}")
+                else:
+                    registros = await self._get_registros_batch(
+                        proyecto_slug,
+                        filtros,
+                        offset,
+                        self.batch_size,
+                        pk
+                    )
             
             manifest = {
                 "job_id": job_id,
@@ -841,6 +812,47 @@ class TrinnovaWorker:
     def stop(self):
         self.running = False
 
+    async def _get_registros_historico(
+        self,
+        proyecto_slug: str,
+        codebars: list,
+        offset: int,
+        limit: int,
+    ) -> List[Dict]:
+        """Lee de tabla_historica para Emisión Especial."""
+        from app.db.router import get_project_db
+        from sqlalchemy import text
+
+        if not codebars:
+            return []
+
+        db_gen = None
+        try:
+            db_gen = get_project_db(proyecto_slug)
+            db_proyecto = next(db_gen)
+
+            # Rebanada del batch actual
+            lote = codebars[offset:offset + limit]
+            if not lote:
+                return []
+
+            placeholders = ", ".join(f":cb{i}" for i in range(len(lote)))
+            params = {f"cb{i}": cb for i, cb in enumerate(lote)}
+
+            result = db_proyecto.execute(text(f"""
+                SELECT * FROM tabla_historica
+                WHERE codebar IN ({placeholders})
+                ORDER BY orden_impresion ASC, codebar ASC
+            """), params)
+
+            return [dict(row._mapping) for row in result]
+
+        except Exception as e:
+            logger.exception("Error leyendo histórico para %s: %s", proyecto_slug, e)
+            return []
+        finally:
+            if db_gen is not None:
+                db_gen.close()
 
 # ============================================================
 # PUNTO DE ENTRADA

@@ -407,7 +407,13 @@ export default function PlantillasDashboard() {
 
       {/* MODAL PREVIEW */}
       {previewModal && (
-        <div className="pl-overlay" onClick={() => { setPreviewModal(null); setPreviewPdf(null); }}>
+          <div className="pl-overlay" onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (window.confirm('¿Cerrar la vista previa?')) {
+              setPreviewModal(null);
+              setPreviewPdf(null);
+            }
+          }}>
           <div className="pl-modal pl-modal--wide" onClick={e => e.stopPropagation()}>
             <div className="pl-modal-header">
               <h3>
@@ -493,7 +499,11 @@ export default function PlantillasDashboard() {
 
       {/* MODAL EDITAR - Sin cambios */}
       {editModal && (
-        <div className="pl-overlay" onClick={() => { if (editSaving) return; if (window.confirm('¿Descartar cambios?')) setEditModal(null);}}>
+          <div className="pl-overlay" onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (editSaving) return;
+            if (window.confirm('¿Descartar cambios?')) setEditModal(null);
+          }}>
           <div className="pl-modal" onClick={e => e.stopPropagation()}>
             <div className="pl-modal-header">
               <h3>Editar plantilla</h3>
@@ -525,7 +535,13 @@ export default function PlantillasDashboard() {
 
       {/* MODAL MAPEO - Sin cambios */}
       {mapModal && (
-        <div className="pl-overlay" onClick={() => { if (mapSaving) return; setMapModal(null);}}>
+          <div className="pl-overlay" onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (mapSaving) return;
+            if (window.confirm('¿Cerrar sin guardar el mapeo?')) {
+              setMapModal(null);
+            }
+          }}>
           <div className="pl-modal pl-modal--wide" onClick={e => e.stopPropagation()}>
             <div className="pl-modal-header">
               <h3>Mapeo de campos — {mapModal.nombre}</h3>

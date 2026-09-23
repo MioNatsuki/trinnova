@@ -125,8 +125,9 @@ export default function Sidebar() {
 
       {canEmision && (
         <Section label="Emisión">
-          <SItem to="/emision/preparacion" iconKey="settings" label="Preparación" sub exact />
-          <SItem to="/emision/emitir"      iconKey="print"    label="Emisión"     sub exact />
+          <SItem to="/emision/preparacion" iconKey="settings" label="Preparación"      sub exact />
+          <SItem to="/emision/emitir"      iconKey="print"    label="Emisión"          sub exact />
+          <SItem to="/emision/especial"    iconKey="print"    label="Emisión Especial" sub exact />
         </Section>
       )}
 

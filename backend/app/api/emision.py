@@ -2587,6 +2587,165 @@ def get_tabla_temporal_errores(
         db_gen.close()
 
 # ============================================================
+# PROYECTO: /{proyecto_slug}/preparación
+# ============================================================
+
+@router.get("/{proyecto_slug}/preparacion")
+def get_preparacion(
+    proyecto_slug: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    viabilidad: Optional[str] = Query(None),
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """
+    Endpoint exclusivo de Preparación.
+
+    Devuelve una fila por cada cuenta en tabla_analisis, con:
+      - viabilidad (de tabla_analisis)
+      - todos los campos calculados de tabla_dinamica (si existen)
+      - flag _tiene_calculo: True/False
+      - columnas de display: _nombre_display, _calle_display, _adeudo_display
+
+    El frontend usa esto para poblar la tabla de Preparación.
+    """
+    from sqlalchemy import text
+    from app.api.analisis import _info
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+
+    try:
+        # Detectar columnas de cada tabla
+        try:
+            cols_analisis = set(_get_columnas_tabla(db_proyecto, "tabla_analisis"))
+        except Exception:
+            return {
+                "rows": [], "total": 0, "page": page, "limit": limit,
+                "pk": pk, "columnas_analisis": [], "columnas_dinamica": [],
+            }
+
+        try:
+            cols_dinamica = set(_get_columnas_tabla(db_proyecto, "tabla_dinamica"))
+        except Exception:
+            cols_dinamica = set()
+
+        # Construir WHERE
+        conditions = []
+        params: Dict[str, Any] = {}
+
+        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+            conditions.append("a.viabilidad = :viabilidad")
+            params["viabilidad"] = viabilidad
+
+        if search:
+            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
+            partes = [f"CAST(a.`{c}` AS CHAR) LIKE :search" for c in search_cols if c in cols_analisis]
+            if partes:
+                conditions.append("(" + " OR ".join(partes) + ")")
+                params["search"] = f"%{search}%"
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+
+        # Total
+        total = db_proyecto.execute(text(
+            f"SELECT COUNT(*) AS total FROM tabla_analisis a WHERE {where}"
+        ), params).first().total
+
+        # Columnas del SELECT: todo de analisis + todo de dinamica (excluyendo duplicados)
+        select_analisis = ", ".join(f"a.`{c}`" for c in cols_analisis)
+        # De dinamica solo traemos las que no existan en analisis para no duplicar
+        cols_dinamica_solo = cols_dinamica - cols_analisis
+        select_dinamica = ", ".join(f"d.`{c}` AS `d_{c}`" for c in cols_dinamica_solo) if cols_dinamica_solo else ""
+
+        select_str = select_analisis
+        if select_dinamica:
+            select_str += ", " + select_dinamica
+
+        # ORDER BY dinámico
+        order_col = pk
+        order_dir = "ASC"
+
+        offset = (page - 1) * limit
+
+        rows = db_proyecto.execute(text(f"""
+            SELECT {select_str}
+            FROM tabla_analisis a
+            LEFT JOIN tabla_dinamica d ON a.`{pk}` = d.`{pk}`
+            WHERE {where}
+            ORDER BY a.`{order_col}` {order_dir}
+            LIMIT {limit} OFFSET {offset}
+        """), params).fetchall()
+
+        # Construir respuesta
+        result = []
+        for r in rows:
+            row_dict = dict(r._mapping)
+
+            # Detectar si tiene cálculo
+            tiene_calculo = False
+            if cols_dinamica_solo:
+                for c in cols_dinamica_solo:
+                    val = row_dict.get(f"d_{c}")
+                    if val is not None:
+                        tiene_calculo = True
+                        break
+            else:
+                # Si no hay columnas extra de dinamica, asumimos que sí porque tabla_dinamica existe
+                # (caso borde: si las columnas son idénticas, no podemos distinguir)
+                tiene_calculo = True
+
+            row_dict["_tiene_calculo"] = tiene_calculo
+
+            # Display helpers
+            nombre_val = ""
+            for col in info["col_nombre"]:
+                v = row_dict.get(col)
+                if v:
+                    nombre_val = str(v)
+                    break
+            row_dict["_nombre_display"] = nombre_val
+
+            calle_val = ""
+            for col in info["col_calle"]:
+                v = row_dict.get(col)
+                if v:
+                    calle_val = str(v)
+                    break
+            row_dict["_calle_display"] = calle_val
+
+            adeudo_val = 0
+            for col in info["col_adeudo"]:
+                v = row_dict.get(col)
+                if v is not None:
+                    try:
+                        adeudo_val = float(v)
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            row_dict["_adeudo_display"] = adeudo_val
+
+            result.append(row_dict)
+
+        return {
+            "rows": result,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+            "columnas_analisis": sorted(cols_analisis),
+            "columnas_dinamica": sorted(cols_dinamica),
+        }
+    finally:
+        db_gen.close()
+
+# ============================================================
 # PROYECTO: /{proyecto_slug}/resolver-duplicados
 # ============================================================ 
 
@@ -3089,6 +3248,34 @@ def preparar_emision_especial(
         db_gen.close()
 
 # ============================================================
+# PROYECTO: /{proyecto_slug}/tabla-temporal/count
+# ============================================================
+
+@router.get("/{proyecto_slug}/tabla-temporal/count")
+def count_tabla_temporal(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Devuelve el número de filas en tabla_temporal (para el modal de Emisión)."""
+    from sqlalchemy import text
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        try:
+            total = db_proyecto.execute(text(
+                "SELECT COUNT(*) AS c FROM tabla_temporal"
+            )).first().c
+        except Exception:
+            total = 0
+
+        return {"success": True, "total": total}
+    finally:
+        db_gen.close()
+
+# ============================================================
 # PROYECTO: /{proyecto_slug}/preparar
 # ============================================================
 
@@ -3101,15 +3288,15 @@ def preparar_emision(
     db_global: Session = Depends(get_global_db),
 ):
     """
-    Prepara una emisión masiva de documentos.
+    Crea el EmisionJob tomando TODO el contenido actual de tabla_temporal.
 
-    1. Valida que el proyecto y plantilla existen
-    2. Cuenta los registros a procesar según los filtros
-    3. Crea un job en la base de datos (status: pending)
-    4. Lo pone en la cola de Redis para que un worker lo procese
-    5. Retorna el ID del job para seguimiento
+    NO filtra por viabilidad ni por programa: la selección ya se hizo en
+    Preparación. tabla_temporal es la fuente de verdad.
+
+    Filtros que se guardan en el job: {"fuente": "temporal"} para que el
+    worker sepa que lee de tabla_temporal.
     """
-    from app.api.analisis import _info
+    from sqlalchemy import text
 
     # 1. VALIDAR ACCESO AL PROYECTO
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
@@ -3127,82 +3314,32 @@ def preparar_emision(
             detail=f"Plantilla no encontrada o inactiva. ID: {request.id_plantilla}"
         )
 
-    # 3. OBTENER REGISTROS A PROCESAR
-    db_proyecto = next(get_project_db(proyecto_slug))
-    info = _info(proyecto_slug)
-    pk = info["pk"]
-
-    condiciones = ["viabilidad = 'viable'"]
-    params = {}
-
-    if (
-        request.filtros.get("programa")
-        and request.filtros["programa"] != "todos"
-    ):
-        condiciones.append(
-            "programa = :programa"
-        )
-
-        params["programa"] = request.filtros["programa"]
-
-    if (
-        request.filtros.get("ids")
-        and isinstance(request.filtros["ids"], list)
-    ):
-        placeholders = ", ".join(
-            f":id{i}"
-            for i in range(len(request.filtros["ids"]))
-        )
-
-        condiciones.append(
-            f"`{pk}` IN ({placeholders})"
-        )
-
-        for i, id_val in enumerate(request.filtros["ids"]):
-            params[f"id{i}"] = id_val
-
-    if (
-        request.filtros.get("cuenta_inicial")
-        and request.filtros.get("cuenta_final")
-    ):
-        condiciones.append(
-            f"`{pk}` BETWEEN :inicio AND :fin"
-        )
-
-        params["inicio"] = request.filtros["cuenta_inicial"]
-        params["fin"] = request.filtros["cuenta_final"]
-
-    where = " AND ".join(condiciones)
-
+    # 3. CONTAR REGISTROS EN tabla_temporal
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
-
     try:
-        count_query = text(
-            f"""
-            SELECT COUNT(*) AS total
-            FROM tabla_analisis
-            WHERE {where}
-            """
-        )
-
-        count_result = db_proyecto.execute(
-            count_query,
-            params
-        ).first()
-
-        total = count_result.total if count_result else 0
-
+        try:
+            count_result = db_proyecto.execute(text(
+                "SELECT COUNT(*) AS total FROM tabla_temporal"
+            )).first()
+            total = count_result.total if count_result else 0
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No existe tabla_temporal. Realiza la Preparación primero. ({e})"
+            )
     finally:
         db_gen.close()
 
     if total == 0:
         raise HTTPException(
             status_code=400,
-            detail="No hay registros viables para emitir con los filtros seleccionados"
+            detail="tabla_temporal está vacía. Selecciona cuentas en Preparación primero."
         )
 
-    # 4. CREAR JOB EN LA BASE DE DATOS
+    # 4. CREAR JOB
+    filtros_finales = {"fuente": "temporal"}
+
     job = EmisionJob(
         id_proyecto=proyecto.id,
         id_plantilla=plantilla.id,
@@ -3213,7 +3350,7 @@ def preparar_emision(
         orden_impresion_inicial=request.orden_impresion_inicial,
         status='pending',
         total_registros=total,
-        filtros=json.dumps(request.filtros),
+        filtros=json.dumps(filtros_finales),
         created_by=current_user.id
     )
 
@@ -3221,30 +3358,30 @@ def preparar_emision(
     db_global.commit()
     db_global.refresh(job)
 
-    # 5. REGISTRAR EN LOG
+    # 5. LOG
     registrar_log(
         db_global,
         current_user.id,
         "preparar_emision",
-        f"Emisión preparada: {total} registros, job_id={job.id}, plantilla={plantilla.nombre}",
+        f"Emisión preparada: {total} registros de tabla_temporal, job_id={job.id}, plantilla={plantilla.nombre}",
         proyecto.id
     )
 
-    # 6. PONER EN COLA DE REDIS
-    from app.core.redis_client import push_job
+    # 6. ENCOLAR EN REDIS
+    from app.core.redis_client import push_job, set_job_status
     publicado = push_job(job.id)
 
     if not publicado:
         logger.warning(f"Job {job.id} creado pero NO publicado en Redis")
 
-    from app.core.redis_client import set_job_status
     set_job_status(
         job.id,
         'pending',
         {
             'total': total,
             'proyecto': proyecto.nombre,
-            'usuario': current_user.nombre
+            'usuario': current_user.nombre,
+            'fuente': 'temporal',
         }
     )
 

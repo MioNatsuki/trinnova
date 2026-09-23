@@ -36,6 +36,8 @@ import Catalogos from './pages/catalogos/Catalogos';
 import Bitacora from './pages/logs/Bitacora';
 
 import DashboardEmision from './pages/emision/Dashboard';
+import Preparacion from './pages/emision/Preparacion';
+import EmisionEspecial from './pages/emision/EmisionEspecial';
 
 
 function ProtectedRoute({ children }) {
@@ -206,12 +208,17 @@ function AppRoutes() {
 
           <Route
             path="emision/preparacion"
-            element={<DashboardEmision />}
+            element={<Preparacion />}
           />
 
           <Route
             path="emision/emitir"
             element={<DashboardEmision />}
+          />
+
+          <Route
+            path="emision/especial"
+            element={<EmisionEspecial />}
           />
 
 

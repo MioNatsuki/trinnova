@@ -107,3 +107,106 @@
         font-size: 11px;
     }
 }
+
+.emision-table-wrapper {
+  flex: 1;
+  overflow: auto;
+  background: var(--clr-white);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  min-height: 300px;
+  max-height: calc(100vh - 380px);
+}
+
+.emision-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  min-width: 900px;
+}
+
+.emision-th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f8f9fa;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--clr-muted);
+  border-bottom: 1px solid var(--clr-border);
+  white-space: nowrap;
+}
+
+.emision-td {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--clr-border);
+  background: #fff;
+  vertical-align: middle;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emision-td--pk {
+  font-family: monospace;
+  font-weight: 600;
+  color: var(--clr-accent);
+}
+
+.emision-td--codebar {
+  font-family: 'Courier New', monospace;
+  font-size: 11.5px;
+  color: #1a202c;
+  letter-spacing: .5px;
+}
+
+.emision-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--clr-muted);
+  background: #fff;
+}
+
+.emision-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0 0;
+  font-size: 13px;
+  color: var(--clr-muted);
+  flex-shrink: 0;
+}
+
+.emision-pagination button {
+  padding: 6px 14px;
+  border: 1px solid var(--clr-border);
+  background: var(--clr-white);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.emision-pagination button:hover:not(:disabled) {
+  background: var(--clr-active-bg);
+  border-color: var(--clr-accent);
+}
+
+.emision-pagination button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.emision-total {
+  margin-left: 12px;
+  font-weight: 500;
+}

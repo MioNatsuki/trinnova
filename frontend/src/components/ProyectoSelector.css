@@ -1,37 +1,37 @@
 .ps-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   background: var(--clr-white);
   border: 1px solid var(--clr-border);
-  border-radius: var(--radius);
-  padding: 12px 20px;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
+  border-radius: 7px;
+  padding: 0 12px;
+  height: 38px;
+  margin-bottom: 0;
 }
 
 .ps-label {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--clr-text);
   white-space: nowrap;
 }
 
 .ps-select {
-  padding: 7px 14px;
+  padding: 0 12px;
+  height: 30px;
   border: 1px solid var(--clr-border);
-  border-radius: 7px;
+  border-radius: 5px;
   font-size: 13px;
   font-family: 'Outfit', sans-serif;
-  min-width: 220px;
+  min-width: 200px;
   background: var(--clr-white);
   color: var(--clr-text);
   outline: none;
-  transition: border-color .2s;
+  transition: border-color .15s;
+  cursor: pointer;
 }
-
-.ps-select:focus {
-  border-color: var(--clr-accent);
-}
+.ps-select:focus { border-color: var(--clr-accent); }
 
 .ps-warn {
   background: #fff3cd;

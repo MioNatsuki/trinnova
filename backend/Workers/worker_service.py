@@ -532,16 +532,19 @@ class TrinnovaWorker:
             fallidos = 0
             errores = []
             orden_impresion = claimed_job.get('orden_impresion_inicial', 1)
-            
+
             offset = procesados
             plantilla_archivo = claimed_job.get('plantilla_archivo', '').split('/')[-1]
             filtros = claimed_job.get('filtros', {})
-    
+
             if isinstance(filtros, str):
                 filtros = json.loads(filtros)
 
             fuente = filtros.get("fuente", "temporal")
             codebars_especiales = filtros.get("codebars", []) if fuente == "historico" else []
+
+            # ⬇️ PK según fuente
+            pk = "codebar" if fuente == "historico" else self._get_pk_name(proyecto_slug)
 
             while offset < total and self.running:
                 if fuente == "historico":
@@ -559,7 +562,53 @@ class TrinnovaWorker:
                         self.batch_size,
                         pk
                     )
-            
+
+                if not registros:
+                    break
+
+                resultados_pdf = await self._generar_pdfs_lote(
+                    renderer,
+                    plantilla_archivo,
+                    registros,
+                    claimed_job,
+                    job_dir,
+                    orden_impresion,
+                    pk=pk,   # ← nuevo parámetro
+                )
+
+                for resultado in resultados_pdf:
+                    if resultado.get('success'):
+                        pdfs_generados += 1
+                        orden_impresion += 1
+                    else:
+                        fallidos += 1
+                        errores.append(resultado.get('error', 'Error desconocido'))
+
+                offset += len(registros)
+
+                # Checkpoint cada N
+                if offset % self.checkpoint_interval == 0 or offset >= total:
+                    ultimo_pk = None
+                    if resultados_pdf:
+                        ultimo_pk = resultados_pdf[-1].get('pk_value')
+
+                    await self.api_client.save_checkpoint(job_id, {
+                        "procesados": offset,
+                        "ultimo_pk": ultimo_pk,
+                        "pdfs_generados": pdfs_generados,
+                        "fallidos": fallidos,
+                        "ultimo_orden": orden_impresion - 1,
+                    })
+
+                    await self.api_client.update_progress(
+                        self.worker_id,
+                        job_id,
+                        procesados=offset,
+                        ultimo_pk=ultimo_pk
+                    )
+
+                    logger.info(f"Progreso: {offset}/{total} | PDFs: {pdfs_generados} | Fallidos: {fallidos}")
+
             manifest = {
                 "job_id": job_id,
                 "worker_id": self.worker_id,
@@ -614,7 +663,7 @@ class TrinnovaWorker:
                 error_msg=str(e)
             )
         finally:
-            db_session.close()  # ✅ Cerrar sesión de BD
+            db_session.close()
             self.current_job = None
     
     def _get_pk_name(self, proyecto_slug: str) -> str:
@@ -725,10 +774,12 @@ class TrinnovaWorker:
         registros: List[Dict],
         job_data: Dict[str, Any],
         job_dir: Path,
-        orden_inicial: int
+        orden_inicial: int,
+        pk: str = None,   # ← NUEVO
     ) -> List[Dict[str, Any]]:
         semaphore = asyncio.Semaphore(self.max_concurrent_pages)
-        pk = self._get_pk_name(job_data.get('proyecto_slug'))
+        if pk is None:
+            pk = self._get_pk_name(job_data.get('proyecto_slug'))
         
         async def generar_pdf(registro, idx):
             async with semaphore:
@@ -767,7 +818,20 @@ class TrinnovaWorker:
                         inject_codebar_style=True  # ← Para asegurar que el estilo se inyecte
                     )
                     
-                    nombre_pdf = f"{orden_actual:05d} - {pk_value}.pdf"
+                    pk_limpio = (
+                        str(pk_value)
+                        .replace('*', '')
+                        .replace('/', '_')
+                        .replace('\\', '_')
+                        .replace(':', '_')
+                        .replace('?', '_')
+                        .replace('"', '_')
+                        .replace('<', '_')
+                        .replace('>', '_')
+                        .replace('|', '_')
+                    ) or "sin_pk"
+
+                    nombre_pdf = f"{orden_actual:05d} - {pk_limpio}.pdf"
                     pdf_path = job_dir / nombre_pdf
                     
                     with open(pdf_path, 'wb') as f:

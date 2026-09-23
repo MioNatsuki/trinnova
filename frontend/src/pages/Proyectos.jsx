@@ -212,6 +212,13 @@ export default function Proyectos() {
                                                 <Icon {...ICONS.print} size={14} />
                                                 Emisión
                                             </button>
+                                            <button 
+                                                onClick={() => irA(proyecto.slug, '/emision/especial')} 
+                                                className="proyecto-action-btn"
+                                                >
+                                                <Icon {...ICONS.print} size={14} />
+                                                Emisión Especial
+                                            </button>
                                         </div>
                                     </div>
                                 )}

@@ -233,7 +233,12 @@ export default function Catalogos() {
       
       {/* Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-overlay" onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (window.confirm('¿Cerrar sin guardar los cambios?')) {
+              setShowModal(false);
+            }
+          }}>
           <div className="modal-catalogo" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editingItem ? 'Editar' : 'Nuevo'} {TABS.find(t => t.id === activeTab)?.label}</h2>

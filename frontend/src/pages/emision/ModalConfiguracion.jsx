@@ -1,17 +1,21 @@
-// frontend/src/components/emision/ModalConfiguracion.jsx
+// frontend/src/pages/emision/ModalConfiguracion.jsx
 import { useState, useEffect } from 'react';
 import api from '../../api/auth';
 import './ModalConfiguracion.css';
 
 export default function ModalConfiguracion({
   proyectoSlug,
-  plantillas,
-  programas,
-  cuentasSeleccionadas = [],
+  totalCuentas = 0,
   onClose,
   onConfirm
 }) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]             = useState(false);
+  const [cargandoCat, setCargandoCat]     = useState(true);
+  const [plantillas, setPlantillas]       = useState([]);
+  const [programas, setProgramas]         = useState([]);
+  const [error, setError]                 = useState('');
+  const [confirmCerrar, setConfirmCerrar] = useState(false);
+
   const [config, setConfig] = useState({
     id_plantilla: '',
     nombre_job: '',
@@ -19,78 +23,86 @@ export default function ModalConfiguracion({
     cuentas_por_lote: 50,
     orden_impresion_inicial: 1,
     programa: 'todos',
-    usar_cuentas_seleccionadas: false
   });
-  const [error, setError] = useState('');
-  
-  // Cuando se selecciona una plantilla, cargar sus placeholders
-  const [placeholders, setPlaceholders] = useState([]);
-  
+
+  // Cargar catálogos al abrir
   useEffect(() => {
-    if (config.id_plantilla) {
-      cargarPlaceholders(config.id_plantilla);
-    }
-  }, [config.id_plantilla]);
-  
-  const cargarPlaceholders = async (plantillaId) => {
-    try {
-      const res = await api.get(`/plantillas/${plantillaId}/placeholders`);
-      setPlaceholders(res.data.placeholders || []);
-    } catch (error) {
-      console.error('Error cargando placeholders:', error);
+    if (!proyectoSlug) return;
+    setCargandoCat(true);
+    Promise.all([
+      api.get(`/emision/${proyectoSlug}/plantillas`),
+      api.get(`/emision/${proyectoSlug}/programas`),
+    ])
+      .then(([pl, pr]) => {
+        setPlantillas(pl.data || []);
+        setProgramas(pr.data || []);
+      })
+      .catch(err => {
+        console.error('Error cargando catálogos:', err);
+        setError('No se pudieron cargar plantillas o programas.');
+      })
+      .finally(() => setCargandoCat(false));
+  }, [proyectoSlug]);
+
+  // Bloqueo de cierre con cambios
+  const handleOverlayClick = (e) => {
+    if (e.target !== e.currentTarget) return;
+    if (config.id_plantilla || config.nombre_job) {
+      setConfirmCerrar(true);
+    } else {
+      onClose();
     }
   };
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    
     try {
-      // Preparar datos
       const payload = {
         id_plantilla: parseInt(config.id_plantilla),
         nombre_job: config.nombre_job || undefined,
         modo: config.modo,
         cuentas_por_lote: config.cuentas_por_lote,
         orden_impresion_inicial: config.orden_impresion_inicial,
-        filtros: {}
+        filtros: {},
       };
-      
-      // Filtro de programa
-      if (config.programa && config.programa !== 'todos') {
-        payload.filtros.programa = config.programa;
-      }
-      
-      // Filtro de cuentas seleccionadas
-      if (config.usar_cuentas_seleccionadas && cuentasSeleccionadas.length > 0) {
-        payload.filtros.ids = cuentasSeleccionadas;
-      }
-      
-      // Enviar al backend
+
       const res = await api.post(`/emision/${proyectoSlug}/preparar`, payload);
-      
+
       if (res.data.success) {
         onConfirm(res.data);
       } else {
         setError(res.data.message || 'Error al preparar la emisión');
       }
-    } catch (error) {
-      setError(error.response?.data?.detail || 'Error al preparar la emisión');
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Error al preparar la emisión');
     } finally {
       setLoading(false);
     }
   };
-  
+
+  const totalPaginasEstimadas = config.modo === 'paquetes'
+    ? Math.ceil(totalCuentas / Math.max(1, config.cuentas_por_lote))
+    : totalCuentas;
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-emision" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Configurar Emisión</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={() => setConfirmCerrar(true)}>✕</button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="modal-form">
+          {/* Resumen de cuentas */}
+          <div className="modal-resumen">
+            <span className="modal-resumen-num">{totalCuentas.toLocaleString()}</span>
+            <span className="modal-resumen-label">
+              cuenta{totalCuentas !== 1 ? 's' : ''} en cola para emitir
+            </span>
+          </div>
+
           {/* Nombre del Job */}
           <div className="form-group">
             <label>Nombre del Job (opcional)</label>
@@ -101,43 +113,32 @@ export default function ModalConfiguracion({
               onChange={e => setConfig({ ...config, nombre_job: e.target.value })}
             />
           </div>
-          
+
           {/* Plantilla */}
           <div className="form-group">
             <label>Plantilla *</label>
-            <select
-              required
-              value={config.id_plantilla}
-              onChange={e => setConfig({ ...config, id_plantilla: e.target.value })}
-            >
-              <option value="">Seleccionar plantilla...</option>
-              {plantillas.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre} ({p.total_campos} campos)
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          {/* Placeholders (información) */}
-          {placeholders.length > 0 && (
-            <div className="form-group placeholders-info">
-              <label>Campos requeridos ({placeholders.length})</label>
-              <div className="placeholders-list">
-                {placeholders.slice(0, 10).map(p => (
-                  <span key={p.placeholder} className="placeholder-tag">
-                    {p.placeholder}
-                  </span>
-                ))}
-                {placeholders.length > 10 && (
-                  <span className="placeholder-tag placeholder-more">
-                    +{placeholders.length - 10} más
-                  </span>
-                )}
+            {cargandoCat ? (
+              <div className="form-loading">Cargando plantillas…</div>
+            ) : plantillas.length === 0 ? (
+              <div className="form-empty">
+                No hay plantillas activas. Sincroniza plantillas primero.
               </div>
-            </div>
-          )}
-          
+            ) : (
+              <select
+                required
+                value={config.id_plantilla}
+                onChange={e => setConfig({ ...config, id_plantilla: e.target.value })}
+              >
+                <option value="">Seleccionar plantilla…</option>
+                {plantillas.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre} ({p.total_campos} campos)
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {/* Modo */}
           <div className="form-group">
             <label>Modo de emisión *</label>
@@ -168,8 +169,8 @@ export default function ModalConfiguracion({
               </label>
             </div>
           </div>
-          
-          {/* Cuentas por lote/paquete */}
+
+          {/* Cuentas por lote */}
           <div className="form-group">
             <label>Cuentas por {config.modo === 'lotes' ? 'lote' : 'paquete'}</label>
             <input
@@ -177,81 +178,69 @@ export default function ModalConfiguracion({
               min={1}
               max={500}
               value={config.cuentas_por_lote}
-              onChange={e => setConfig({ 
-                ...config, 
-                cuentas_por_lote: parseInt(e.target.value) || 50 
+              onChange={e => setConfig({
+                ...config,
+                cuentas_por_lote: parseInt(e.target.value) || 50
               })}
             />
             <small className="form-hint">
-              {config.modo === 'lotes' 
-                ? 'Número de cuentas procesadas en cada lote (1-500)'
-                : 'Número de cuentas por paquete PDF (1-500)'
-              }
+              {config.modo === 'lotes'
+                ? `Se procesarán ${totalCuentas} PDFs individuales en ${Math.ceil(totalCuentas / Math.max(1, config.cuentas_por_lote))} lote(s).`
+                : `Se generarán ~${totalPaginasEstimadas} PDF(s) agrupados.`}
             </small>
           </div>
-          
-          {/* Orden de impresión inicial */}
+
+          {/* Orden inicial */}
           <div className="form-group">
             <label>Orden de impresión inicial</label>
             <input
               type="number"
               min={1}
               value={config.orden_impresion_inicial}
-              onChange={e => setConfig({ 
-                ...config, 
-                orden_impresion_inicial: parseInt(e.target.value) || 1 
+              onChange={e => setConfig({
+                ...config,
+                orden_impresion_inicial: parseInt(e.target.value) || 1
               })}
             />
             <small className="form-hint">
-              Número desde el cual comenzarán los nombres de los archivos (ej: 00001)
+              Número desde el cual comenzarán los nombres de archivo (ej. 00001)
             </small>
           </div>
-          
-          {/* Filtro de programa */}
-          <div className="form-group">
-            <label>Filtrar por programa</label>
-            <select
-              value={config.programa}
-              onChange={e => setConfig({ ...config, programa: e.target.value })}
-            >
-              <option value="todos">Todos los programas</option>
-              {programas.map(p => (
-                <option key={p.id} value={p.slug}>
-                  {p.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          {/* Usar cuentas seleccionadas */}
-          {cuentasSeleccionadas.length > 0 && (
-            <div className="form-group checkbox-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={config.usar_cuentas_seleccionadas}
-                  onChange={e => setConfig({ 
-                    ...config, 
-                    usar_cuentas_seleccionadas: e.target.checked 
-                  })}
-                />
-                Usar solo las {cuentasSeleccionadas.length} cuentas seleccionadas
-              </label>
-            </div>
-          )}
-          
+
           {error && <div className="form-error">{error}</div>}
-          
+
           <div className="modal-footer">
-            <button type="button" className="btn-cancel" onClick={onClose}>
+            <button type="button" className="btn-cancel" onClick={() => setConfirmCerrar(true)}>
               Cancelar
             </button>
-            <button type="submit" className="btn-confirm" disabled={loading}>
-              {loading ? 'Preparando...' : 'Preparar Emisión'}
+            <button
+              type="submit"
+              className="btn-confirm"
+              disabled={loading || !config.id_plantilla}
+            >
+              {loading ? 'Preparando…' : 'Comenzar Emisión'}
             </button>
           </div>
         </form>
       </div>
+
+      {/* Modal de confirmación de cierre */}
+      {confirmCerrar && (
+        <div className="confirm-overlay" onClick={() => setConfirmCerrar(false)}>
+          <div className="confirm-modal" onClick={e => e.stopPropagation()}>
+            <h3>¿Cerrar sin guardar?</h3>
+            <p>Perderás los cambios de configuración que hayas hecho.</p>
+            <div className="confirm-actions">
+              <button className="btn-cancel" onClick={() => setConfirmCerrar(false)}>
+                Quedarme
+              </button>
+              <button className="btn-confirm" onClick={onClose}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

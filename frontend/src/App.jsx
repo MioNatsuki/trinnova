@@ -182,19 +182,7 @@ function AppRoutes() {
 
           {/* ====================================================
               EMISIÓN
-              ====================================================
-
-              El Sidebar y Proyectos.jsx utilizan:
-
-                  /emision/preparacion
-                  /emision/emitir
-
-              Actualmente ambos procesos viven dentro de
-              DashboardEmision.
-
-              Mantenemos /emision como alias para evitar URLs
-              huérfanas o enlaces antiguos.
-              ==================================================== */}
+              ====================================================*/}
 
           <Route
             path="emision"

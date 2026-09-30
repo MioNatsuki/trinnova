@@ -133,8 +133,9 @@ export default function Sidebar() {
 
       {isSuperadmin && (
         <Section label="Catálogos">
-          <SItem to="/catalogo/documentos" iconKey="catalog" label="Catálogo Documentos" sub exact />
-          <SItem to="/catalogo/zonas"      iconKey="map"     label="Catálogo Zonas"      sub exact />
+          <SItem to="/catalogo/documentos"    iconKey="catalog" label="Catálogo Documentos"    sub exact />
+          <SItem to="/catalogo/notificadores" iconKey="users"   label="Catálogo Notificadores" sub exact />
+          <SItem to="/catalogo/zonas"         iconKey="map"     label="Catálogo Zonas"         sub exact />
         </Section>
       )}
 

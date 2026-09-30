@@ -23,27 +23,31 @@ export default function ModalConfiguracion({
     cuentas_por_lote: 50,
     orden_impresion_inicial: 1,
     programa: 'todos',
+    ruta_salida: '',
   });
 
   // Cargar catálogos al abrir
   useEffect(() => {
-    if (!proyectoSlug) return;
-    setCargandoCat(true);
-    Promise.all([
-      api.get(`/emision/${proyectoSlug}/plantillas`),
-      api.get(`/emision/${proyectoSlug}/programas`),
-    ])
-      .then(([pl, pr]) => {
-        setPlantillas(pl.data || []);
-        setProgramas(pr.data || []);
-      })
-      .catch(err => {
-        console.error('Error cargando catálogos:', err);
-        setError('No se pudieron cargar plantillas o programas.');
-      })
-      .finally(() => setCargandoCat(false));
+      if (!proyectoSlug) return;
+      setCargandoCat(true);
+      Promise.all([
+        api.get(`/emision/${proyectoSlug}/plantillas`),
+        api.get(`/emision/${proyectoSlug}/programas`),
+        api.get('/emision/rutas-salida'),
+      ])
+        .then(([pl, pr, ru]) => {
+          setPlantillas(pl.data || []);
+          setProgramas(pr.data || []);
+          setRutasDisponibles(ru.data?.rutas || []);
+        })
+        .catch(err => {
+          console.error('Error cargando catálogos:', err);
+          setError('No se pudieron cargar plantillas, programas o rutas.');
+        })
+        .finally(() => setCargandoCat(false));
   }, [proyectoSlug]);
 
+  const [rutasDisponibles, setRutasDisponibles] = useState([]);
   // Bloqueo de cierre con cambios
   const handleOverlayClick = (e) => {
     if (e.target !== e.currentTarget) return;
@@ -66,6 +70,7 @@ export default function ModalConfiguracion({
         cuentas_por_lote: config.cuentas_por_lote,
         orden_impresion_inicial: config.orden_impresion_inicial,
         filtros: {},
+        ruta_salida: config.ruta_salida?.trim() || undefined,
       };
 
       const res = await api.post(`/emision/${proyectoSlug}/preparar`, payload);
@@ -190,6 +195,25 @@ export default function ModalConfiguracion({
             </small>
           </div>
 
+          {/* Ruta de salida */}
+            {rutasDisponibles.length > 0 && (
+              <div className="form-group">
+                <label>¿Dónde guardar los PDFs?</label>
+                <select
+                  value={config.ruta_salida}
+                  onChange={e => setConfig({ ...config, ruta_salida: e.target.value })}
+                >
+                  <option value="">Usar la ruta por defecto del worker</option>
+                  {rutasDisponibles.map(ruta => (
+                    <option key={ruta} value={ruta}>{ruta}</option>
+                  ))}
+                </select>
+                <small className="form-hint">
+                  Elige una ubicación de la lista, o deja el default para que el worker decida.
+                </small>
+              </div>
+            )}      
+
           {/* Orden inicial */}
           <div className="form-group">
             <label>Orden de impresión inicial</label>
@@ -208,6 +232,20 @@ export default function ModalConfiguracion({
           </div>
 
           {error && <div className="form-error">{error}</div>}
+
+          <div className="form-group">
+            <label>Ruta de salida (opcional)</label>
+            <input
+              type="text"
+              placeholder="Ej: C:\Emisiones\pensiones"
+              value={config.ruta_salida}
+              onChange={e => setConfig({ ...config, ruta_salida: e.target.value })}
+            />
+            <small className="form-hint">
+              Déjalo vacío para usar la ruta por defecto del worker.
+              La carpeta se creará automáticamente si no existe.
+            </small>
+          </div>    
 
           <div className="modal-footer">
             <button type="button" className="btn-cancel" onClick={() => setConfirmCerrar(true)}>

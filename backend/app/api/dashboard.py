@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from app.db.session import get_global_db
@@ -36,6 +36,7 @@ class DashboardResponse(BaseModel):
 
 @router.get("/", response_model=DashboardResponse)
 def get_dashboard(
+    proyecto_slug: Optional[str] = Query(None, description="Filtrar por proyecto"),
     current_user: Usuario = Depends(get_current_active_user),
     db: Session = Depends(get_global_db),
 ):
@@ -44,19 +45,26 @@ def get_dashboard(
     es_analista = rol == RolNombre.analista
     es_auxiliar = rol == RolNombre.auxiliar
 
-    # --- Proyectos visibles para este usuario ---
+    # --- Proyectos visibles ---
     if es_superadmin:
-        proyectos = db.query(Proyecto).filter(Proyecto.activo == True).all()
-        proyecto_ids = [p.id for p in proyectos]
+        proyectos_all = db.query(Proyecto).filter(Proyecto.activo == True).all()
     else:
         ups = db.query(UsuarioProyecto).filter(
             UsuarioProyecto.id_usuario == current_user.id
         ).all()
-        proyecto_ids = [up.id_proyecto for up in ups]
-        proyectos = db.query(Proyecto).filter(
-            Proyecto.id.in_(proyecto_ids),
+        ids = [up.id_proyecto for up in ups]
+        proyectos_all = db.query(Proyecto).filter(
+            Proyecto.id.in_(ids),
             Proyecto.activo == True
         ).all()
+
+    # Aplicar filtro de proyecto si viene
+    if proyecto_slug:
+        proyectos = [p for p in proyectos_all if p.slug == proyecto_slug]
+    else:
+        proyectos = proyectos_all
+
+    proyecto_ids = [p.id for p in proyectos]
 
     # --- Cards ---
     total_usuarios = None
@@ -73,67 +81,33 @@ def get_dashboard(
         EmisionJob.status == 'completed'
     ).scalar() or 0
 
-    # --- Estadísticas de análisis (solo para analista y superadmin) ---
-    viables = 0
-    pendientes = 0
-    no_viables = 0
+    # --- Viabilidad (JOIN tabla_analisis de cada proyecto) ---
+    viables = pendientes = no_viables = 0
 
     if es_superadmin or es_analista:
         from app.db.router import get_project_db
-
         for proyecto in proyectos:
             db_gen = None
-
             try:
                 db_gen = get_project_db(proyecto.slug)
                 db_proyecto = next(db_gen)
 
-                v = db_proyecto.execute(
-                    text(
-                        """
-                        SELECT COUNT(*) AS total
-                        FROM tabla_analisis
-                        WHERE viabilidad = 'viable'
-                        """
-                    )
-                ).first()
-
-                viables += v.total if v else 0
-
-                p = db_proyecto.execute(
-                    text(
-                        """
-                        SELECT COUNT(*) AS total
-                        FROM tabla_analisis
-                        WHERE viabilidad = 'pendiente'
-                        """
-                    )
-                ).first()
-
-                pendientes += p.total if p else 0
-
-                nv = db_proyecto.execute(
-                    text(
-                        """
-                        SELECT COUNT(*) AS total
-                        FROM tabla_analisis
-                        WHERE viabilidad = 'no_viable'
-                        """
-                    )
-                ).first()
-
-                no_viables += nv.total if nv else 0
-
+                for key, val in (("viable", "viable"), ("pendiente", "pendiente"), ("no_viable", "no_viable")):
+                    r = db_proyecto.execute(
+                        text("SELECT COUNT(*) AS total FROM tabla_analisis WHERE viabilidad = :v"),
+                        {"v": val}
+                    ).first()
+                    n = r.total if r else 0
+                    if key == "viable": viables += n
+                    elif key == "pendiente": pendientes += n
+                    else: no_viables += n
             except Exception:
-                # Un proyecto sin tabla_analisis no debe romper
-                # todo el dashboard.
                 pass
-
             finally:
                 if db_gen is not None:
                     db_gen.close()
 
-    # --- Emisiones por mes y proyecto (últimos 6 meses) ---
+    # --- Emisiones por mes ---
     emisiones_raw = (
         db.query(
             func.date_format(EmisionJob.created_at, '%Y-%m').label('mes'),
@@ -150,32 +124,23 @@ def get_dashboard(
     )
 
     proy_map = {p.id: p for p in proyectos}
-
     emisiones = []
+    MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+             'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
     for row in emisiones_raw:
         proy = proy_map.get(row.id_proyecto)
         if not proy:
             continue
         try:
             dt = datetime.strptime(row.mes, '%Y-%m')
-            MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-                     'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
             mes_label = f"{MESES[dt.month - 1]} {dt.year}"
         except Exception:
             mes_label = row.mes
-
         emisiones.append(EmisionMes(
-            mes=mes_label,
-            proyecto=proy.nombre,
-            slug=proy.slug,
-            total=row.total,
+            mes=mes_label, proyecto=proy.nombre, slug=proy.slug, total=row.total,
         ))
 
-    # --- Proyectos del usuario (para el frontend) ---
-    proyectos_usuario = [
-        {"id": p.id, "nombre": p.nombre, "slug": p.slug}
-        for p in proyectos
-    ]
+    proyectos_usuario = [{"id": p.id, "nombre": p.nombre, "slug": p.slug} for p in proyectos_all]
 
     return DashboardResponse(
         cards=StatCards(
@@ -189,5 +154,5 @@ def get_dashboard(
         ),
         emisiones=emisiones,
         rol=rol,
-        proyectos_usuario=proyectos_usuario
+        proyectos_usuario=proyectos_usuario,
     )

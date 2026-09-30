@@ -19,9 +19,9 @@
         "max_retries": 3
     },
     "almacenamiento": {
-        "base_path": "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/Emisiones",
-        "temp_path": "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/Temp",
-        "zip_path": "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/Emisiones/Zips",
+        "base_path": "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/backend/Emisiones",
+        "temp_path":  "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/backend/Temp",
+        "zip_path":   "C:/Users/Omar/Desktop/PROYECTOS/4. Virtual Enviroment/trinnova/backend/Emisiones/Zips",
         "cleanup_days": 7
     }
 }

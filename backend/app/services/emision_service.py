@@ -47,7 +47,8 @@ class EmisionService:
         self,
         job_id: int,
         db_global: Session,
-        worker_id: str = "worker_1"
+        worker_id: str = "worker_1",
+        job_dir: Optional[Path] = None,
     ):
         self.job_id = job_id
         self.db_global = db_global
@@ -72,7 +73,15 @@ class EmisionService:
         # Directorio de salida
         from app.core.config import settings
         self.base_path = Path(settings.EMISIONES_PATH) / self.proyecto_slug
-        self.job_dir = self._get_job_directory()
+
+        # Si el worker nos pasa un job_dir ya calculado, usarlo.
+        # Esto permite la ruta dinámica elegida por el usuario.
+        if job_dir is not None:
+            self.job_dir = Path(job_dir)
+            logger.info(f"EmisionService usando job_dir pasado por el worker: {self.job_dir}")
+        else:
+            self.job_dir = self._get_job_directory()
+            logger.info(f"EmisionService calculó job_dir internamente: {self.job_dir}")
         
         # Estadísticas
         self.stats = {
@@ -105,9 +114,13 @@ class EmisionService:
     
     def _prepare_job_directory(self):
         """Prepara el directorio del job."""
-        self.job_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Directorio de trabajo: {self.job_dir}")
-        return self.job_dir
+        try:
+            self.job_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Directorio de trabajo: {self.job_dir}")
+            return self.job_dir
+        except Exception as e:
+            logger.error(f"No se pudo crear el directorio {self.job_dir}: {e}")
+            raise
     
     # ============================================================
     # OBTENCIÓN DE REGISTROS

@@ -1,21 +1,30 @@
 // frontend/src/pages/catalogos/Catalogos.jsx
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
 import api from '../../api/auth';
 import './Catalogos.css';
 
-const TABS = [
-  { id: 'documentos', label: 'Documentos', icon: '📄' },
-  { id: 'notificadores', label: 'Notificadores', icon: '👤' },
-  { id: 'zonas', label: 'Zonas', icon: '📍' }
-];
+const PATH_TO_TAB = {
+  '/catalogo/documentos':    'documentos',
+  '/catalogo/notificadores': 'notificadores',
+  '/catalogo/zonas':         'zonas',
+  '/catalogos':              'documentos',  // fallback
+};
+
+const TAB_LABELS = {
+  documentos:    { title: 'Catálogo de Documentos',     icon: '📄' },
+  notificadores: { title: 'Catálogo de Notificadores',  icon: '👤' },
+  zonas:         { title: 'Catálogo de Zonas',          icon: '📍' },
+};
 
 export default function Catalogos() {
   const { user } = useAuth();
   const { proyectoSlug, setProyectoSlug, proyectos } = useProyecto();
-  const [activeTab, setActiveTab] = useState('documentos');
+  const location = useLocation();
+  const activeTab = PATH_TO_TAB[location.pathname] || 'documentos';
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -158,7 +167,7 @@ export default function Catalogos() {
   return (
     <div className="catalogos-page">
       <div className="catalogos-header">
-        <h1>Catálogos</h1>
+        <h1>{TAB_LABELS[activeTab]?.title || 'Catálogos'}</h1>
         <div className="catalogos-actions">
           <ProyectoSelector 
             proyectos={proyectos} 
@@ -167,24 +176,10 @@ export default function Catalogos() {
           />
           {isAnalista && proyectoId && (
             <button className="btn-primary" onClick={handleCreate}>
-              + Nuevo
+              + Nuevo {TAB_LABELS[activeTab]?.title?.split(' de ')[1] || ''}
             </button>
           )}
         </div>
-      </div>
-      
-      {/* Tabs */}
-      <div className="catalogos-tabs">
-        {TABS.map(tab => (
-          <button
-            key={tab.id}
-            className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <span className="tab-icon">{tab.icon}</span>
-            {tab.label}
-          </button>
-        ))}
       </div>
       
       {/* Mensaje */}

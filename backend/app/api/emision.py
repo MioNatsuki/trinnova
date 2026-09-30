@@ -1,5 +1,5 @@
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, Dict, Any, List
@@ -56,9 +56,10 @@ class PrepararEmisionRequest(BaseModel):
     id_plantilla: int = Field(..., description="ID de la plantilla a usar")
     nombre_job: Optional[str] = Field(None, description="Nombre descriptivo del job")
     modo: str = Field("lotes", description="lotes | paquetes")
-    cuentas_por_lote: int = Field(50, ge=1, le=500, description="Cuentas por lote/paquete")
-    orden_impresion_inicial: int = Field(1, ge=1, description="Número inicial de orden")
-    filtros: Dict[str, Any] = Field(default_factory=dict, description="Filtros para seleccionar cuentas")
+    cuentas_por_lote: int = Field(50, ge=1, le=500)
+    orden_impresion_inicial: int = Field(1, ge=1)
+    filtros: Dict[str, Any] = Field(default_factory=dict)
+    ruta_salida: Optional[str] = Field(None, description="Ruta de salida elegida por el usuario")
 
 class PrepararEmisionResponse(BaseModel):
     """Response al preparar una emisión"""
@@ -1056,7 +1057,7 @@ def get_pending_jobs(
     # ============================================================
     # OBTENER TODOS LOS JOBS DE LA COLA (SIN REMOVERLOS)
     # ============================================================
-    job_ids = get_all_queue_jobs()  # ← Usar función de conveniencia
+    job_ids = get_all_queue_jobs()
 
     jobs = []
     for job_id_str in job_ids:
@@ -1092,6 +1093,7 @@ def get_pending_jobs(
                 "orden_impresion_inicial": job.orden_impresion_inicial,
                 "total_registros": job.total_registros,
                 "filtros": job.filtros,
+                "ruta_salida": job.ruta_salida,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
             })
 
@@ -1182,6 +1184,7 @@ def claim_job(
             "orden_impresion_inicial": job.orden_impresion_inicial,
             "total_registros": job.total_registros,
             "filtros": job.filtros,
+            "ruta_salida": job.ruta_salida,
             "created_at": job.created_at.isoformat() if job.created_at else None,
         }
     }
@@ -2443,6 +2446,23 @@ def health_check(
     return health
 
 # ============================================================
+# PROYECTO: /rutas-salida
+# ============================================================
+
+@router.get("/rutas-salida")
+def get_rutas_salida(
+    current_user: Usuario = Depends(get_current_active_user),
+):
+    """
+    Devuelve la lista de rutas de salida permitidas.
+    Se configuran en backend/.env → RUTAS_SALIDA_DISPONIBLES (separadas por ;).
+    """
+    return {
+        "rutas": settings.rutas_salida_lista,
+        "default": None,   # el worker decide el default
+    }
+
+# ============================================================
 # PROYECTO: /{proyecto_slug}/preparar-tabla-temporal
 # ============================================================
 
@@ -2450,7 +2470,7 @@ def health_check(
              response_model=ContinuarEmisionResponse)
 def preparar_tabla_temporal(
     proyecto_slug: str,
-    request: PrepararEmisionRequest,
+    request: PrepararTablaTemporalRequest,        # ← corregido
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -2458,7 +2478,7 @@ def preparar_tabla_temporal(
 
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
-    clave = info["pk"]     # ← clave foránea (clave_APA, credito, ...)
+    clave = info["pk"]
 
     if not request.ids:
         raise HTTPException(status_code=400, detail="No se enviaron cuentas.")
@@ -3200,24 +3220,32 @@ def preparar_emision_especial(
                 status_code=400,
                 detail="No se pudo determinar la plantilla original. Verifica que existan plantillas activas."
             )
+        
+        ruta_salida_final = None
+        if request.ruta_salida:
+            rutas_permitidas = settings.rutas_salida_lista
+            if rutas_permitidas and request.ruta_salida not in rutas_permitidas:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La ruta '{request.ruta_salida}' no está en la lista permitida."
+                )
+            ruta_salida_final = request.ruta_salida
 
         # 3. Crear EmisionJob
         total = len(request.codebars)
         job = EmisionJob(
             id_proyecto=proyecto.id,
-            id_plantilla=id_plantilla,
+            id_plantilla=plantilla.id,
             id_usuario=current_user.id,
-            nombre_job=request.nombre_job or f"Reimpresión {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            modo="lotes",
+            nombre_job=request.nombre_job or f"Emisión {proyecto.nombre} - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            modo=request.modo,
             cuentas_por_lote=request.cuentas_por_lote,
             orden_impresion_inicial=request.orden_impresion_inicial,
-            status="pending",
+            status='pending',
             total_registros=total,
-            filtros=json.dumps({
-                "fuente": "historico",
-                "codebars": [cb.strip("*") for cb in request.codebars],
-            }),
-            created_by=current_user.id,
+            filtros=json.dumps({"fuente": "temporal"}),
+            ruta_salida=ruta_salida_final,     
+            created_by=current_user.id
         )
         db_global.add(job)
         db_global.commit()
@@ -3351,6 +3379,7 @@ def preparar_emision(
         status='pending',
         total_registros=total,
         filtros=json.dumps(filtros_finales),
+        ruta_salida=request.ruta_salida,
         created_by=current_user.id
     )
 

@@ -641,167 +641,96 @@ def get_tabla_dinamica(
     db_global: Session = Depends(get_global_db),
 ):
     """
-    Obtiene los datos de tabla_dinamica para la pantalla de Cálculos.
+    Obtiene los datos de tabla_dinamica para la pantalla de Cálculos,
+    enriquecidos con nombre y adeudo de tabla_analisis.
     """
     from sqlalchemy import text
+    from app.api.analisis import _info
 
-    check_project_access(
-        proyecto_slug,
-        current_user,
-        db_global
-    )
+    check_project_access(proyecto_slug, current_user, db_global)
+
+    info = _info(proyecto_slug)
+    pk_clave = info["pk"]            # clave foránea (prestamo, cuenta, etc.)
+    col_nombre = info["col_nombre"][0] if info["col_nombre"] else None
+    col_adeudo = info["col_adeudo"][0] if info["col_adeudo"] else None
 
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
 
-    pks = {
-        "apa_tlajomulco": "clave_APA",
-        "predial_tlajomulco": "cuenta",
-        "licencias_gdl": "licencia",
-        "predial_gdl": "cuenta_n",
-        "estado": "credito",
-        "pensiones": "prestamo",
-    }
-
-    pk = pks.get(proyecto_slug, "id")
-
     try:
         # Verificar existencia de tabla_dinamica
         try:
-            db_proyecto.execute(
-                text(
-                    "SELECT 1 FROM tabla_dinamica LIMIT 1"
-                )
-            )
-
+            db_proyecto.execute(text("SELECT 1 FROM tabla_dinamica LIMIT 1"))
         except Exception:
             return {
                 "rows": [],
                 "total": 0,
                 "page": page,
                 "limit": limit,
-                "pk": pk,
-                "error": (
-                    "No hay datos calculados. "
-                    "Ejecuta 'Calcular Todas' primero."
-                )
+                "pk": "codebar",
+                "clave": pk_clave,
+                "error": "No hay datos calculados. Ejecuta 'Calcular Todas' primero."
             }
 
         offset = (page - 1) * limit
 
         total_row = db_proyecto.execute(
-            text(
-                "SELECT COUNT(*) AS total "
-                "FROM tabla_dinamica"
-            )
+            text("SELECT COUNT(*) AS total FROM tabla_dinamica")
         ).first()
-
         total = total_row.total if total_row else 0
 
-        # Obtener columnas
-        cols_result = db_proyecto.execute(
-            text(
-                "SHOW COLUMNS FROM tabla_dinamica"
-            )
-        ).fetchall()
+        # Detectar columnas disponibles
+        cols_din = {r[0] for r in db_proyecto.execute(
+            text("SHOW COLUMNS FROM tabla_dinamica")
+        ).fetchall()}
 
-        all_cols = [
-            row[0]
-            for row in cols_result
-        ]
+        cols_ana = set()
+        try:
+            cols_ana = {r[0] for r in db_proyecto.execute(
+                text("SHOW COLUMNS FROM tabla_analisis")
+            ).fetchall()}
+        except Exception:
+            pass
 
-        nombre_cols = [
-            "nombre",
-            "propietario",
-            "nombre_razon_social",
-            "propietario_nombre",
-            "nombre_contribuyente",
-        ]
+        # Construir SELECT
+        select_cols = [f"d.`{c}`" for c in cols_din]
 
-        adeudo_cols = [
-            "saldo",
-            "total_adeudo",
-            "importe_historico_determinado",
-            "adeudo",
-            "total",
-        ]
+        # Nombre desde analisis
+        if col_nombre and col_nombre in cols_ana:
+            select_cols.append(f"a.`{col_nombre}` AS `_nombre_display`")
+        else:
+            select_cols.append("NULL AS `_nombre_display`")
 
-        select_cols = [
-            f"`{col}`"
-            for col in all_cols
-        ]
+        # Adeudo desde analisis
+        if col_adeudo and col_adeudo in cols_ana:
+            select_cols.append(f"a.`{col_adeudo}` AS `_adeudo_display`")
+        else:
+            select_cols.append("NULL AS `_adeudo_display`")
 
-        has_nombre = any(
-            col in all_cols
-            for col in nombre_cols
-        )
-
-        has_adeudo = any(
-            col in all_cols
-            for col in adeudo_cols
-        )
-
-        if not has_nombre:
-            for col in nombre_cols:
-                if col not in all_cols:
-                    select_cols.append(
-                        f"NULL AS `{col}`"
-                    )
-
-        if not has_adeudo:
-            for col in adeudo_cols:
-                if col not in all_cols:
-                    select_cols.append(
-                        f"NULL AS `{col}`"
-                    )
+        # Clave foránea desde analisis (por si el front la necesita)
+        if pk_clave in cols_ana:
+            select_cols.append(f"a.`{pk_clave}` AS `_clave_display`")
 
         select_str = ", ".join(select_cols)
 
-        rows = db_proyecto.execute(
-            text(
-                f"""
-                SELECT {select_str}
-                FROM tabla_dinamica
-                LIMIT :limit OFFSET :offset
-                """
-            ),
-            {
-                "limit": limit,
-                "offset": offset,
-            }
-        ).fetchall()
+        # JOIN dinámica ↔ análisis por la clave foránea
+        rows = db_proyecto.execute(text(f"""
+            SELECT {select_str}
+            FROM tabla_dinamica d
+            LEFT JOIN tabla_analisis a ON d.`{pk_clave}` = a.`{pk_clave}`
+            ORDER BY d.`{pk_clave}` ASC
+            LIMIT :limit OFFSET :offset
+        """), {"limit": limit, "offset": offset}).fetchall()
 
-        result = []
-
-        for row in rows:
-            row_dict = dict(row._mapping)
-
-            # Nombre
-            has_name = any(
-                row_dict.get(col)
-                for col in nombre_cols
-            )
-
-            if not has_name:
-                row_dict["nombre"] = "Sin nombre"
-
-            # Adeudo
-            has_adeudo_val = any(
-                row_dict.get(col) is not None
-                for col in adeudo_cols
-            )
-
-            if not has_adeudo_val:
-                row_dict["saldo"] = 0
-
-            result.append(row_dict)
+        result = [dict(r._mapping) for r in rows]
 
         return {
             "rows": result,
             "total": total,
             "page": page,
             "limit": limit,
-            "pk": pk
+            "pk": "codebar",
+            "clave": pk_clave,
         }
 
     finally:

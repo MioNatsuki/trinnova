@@ -360,6 +360,7 @@ def _get_imports_ldd(filename, search_paths):
     output = set()
 
     # Output of ldd varies between platforms...
+    ldd_extra_args = []
     if compat.is_aix:
         # Match libs of the form
         #   'archivelib.a(objectmember.so/.o)'
@@ -393,13 +394,37 @@ def _get_imports_ldd(filename, search_paths):
         # or
         #   /tmp/python/install/bin/../lib/libpython3.13.so.1.0 (0x00007b9489c82000)
         LDD_PATTERN = re.compile(r"^\s*(?:(.*?)\s+=>\s+)?(.*?)\s+\(.*\)")
+    elif compat.is_netbsd:
+        # The default output format used by NetBSD ldd is `\t-l%o.%m => %p\n'. This would give us entries of form
+        #    -lpython3.11.1.0 => /usr/pkg/lib/libpython3.11.so.1.0
+        # Instead, override the format to give us entries of the form
+        #    libpython3.11.so.1.0 => /usr/pkg/lib/libpython3.11.so.1.0
+        ldd_extra_args = ['-f', '\tlib%o.so.%m => %p\n']
+        LDD_PATTERN = re.compile(r"\s*(.*?)\s+=>\s+(.*?)$")
+    elif compat.is_openbsd:
+        # $ ldd /usr/local/bin/python3.13
+        # /usr/local/bin/python3.13:
+        #   Start            End              Type  Open Ref GrpRef Name
+        #   000001b19dcf5000 000001b19dcf9000 exe   2    0   0      /usr/local/bin/python3.13
+        #   000001b48652e000 000001b486bb6000 rlib  0    1   0      /usr/local/lib/libpython3.13.so.0.0
+        #   000001b3b8ced000 000001b3b8d25000 rlib  0    2   0      /usr/local/lib/libintl.so.8.2
+        #   ...
+        #
+        # Note that `ldd` on OpenBSD explicitly disallows unresolved libraries, and exits with signal 9 if any are
+        # encountered.
+        #
+        # The pattern implicitly ignores the first two lines (input path and the header).
+        LDD_PATTERN = re.compile(
+            r"^\s+(?P<start>\S+)\s+(?P<end>\S+)\s+(?P<type>\S+)\s+(?P<open>\d+)\s+(?P<ref>\d+)\s+(?P<grp_ref>\d+)"
+            r"\s+(?P<name>.*)$"
+        )
     else:
         LDD_PATTERN = re.compile(r"\s*(.*?)\s+=>\s+(.*?)\s+\(.*\)")
 
     # Resolve symlinks since GNU ldd contains a bug in processing a symlink to a binary
     # using $ORIGIN: https://sourceware.org/bugzilla/show_bug.cgi?id=25263
     p = subprocess.run(
-        ['ldd', os.path.realpath(filename)],
+        ['ldd', *ldd_extra_args, os.path.realpath(filename)],
         stdin=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -447,6 +472,19 @@ def _get_imports_ldd(filename, search_paths):
                     #   'sharedlib.so'
                     lib = m.group('libshared')
                     name = os.path.basename(lib)
+            elif compat.is_openbsd:
+                # Ignore 'exe', 'dlib', and 'ld.so' types.
+                if m['type'] != 'rlib':
+                    continue
+
+                # Ignore the entry with ref=0, which appears to be the scanned binary itself; should be already
+                # discarded by type check above (due to being 'exe' or 'dlib'), but just in case...
+                ref = int(m['ref'])
+                if ref == 0:
+                    continue
+
+                lib = m['name']
+                name = os.path.basename(lib)
             elif compat.is_hpux:
                 name, lib = m.group(1), m.group(2)
             else:
@@ -457,6 +495,10 @@ def _get_imports_ldd(filename, search_paths):
                     # plus musl's ld-musl-*.so.* and Termux' ld-android.so.
                     if re.fullmatch(r"ld(64)?(-linux|-musl)?(-.+)?\.so(\..+)?", os.path.basename(lib)):
                         continue
+                elif compat.is_netbsd:
+                    # libsomething.so without soversion has .(null) in displayed name (the .%m part of the ldd format).
+                    if name.endswith('.(null)'):
+                        name = name[:-7]
             if name[:10] in ('linux-gate', 'linux-vdso'):
                 # linux-gate is a fake library which does not exist and should be ignored. See also:
                 # http://www.trilithium.com/johan/2005/08/linux-gate/
@@ -818,7 +860,7 @@ def _resolve_library_path_unix(name):
                 paths.append('/usr/local/lib/hpux32')
             else:
                 paths.append('/usr/local/lib/hpux64')
-        elif compat.is_freebsd or compat.is_openbsd:
+        elif compat.is_freebsd or compat.is_openbsd or compat.is_netbsd:
             paths.append('/usr/local/lib')
         lib = lib_search_func(name, paths)
 

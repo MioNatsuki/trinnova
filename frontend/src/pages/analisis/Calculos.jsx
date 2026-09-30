@@ -460,8 +460,8 @@ export default function Calculos() {
         if (proyectoSlug === 'estado') {
             return [
                 { key: 'credito', label: 'Crédito', isPk: true },
-                { key: 'nombre_razon_social', label: 'Nombre' },
-                { key: 'importe_historico_determinado', label: 'Importe Histórico', isMonto: true },
+                { key: '_nombre_display', label: 'Nombre' },
+                { key: '_adeudo_display', label: 'Importe Histórico', isMonto: true },
                 { key: 'fecha_notificacion', label: 'Fecha Notificación' },
                 { key: 'fecha_requerimiento', label: 'Fecha Requerimiento' },
                 { key: 'proximo_inpc', label: 'Próximo INPC' },
@@ -479,8 +479,8 @@ export default function Calculos() {
         if (proyectoSlug === 'apa_tlajomulco') {
             return [
                 { key: 'clave_APA', label: 'Clave APA', isPk: true },
-                { key: 'propietario_nombre', label: 'Propietario' },
-                { key: 'total_adeudo', label: 'Total Adeudo', isMonto: true },
+                { key: '_nombre_display', label: 'Propietario' },
+                { key: '_adeudo_display', label: 'Total Adeudo', isMonto: true },
                 { key: 'domicilio', label: 'Domicilio' },
                 { key: 'firma', label: 'Firma' },
                 { key: 'codebar', label: 'Código de Barras' },
@@ -491,8 +491,8 @@ export default function Calculos() {
         if (proyectoSlug === 'predial_gdl') {
             return [
                 { key: 'cuenta_n', label: 'Cuenta', isPk: true },
-                { key: 'propietario', label: 'Propietario' },
-                { key: 'saldo', label: 'Saldo', isMonto: true },
+                { key: '_nombre_display', label: 'Propietario' },
+                { key: '_adeudo_display', label: 'Saldo', isMonto: true },
                 { key: 'codebar', label: 'Código de Barras' },
             ];
         }
@@ -501,8 +501,8 @@ export default function Calculos() {
         if (proyectoSlug === 'predial_tlajomulco') {
             return [
                 { key: 'cuenta', label: 'Cuenta', isPk: true },
-                { key: 'propietario', label: 'Propietario' },
-                { key: 'saldo', label: 'Saldo', isMonto: true },
+                { key: '_nombre_display', label: 'Propietario' },
+                { key: '_adeudo_display', label: 'Saldo', isMonto: true },
                 { key: 'codebar', label: 'Código de Barras' },
             ];
         }
@@ -511,11 +511,8 @@ export default function Calculos() {
         if (proyectoSlug === 'pensiones') {
             return [
                 { key: 'prestamo', label: 'Préstamo', isPk: true },
-                { key: 'nombre', label: 'Nombre' },
-                { key: 'adeudo', label: 'Adeudo', isMonto: true },
-                // ============================================================
-                // NUEVAS COLUMNAS PARA PENSIONES
-                // ============================================================
+                { key: '_nombre_display', label: 'Nombre' },
+                { key: '_adeudo_display', label: 'Adeudo', isMonto: true },
                 { key: 'ultimo_abono_modificado', label: 'Último Abono Modificado' },
                 { key: 'sub_estatus_id', label: 'Sub-Estatus' },
                 { key: 'codebar', label: 'Código de Barras' },
@@ -525,8 +522,8 @@ export default function Calculos() {
         // Proyectos genéricos
         return [
             { key: pk, label: 'ID', isPk: true },
-            { key: 'nombre', label: 'Nombre' },
-            { key: 'saldo', label: 'Saldo', isMonto: true },
+            { key: '_nombre_display', label: 'Nombre' },
+            { key: '_adeudo_display', label: 'Saldo', isMonto: true },
             { key: 'codebar', label: 'Código de Barras' },
         ];
     }, [proyectoSlug, data.pk]);

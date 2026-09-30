@@ -201,6 +201,7 @@ class EmisionJob(Base):
     # Resultados
     ruta_zip = Column(String(500), nullable=True)
     ruta_temporal = Column(String(500), nullable=True)
+    ruta_salida = Column(String(500), nullable=True)
     
     # Errores
     error_msg = Column(Text, nullable=True)

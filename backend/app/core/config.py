@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     JOB_TIMEOUT: int = int(os.getenv("JOB_TIMEOUT", "3600"))
     
     # Almacenamiento
+    RUTAS_SALIDA_DISPONIBLES: str = os.getenv("RUTAS_SALIDA_DISPONIBLES", "")
+    
+    @property
+    def rutas_salida_lista(self) -> list:
+        """Devuelve la lista de rutas permitidas como list[str]."""
+        if not self.RUTAS_SALIDA_DISPONIBLES:
+            return []
+        return [p.strip() for p in self.RUTAS_SALIDA_DISPONIBLES.split(";") if p.strip()]
+        
     EMISIONES_PATH: str = os.getenv("EMISIONES_PATH", str(BACKEND_DIR.parent / "Emisiones"))
     TEMP_PATH: str = os.getenv("TEMP_PATH", str(BACKEND_DIR.parent / "Temp"))
 

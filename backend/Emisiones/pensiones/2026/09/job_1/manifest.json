@@ -1,0 +1,14 @@
+{
+  "job_id": 1,
+  "proyecto": "pensiones",
+  "plantilla": "Afiliados",
+  "fecha_emision": "2026-09-28T11:17:49.490073",
+  "modo": "lotes",
+  "total_registros": 3,
+  "generados": 209,
+  "fallidos": 0,
+  "orden_inicial": 1,
+  "orden_final": 210,
+  "ruta": "C:\\Users\\Omar\\Desktop\\PROYECTOS\\4. Virtual Enviroment\\trinnova\\backend\\Emisiones\\pensiones\\2026\\09\\job_1",
+  "errores": []
+}

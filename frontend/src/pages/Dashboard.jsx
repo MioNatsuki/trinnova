@@ -48,53 +48,29 @@ export default function Dashboard() {
     // ============================================================
     // CARGAR DATOS DEL DASHBOARD
     // ============================================================
-
+    
     useEffect(() => {
-        api.get('/dashboard/')
-            .then(r => setData(r.data))
-            .catch(() => setError('No se pudo cargar el dashboard'))
-            .finally(() => setLoading(false));
-    }, []);
-
-    // ============================================================
-    // FILTRAR EMISIONES POR PROYECTO SELECCIONADO
-    // ============================================================
-
-    const filteredData = useMemo(() => {
-        if (!data) return null;
-
-        // Si no hay filtro o es "todos", devolver datos completos
-        if (selectedProyecto === 'todos' || !selectedProyecto) {
-            return data;
-        }
-
-        // Filtrar emisiones por proyecto
-        const emisionesFiltradas = (data.emisiones || []).filter(
-            e => e.slug === selectedProyecto
-        );
-
-        // Filtrar proyectos del usuario (para mostrar solo el seleccionado)
-        const proyectosFiltrados = (data.proyectos_usuario || []).filter(
-            p => p.slug === selectedProyecto
-        );
-
-        return {
-            ...data,
-            emisiones: emisionesFiltradas,
-            proyectos_usuario: proyectosFiltrados,
-        };
-    }, [data, selectedProyecto]);
+    setLoading(true);
+    const params = selectedProyecto !== 'todos' && selectedProyecto
+        ? { proyecto_slug: selectedProyecto }
+        : {};
+    api.get('/dashboard/', { params })
+        .then(r => setData(r.data))
+        .catch(() => setError('No se pudo cargar el dashboard'))
+        .finally(() => setLoading(false));
+    }, [selectedProyecto]);
+    
 
     // ============================================================
     // CONSTRUIR DATOS PARA LA GRÁFICA
     // ============================================================
 
     const { rows, proyectos } = useMemo(() => {
-        if (!filteredData?.emisiones?.length) {
+        if (!data?.emisiones?.length) {
             return { rows: [], proyectos: [] };
         }
 
-        const emisiones = filteredData.emisiones;
+        const emisiones = data.emisiones;
         const slugs = [...new Set(emisiones.map(e => e.slug))];
         const meses = [...new Set(emisiones.map(e => e.mes))];
 
@@ -116,40 +92,7 @@ export default function Dashboard() {
         }));
 
         return { rows, proyectos };
-    }, [filteredData]);
-
-    // ============================================================
-    // CALCULAR ESTADÍSTICAS FILTRADAS
-    // ============================================================
-
-    const filteredCards = useMemo(() => {
-        if (!filteredData?.cards) {
-            return { usuarios: 0, proyectos: 0, plantillas: 0, emisiones: 0 };
-        }
-
-        const cards = filteredData.cards;
-
-        // Si hay filtro por proyecto, calcular solo ese proyecto
-        if (selectedProyecto !== 'todos' && selectedProyecto) {
-            // Las emisiones ya están filtradas en filteredData
-            const emisionesFiltradas = filteredData.emisiones || [];
-            const totalEmisiones = emisionesFiltradas.reduce(
-                (sum, e) => sum + e.total, 0
-            );
-
-            // Para viables/pendientes/no_viables, solo contar del proyecto seleccionado
-            // Nota: Esto requiere que el backend envíe datos por proyecto
-            // Por ahora, usamos los valores originales pero con advertencia
-            return {
-                ...cards,
-                emisiones: totalEmisiones,
-                // Para proyectos, mostrar solo el seleccionado
-                proyectos: filteredData.proyectos_usuario?.length || 1,
-            };
-        }
-
-        return cards;
-    }, [filteredData, selectedProyecto]);
+    }, [data]);
 
     // ============================================================
     // TOOLTIP PERSONALIZADO
@@ -177,7 +120,7 @@ export default function Dashboard() {
     if (error) return <div className="dash-error">{error}</div>;
     if (!data) return <div className="dash-loading">Sin datos</div>;
 
-    const cards = filteredCards || data.cards || {};
+    const cards = data.cards || {};
 
     return (
         <div className="dashboard">

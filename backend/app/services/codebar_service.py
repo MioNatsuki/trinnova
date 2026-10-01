@@ -97,18 +97,27 @@ class CodebarService:
     @staticmethod
     def inject_codebar_style(html_content: str) -> str:
         """
-        Inyecta el estilo CSS necesario para renderizar códigos de barras.
-        
-        NOTA: Este método es un helper para desarrollo/preview.
-        En producción, el estilo debería estar incluido en el HTML de la plantilla.
+        Inyecta la fuente de código de barras y envuelve los {{codebar}} restantes
+        en un <span class="codebar"> para que tomen la fuente correcta.
+
+        Es idempotente: si ya se inyectó, no duplica.
         """
-        # Si ya tiene la fuente, no hacer nada
+        # 1. Envolver todos los {{codebar}} que aún no estén envueltos
+        import re
+        pattern = re.compile(r'\{\{codebar\}\}')
+
+        def _wrap(match):
+            return '<span class="codebar">{{codebar}}</span>'
+
+        html_content = pattern.sub(_wrap, html_content)
+
+        # 2. Si ya tiene la fuente inyectada, solo devolver
         if 'IDAutomationHC39M' in html_content:
             return html_content
-        
-        # Cargar la fuente desde el archivo .ttf y convertir a base64
+
+        # 3. Cargar la fuente en base64
         font_ttf_path = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
-        
+
         font_base64 = ""
         if font_ttf_path.exists():
             try:
@@ -116,13 +125,10 @@ class CodebarService:
                     font_base64 = base64.b64encode(f.read()).decode('utf-8')
             except Exception as e:
                 logger.warning(f"No se pudo cargar la fuente: {e}")
-        
-        # Si no se pudo cargar la fuente, usar un fallback
+
         if not font_base64:
-            # Este es un fallback mínimo - la fuente real es necesaria para códigos de barras
-            font_base64 = "AAEAAAALAIAAAwAwT1MvMg8SA..."  # Fallback vacío
-            logger.warning("Usando fallback para fuente de código de barras")
-        
+            logger.warning("Fuente de código de barras no encontrada; los códigos se verán como texto plano.")
+
         style = f'''
         <style>
         @font-face {{
@@ -131,25 +137,18 @@ class CodebarService:
             font-weight: normal;
             font-style: normal;
         }}
-        .codebar, [class*="codebar"], [class*="c-o-d-e-b-a-r"] {{
+        .codebar {{
             font-family: 'IDAutomationHC39M', 'Courier New', monospace !important;
             font-size: 10px;
             letter-spacing: 1px;
             font-weight: 400;
         }}
-        .c-o-d-e-b-a-r-05214b39831f {{
-            font-family: 'IDAutomationHC39M', 'Courier New', monospace !important;
-            font-size: 10px;
-            letter-spacing: 1px;
-        }}
         </style>
         '''
-        
-        # Insertar antes del cierre de </head>
+
         if '</head>' in html_content:
             return html_content.replace('</head>', style + '</head>')
-        
-        # Si no hay </head>, insertar al inicio
+
         return style + html_content
     
     # ============================================================

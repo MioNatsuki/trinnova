@@ -582,12 +582,11 @@ class TrinnovaWorker:
                         self.batch_size,
                     )
                 else:
-                    registros = await self._get_registros_batch(
+                    registros = await self._get_registros_temporal(
                         proyecto_slug,
-                        filtros,
                         offset,
                         self.batch_size,
-                        pk
+                        pk,
                     )
 
                 if not registros:
@@ -700,6 +699,48 @@ class TrinnovaWorker:
             "pensiones": "prestamo",
         }
         return pks.get(proyecto_slug, "id")
+
+    async def _get_registros_temporal(
+        self,
+        proyecto_slug: str,
+        offset: int,
+        limit: int,
+        pk: str,
+    ) -> List[Dict]:
+        """
+        Lee de tabla_temporal. Es la fuente real para emisión normal.
+        """
+        from app.db.router import get_project_db
+        from sqlalchemy import text
+
+        db_gen = None
+        try:
+            db_gen = get_project_db(proyecto_slug)
+            db_proyecto = next(db_gen)
+
+            query = text(f"""
+                SELECT *
+                FROM tabla_temporal
+                ORDER BY `orden_impresion` ASC, `{pk}` ASC
+                LIMIT :limit OFFSET :offset
+            """)
+
+            result = db_proyecto.execute(query, {
+                "limit": limit,
+                "offset": offset,
+            })
+
+            return [dict(row._mapping) for row in result]
+
+        except Exception as e:
+            logger.exception(
+                "Error obteniendo registros de tabla_temporal en %s: %s",
+                proyecto_slug, e
+            )
+            return []
+        finally:
+            if db_gen is not None:
+                db_gen.close()
 
     async def _get_registros_batch(
         self,
@@ -824,13 +865,22 @@ class TrinnovaWorker:
                     if 'codebar' not in placeholders:
                         from app.services.codebar_service import CodebarService
 
-                        codebar = CodebarService.generar_codebar_completo(
+                        fecha_emision_job = job_data.get('fecha_emision')
+                        if isinstance(fecha_emision_job, str):
+                            try:
+                                fecha_emision_job = datetime.fromisoformat(fecha_emision_job)
+                            except Exception:
+                                fecha_emision_job = datetime.now()
+                        elif not isinstance(fecha_emision_job, datetime):
+                            fecha_emision_job = datetime.now()
+
+                        codebar_final = CodebarService.generar_codebar_completo(
                             pk_value=str(pk_value),
-                            fecha_emision=datetime.now(),
+                            fecha_emision=fecha_emision_job,
                             visita=job_data.get('visita'),
-                            identificador_documento=job_data.get('identificador_documento')
+                            identificador_documento=job_data.get('identificador_documento'),
                         )
-                        placeholders['codebar'] = codebar
+                        placeholders['codebar'] = codebar_final
 
                     pdf_bytes = await renderer.render_pdf(
                         plantilla_archivo,

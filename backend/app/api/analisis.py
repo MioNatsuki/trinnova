@@ -594,25 +594,6 @@ def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str], 
 # FUNCIÓN AUXILIAR PARA CÓDIGO DE BARRAS (MODIFICADA)
 # ============================================================
 
-def _generar_codebar_completo(
-    pk_value: str,
-    fecha_emision: datetime,
-    id_documento: Optional[int] = None,
-    visita: Optional[str] = None,
-    identificador_documento: Optional[str] = None
-) -> str:
-    """
-    Genera código de barras con formato: *PK+FECHA+IDENTIFICADOR+VISTA*
-    - PK: COMPLETA (no se trunca)
-    - IDENTIFICADOR: del documento (ej: N, R, A)
-    - VISTA: número de visita (ej: 3)
-    """
-    from datetime import datetime as dt
-
-    codebar = str(pk_value)
-    return codebar
-
-
 def _upsert_tabla_dinamica(
     db_proyecto,
     pk_name: str,

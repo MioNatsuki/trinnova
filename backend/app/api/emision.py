@@ -436,12 +436,13 @@ def _poblar_tabla_temporal(
     orden_map: dict = None,
 ):
     """
-    Puebla tabla_temporal desde tabla_dinamica JOIN tabla_analisis.
+    Puebla tabla_temporal cruzando tabla_analisis + tabla_dinamica + tabla_padron.
 
     Reglas:
     - codebar es PK de tabla_temporal y se genera aquí.
-    - La unión con tabla_dinamica/analisis es vía clave_origen.
-    - Solo se copian columnas comunes.
+    - La unión con las otras tablas es vía clave_origen.
+    - Para cada columna destino se toma COALESCE(d.col, a.col, p.col):
+      primero dinamica, luego analisis, luego padron.
     - Colisiones de codebar → tabla_temporal_errores (no abortan).
     """
     from sqlalchemy import text
@@ -455,43 +456,79 @@ def _poblar_tabla_temporal(
         db_proyecto.commit()
         return {"insertados": 0, "errores": 0, "total_errores": 0}
 
-    # 1. Columnas comunes (excluir control)
+    # 1. Detectar columnas existentes en cada tabla
     cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
-    cols_din  = _get_columnas_tabla(db_proyecto, "tabla_dinamica")
+    cols_ana  = set(_get_columnas_tabla(db_proyecto, "tabla_analisis"))
+    cols_din  = set(_get_columnas_tabla(db_proyecto, "tabla_dinamica"))
 
-    cols_excluir = {"codebar", "orden_impresion", "seleccionada", "id_temporal"}
-    cols_comunes = [
-        c for c in cols_temp
-        if c in cols_din and c not in cols_excluir
-    ]
+    try:
+        cols_pad = set(_get_columnas_tabla(db_proyecto, "tabla_padron"))
+    except Exception:
+        cols_pad = set()
 
-    if clave_origen not in cols_comunes:
+    # 2. Columnas destino = las de tabla_temporal, excluyendo codebar/orden_impresion
+    cols_excluir = {"codebar", "orden_impresion", "seleccionada", "id_temporal", clave_origen}
+    cols_destino = [c for c in cols_temp if c not in cols_excluir]
+
+    print(f"[DIAG] clave_origen = {clave_origen!r}")
+    print(f"[DIAG] tipo de clave_origen = {type(clave_origen)}")
+    print(f"[DIAG] cols_temp ({len(cols_temp)}): {cols_temp}")
+    print(f"[DIAG] ¿está 'prestamo' en cols_temp? {'prestamo' in cols_temp}")
+    print(f"[DIAG] ¿está clave_origen en cols_temp? {clave_origen in cols_temp}")
+
+    if clave_origen not in cols_temp:   # ← corregido: cols_temp, no cols_destino
         raise HTTPException(
             status_code=500,
             detail=f"La clave '{clave_origen}' no existe en tabla_temporal."
         )
 
-    # 2. Limpiar
+    # 3. Limpiar tabla_temporal y tabla_temporal_errores
     db_proyecto.execute(text("DELETE FROM tabla_temporal"))
     db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
 
-    # 3. Traer filas desde dinamica
+    # 4. Armar el SELECT con COALESCE por columna
+    #    Solo referencia tablas si la columna existe en esa tabla.
+    select_parts = []
+    for col in cols_destino:
+        candidates = []
+        if col in cols_din:
+            candidates.append(f"d.`{col}`")
+        if col in cols_ana:
+            candidates.append(f"a.`{col}`")
+        if col in cols_pad:
+            candidates.append(f"p.`{col}`")
+
+        if not candidates:
+            expr = "NULL"
+        elif len(candidates) == 1:
+            expr = candidates[0]
+        else:
+            expr = f"COALESCE({', '.join(candidates)})"
+
+        select_parts.append(f"{expr} AS `{col}`")   # ← alias agregado
+
+    select_sql = ", ".join(select_parts)
+
+    # 5. Traer todos los registros seleccionados cruzando las 3 tablas
     placeholders = ", ".join(f":id{i}" for i in range(len(ids_seleccionados)))
     params = {f"id{i}": v for i, v in enumerate(ids_seleccionados)}
 
-    cols_str = ", ".join(f"`{c}`" for c in cols_comunes)
-    rows = db_proyecto.execute(text(f"""
-        SELECT {cols_str}
-        FROM tabla_dinamica
-        WHERE `{clave_origen}` IN ({placeholders})
-        ORDER BY `{clave_origen}` ASC
-    """), params).fetchall()
+    query = text(f"""
+        SELECT a.`{clave_origen}` AS `__pk__`, {select_sql}
+        FROM tabla_analisis a
+        LEFT JOIN tabla_dinamica d ON a.`{clave_origen}` = d.`{clave_origen}`
+        LEFT JOIN tabla_padron   p ON a.`{clave_origen}` = p.`{clave_origen}`
+        WHERE a.`{clave_origen}` IN ({placeholders})
+        ORDER BY a.`{clave_origen}` ASC
+    """)
+
+    rows = db_proyecto.execute(query, params).fetchall()
 
     if not rows:
         db_proyecto.commit()
         return {"insertados": 0, "errores": 0, "total_errores": 0}
 
-    # 4. Insertar fila por fila
+    # 6. Insertar fila por fila (necesitamos generar codebar único)
     fecha_emision = datetime.now()
     orden_secuencial = 0
     insertados = 0
@@ -499,7 +536,8 @@ def _poblar_tabla_temporal(
 
     for row in rows:
         row_dict = dict(row._mapping)
-        pk_val = row_dict.get(clave_origen)
+        pk_val = row_dict.pop("__pk__", None)
+
         if pk_val is None:
             continue
 
@@ -510,7 +548,7 @@ def _poblar_tabla_temporal(
             orden_secuencial += 1
             orden = orden_secuencial
 
-        # Generar codebar
+        # Generar codebar base (sin visita/identificador; se completará en el worker)
         try:
             codebar = CodebarService.generar_codebar_completo(
                 pk_value=str(pk_val),
@@ -530,10 +568,11 @@ def _poblar_tabla_temporal(
             })
             continue
 
-        insert_cols = list(cols_comunes) + ["codebar", "orden_impresion"]
-        insert_vals = [f":{c}" for c in cols_comunes] + [":codebar", ":orden_impresion"]
+        insert_cols = [clave_origen] + cols_destino + ["codebar", "orden_impresion"]
+        insert_vals = [f":{clave_origen}"] + [f":{c}" for c in cols_destino] + [":codebar", ":orden_impresion"]
 
         insert_params = {**row_dict}
+        insert_params[clave_origen] = pk_val
         insert_params["codebar"] = codebar
         insert_params["orden_impresion"] = orden
 
@@ -546,7 +585,6 @@ def _poblar_tabla_temporal(
             insertados += 1
         except Exception as e:
             errores += 1
-            motivo = str(e)[:200]
             db_proyecto.execute(text("""
                 INSERT INTO tabla_temporal_errores
                     (clave_origen, codebar_intento, motivo, payload_json)
@@ -554,7 +592,7 @@ def _poblar_tabla_temporal(
             """), {
                 "c": str(pk_val),
                 "cb": codebar,
-                "m": motivo,
+                "m": str(e)[:200],
                 "p": json.dumps(row_dict, default=str)[:60000],
             })
 

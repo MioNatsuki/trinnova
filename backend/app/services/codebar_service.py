@@ -3,9 +3,12 @@ from datetime import datetime
 from typing import Optional
 import logging
 import base64
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_FONT_PATH = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
 
 class CodebarService:
     """
@@ -95,60 +98,47 @@ class CodebarService:
     # ============================================================
     
     @staticmethod
+    def render_codebar_html(codebar: str) -> str:
+        """Devuelve el <span> con la clase .codebar listo para meterse en la plantilla."""
+        return f'<span class="codebar">{codebar or ""}</span>'
+ 
+    @staticmethod
     def inject_codebar_style(html_content: str) -> str:
         """
-        Inyecta la fuente de código de barras y envuelve los {{codebar}} restantes
-        en un <span class="codebar"> para que tomen la fuente correcta.
-
-        Es idempotente: si ya se inyectó, no duplica.
+        Inyecta @font-face + clase .codebar. Idempotente.
+        IMPORTANTE: ya no depende de encontrar '{{codebar}}' (el renderer lo reemplaza
+        ANTES de llamar a este método, por eso antes nunca se aplicaba la fuente).
         """
-        # 1. Envolver todos los {{codebar}} que aún no estén envueltos
-        import re
-        pattern = re.compile(r'\{\{codebar\}\}')
-
-        def _wrap(match):
-            return '<span class="codebar">{{codebar}}</span>'
-
-        html_content = pattern.sub(_wrap, html_content)
-
-        # 2. Si ya tiene la fuente inyectada, solo devolver
-        if 'IDAutomationHC39M' in html_content:
+        if "IDAutomationHC39M" in html_content:
             return html_content
-
-        # 3. Cargar la fuente en base64
-        font_ttf_path = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
-
-        font_base64 = ""
-        if font_ttf_path.exists():
-            try:
-                with open(font_ttf_path, 'rb') as f:
-                    font_base64 = base64.b64encode(f.read()).decode('utf-8')
-            except Exception as e:
-                logger.warning(f"No se pudo cargar la fuente: {e}")
-
-        if not font_base64:
-            logger.warning("Fuente de código de barras no encontrada; los códigos se verán como texto plano.")
-
-        style = f'''
-        <style>
-        @font-face {{
-            font-family: 'IDAutomationHC39M';
-            src: url('data:font/truetype;charset=utf-8;base64,{font_base64}') format('truetype');
-            font-weight: normal;
-            font-style: normal;
-        }}
-        .codebar {{
-            font-family: 'IDAutomationHC39M', 'Courier New', monospace !important;
-            font-size: 10px;
-            letter-spacing: 1px;
-            font-weight: 400;
-        }}
-        </style>
-        '''
-
-        if '</head>' in html_content:
-            return html_content.replace('</head>', style + '</head>')
-
+ 
+        if not _FONT_PATH.exists():
+            # Mejor fallar fuerte que generar 10,000 PDFs con texto plano en vez de barras
+            raise FileNotFoundError(f"No existe la fuente del código de barras: {_FONT_PATH}")
+ 
+        font_b64 = base64.b64encode(_FONT_PATH.read_bytes()).decode("utf-8")
+ 
+        style = f"""
+                <style>
+                @font-face {{
+                    font-family: 'IDAutomationHC39M';
+                    src: url('data:font/truetype;base64,{font_b64}') format('truetype');
+                    font-weight: normal;
+                    font-style: normal;
+                }}
+                .codebar {{
+                    font-family: 'IDAutomationHC39M' !important;
+                    font-size: 16px !important;      /* 10px es demasiado chico para que las barras se lean */
+                    font-weight: 400 !important;     /* si el padre es bold, Chromium "engorda" las barras y se rompen */
+                    font-style: normal !important;
+                    letter-spacing: 0 !important;
+                    line-height: 1 !important;
+                    white-space: pre !important;
+                }}
+                </style>
+                """
+        if "</head>" in html_content:
+            return html_content.replace("</head>", style + "</head>", 1)
         return style + html_content
     
     # ============================================================

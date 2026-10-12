@@ -429,184 +429,124 @@ def _get_columnas_tabla(db_proyecto, tabla: str) -> list:
     rows = db_proyecto.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
     return [r[0] for r in rows]
 
-def _poblar_tabla_temporal(
-    db_proyecto,
-    clave_origen: str,
-    ids_seleccionados: list,
-    orden_map: dict = None,
-):
-    """
-    Puebla tabla_temporal cruzando tabla_analisis + tabla_dinamica + tabla_padron.
+def _get_columnas_tipos(db_proyecto, tabla: str) -> dict:
+    from sqlalchemy import text
+    rows = db_proyecto.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
+    return {r[0]: str(r[1]).lower() for r in rows}
+ 
+def _es_texto(tipo: str) -> bool:
+    return any(t in tipo for t in ("char", "text"))
 
-    Reglas:
-    - codebar es PK de tabla_temporal y se genera aquí.
-    - La unión con las otras tablas es vía clave_origen.
-    - Para cada columna destino se toma COALESCE(d.col, a.col, p.col):
-      primero dinamica, luego analisis, luego padron.
-    - Colisiones de codebar → tabla_temporal_errores (no abortan).
-    """
+def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_map=None):
     from sqlalchemy import text
     from app.services.codebar_service import CodebarService
     from datetime import datetime
     import json
-
+ 
     if not ids_seleccionados:
         db_proyecto.execute(text("DELETE FROM tabla_temporal"))
         db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
         db_proyecto.commit()
         return {"insertados": 0, "errores": 0, "total_errores": 0}
-
-    # 1. Detectar columnas existentes en cada tabla
-    cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
-    cols_ana  = set(_get_columnas_tabla(db_proyecto, "tabla_analisis"))
-    cols_din  = set(_get_columnas_tabla(db_proyecto, "tabla_dinamica"))
-
+ 
+    tip_temp = _get_columnas_tipos(db_proyecto, "tabla_temporal")
+    tip_ana = _get_columnas_tipos(db_proyecto, "tabla_analisis")
+    tip_din = _get_columnas_tipos(db_proyecto, "tabla_dinamica")
     try:
-        cols_pad = set(_get_columnas_tabla(db_proyecto, "tabla_padron"))
+        tip_pad = _get_columnas_tipos(db_proyecto, "tabla_padron")
     except Exception:
-        cols_pad = set()
-
-    # 2. Columnas destino = las de tabla_temporal, excluyendo codebar/orden_impresion
+        tip_pad = {}
+ 
+    if clave_origen not in tip_temp:
+        raise HTTPException(500, f"La clave '{clave_origen}' no existe en tabla_temporal.")
+ 
     cols_excluir = {"codebar", "orden_impresion", "seleccionada", "id_temporal", clave_origen}
-    cols_destino = [c for c in cols_temp if c not in cols_excluir]
-
-    print(f"[DIAG] clave_origen = {clave_origen!r}")
-    print(f"[DIAG] tipo de clave_origen = {type(clave_origen)}")
-    print(f"[DIAG] cols_temp ({len(cols_temp)}): {cols_temp}")
-    print(f"[DIAG] ¿está 'prestamo' en cols_temp? {'prestamo' in cols_temp}")
-    print(f"[DIAG] ¿está clave_origen en cols_temp? {clave_origen in cols_temp}")
-
-    if clave_origen not in cols_temp:   # ← corregido: cols_temp, no cols_destino
-        raise HTTPException(
-            status_code=500,
-            detail=f"La clave '{clave_origen}' no existe en tabla_temporal."
-        )
-
-    # 3. Limpiar tabla_temporal y tabla_temporal_errores
+    cols_destino = [c for c in tip_temp if c not in cols_excluir]
+ 
     db_proyecto.execute(text("DELETE FROM tabla_temporal"))
     db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
-
-    # 4. Armar el SELECT con COALESCE por columna
-    #    Solo referencia tablas si la columna existe en esa tabla.
+ 
+    # --- Un valor "vacío" ('' o '   ') NO debe ganarle a un valor real de otra tabla.
+    #     Sin NULLIF, COALESCE se quedaba con '' de dinámica y nunca llegaba a analisis/padrón.
+    def cand(alias, col, tipos):
+        if col not in tipos:
+            return None
+        if _es_texto(tipos[col]):
+            return f"NULLIF(TRIM({alias}.`{col}`), '')"
+        return f"{alias}.`{col}`"
+ 
     select_parts = []
     for col in cols_destino:
-        candidates = []
-        if col in cols_din:
-            candidates.append(f"d.`{col}`")
-        if col in cols_ana:
-            candidates.append(f"a.`{col}`")
-        if col in cols_pad:
-            candidates.append(f"p.`{col}`")
-
-        if not candidates:
-            expr = "NULL"
-        elif len(candidates) == 1:
-            expr = candidates[0]
-        else:
-            expr = f"COALESCE({', '.join(candidates)})"
-
-        select_parts.append(f"{expr} AS `{col}`")   # ← alias agregado
-
-    select_sql = ", ".join(select_parts)
-
-    # 5. Traer todos los registros seleccionados cruzando las 3 tablas
+        cs = [x for x in (cand("d", col, tip_din),
+                          cand("a", col, tip_ana),
+                          cand("p", col, tip_pad)) if x]
+        expr = "NULL" if not cs else (cs[0] if len(cs) == 1 else f"COALESCE({', '.join(cs)})")
+        select_parts.append(f"{expr} AS `{col}`")
+ 
+    # codebar: se respeta el que ya calculó tabla_dinamica (con fecha + identificador + visita)
+    d_codebar = "d.`codebar`" if "codebar" in tip_din else "NULL"
+ 
     placeholders = ", ".join(f":id{i}" for i in range(len(ids_seleccionados)))
     params = {f"id{i}": v for i, v in enumerate(ids_seleccionados)}
-
-    query = text(f"""
-        SELECT a.`{clave_origen}` AS `__pk__`, {select_sql}
+ 
+    rows = db_proyecto.execute(text(f"""
+        SELECT a.`{clave_origen}` AS `__pk__`, {d_codebar} AS `__cb_din__`,
+               {', '.join(select_parts)}
         FROM tabla_analisis a
         LEFT JOIN tabla_dinamica d ON a.`{clave_origen}` = d.`{clave_origen}`
         LEFT JOIN tabla_padron   p ON a.`{clave_origen}` = p.`{clave_origen}`
         WHERE a.`{clave_origen}` IN ({placeholders})
         ORDER BY a.`{clave_origen}` ASC
-    """)
-
-    rows = db_proyecto.execute(query, params).fetchall()
-
-    if not rows:
-        db_proyecto.commit()
-        return {"insertados": 0, "errores": 0, "total_errores": 0}
-
-    # 6. Insertar fila por fila (necesitamos generar codebar único)
+    """), params).fetchall()
+ 
     fecha_emision = datetime.now()
-    orden_secuencial = 0
-    insertados = 0
-    errores = 0
-
+    orden_sec, insertados, errores = 0, 0, 0
+ 
     for row in rows:
-        row_dict = dict(row._mapping)
-        pk_val = row_dict.pop("__pk__", None)
-
+        rd = dict(row._mapping)
+        pk_val = rd.pop("__pk__", None)
+        cb_din = rd.pop("__cb_din__", None)
         if pk_val is None:
             continue
-
-        # Determinar orden
+ 
         if orden_map and str(pk_val) in orden_map:
             orden = int(orden_map[str(pk_val)])
         else:
-            orden_secuencial += 1
-            orden = orden_secuencial
+            orden_sec += 1
+            orden = orden_sec
+ 
+        codebar = cb_din or CodebarService.generar_codebar_completo(
+            pk_value=str(pk_val),
+            fecha_emision=fecha_emision,
+            visita=rd.get("visita"),
+            identificador_documento=rd.get("identificador_documento"),
+        )
 
-        # Generar codebar base (sin visita/identificador; se completará en el worker)
-        try:
-            codebar = CodebarService.generar_codebar_completo(
-                pk_value=str(pk_val),
-                fecha_emision=fecha_emision,
-            )
-        except Exception as e:
-            errores += 1
-            db_proyecto.execute(text("""
-                INSERT INTO tabla_temporal_errores
-                    (clave_origen, codebar_intento, motivo, payload_json)
-                VALUES (:c, :cb, :m, :p)
-            """), {
-                "c": str(pk_val),
-                "cb": "",
-                "m": f"Error generando codebar: {str(e)[:200]}",
-                "p": json.dumps(row_dict, default=str)[:60000],
-            })
-            continue
-
+        if 'autoridad_impositora' in cols_destino and not rd.get('autoridad_impositora'):
+            rd['autoridad_impositora'] = rd.get('autoridad_determinante')
+            
         insert_cols = [clave_origen] + cols_destino + ["codebar", "orden_impresion"]
-        insert_vals = [f":{clave_origen}"] + [f":{c}" for c in cols_destino] + [":codebar", ":orden_impresion"]
-
-        insert_params = {**row_dict}
-        insert_params[clave_origen] = pk_val
-        insert_params["codebar"] = codebar
-        insert_params["orden_impresion"] = orden
-
+        vals = [f":{c}" for c in insert_cols]
+        p = {**rd, clave_origen: pk_val, "codebar": codebar, "orden_impresion": orden}
+ 
+        # SAVEPOINT: un error en una fila no tumba la transacción de las demás
         try:
-            db_proyecto.execute(text(f"""
-                INSERT INTO tabla_temporal
-                    ({", ".join(f"`{c}`" for c in insert_cols)})
-                VALUES ({", ".join(insert_vals)})
-            """), insert_params)
+            with db_proyecto.begin_nested():
+                db_proyecto.execute(text(
+                    f"INSERT INTO tabla_temporal ({', '.join(f'`{c}`' for c in insert_cols)}) "
+                    f"VALUES ({', '.join(vals)})"), p)
             insertados += 1
         except Exception as e:
             errores += 1
             db_proyecto.execute(text("""
-                INSERT INTO tabla_temporal_errores
-                    (clave_origen, codebar_intento, motivo, payload_json)
-                VALUES (:c, :cb, :m, :p)
-            """), {
-                "c": str(pk_val),
-                "cb": codebar,
-                "m": str(e)[:200],
-                "p": json.dumps(row_dict, default=str)[:60000],
-            })
-
+                INSERT INTO tabla_temporal_errores (clave_origen, codebar_intento, motivo, payload_json)
+                VALUES (:c, :cb, :m, :p)"""),
+                {"c": str(pk_val), "cb": codebar, "m": str(e)[:200],
+                 "p": json.dumps(rd, default=str)[:60000]})
+ 
     db_proyecto.commit()
-
-    total_err = db_proyecto.execute(text(
-        "SELECT COUNT(*) AS c FROM tabla_temporal_errores"
-    )).first().c
-
-    return {
-        "insertados": insertados,
-        "errores": errores,
-        "total_errores": total_err,
-    }
+    total_err = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_temporal_errores")).first().c
+    return {"insertados": insertados, "errores": errores, "total_errores": total_err}
 
 CAMPO_MONTO_POR_PROYECTO = {
     "apa_tlajomulco":     "total_adeudo",
@@ -3273,7 +3213,7 @@ def preparar_emision_especial(
         total = len(request.codebars)
         job = EmisionJob(
             id_proyecto=proyecto.id,
-            id_plantilla=plantilla.id,
+            id_plantilla=id_plantilla,
             id_usuario=current_user.id,
             nombre_job=request.nombre_job or f"Emisión {proyecto.nombre} - {datetime.now().strftime('%d/%m/%Y %H:%M')}",
             modo=request.modo,

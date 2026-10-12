@@ -225,6 +225,64 @@ class PlantillaRenderer:
             '{{_hora_actual}}': ahora.strftime("%H:%M"),
         }
     
+    def _resolver_placeholders_derivados(
+        self,
+        placeholders: Dict[str, str],
+    ) -> Dict[str, str]:
+        """
+        Agrega aliases y valores derivados que la plantilla espera pero
+        que no existen como columnas en BD.
+
+        Reglas:
+          - _fecha_actual  -> fecha_emision (si existe)
+          - inpc_c         -> inpc_a (alias)
+          - mes_inpc, ano_inpc -> split de periodo_a (YYYY-MM)
+          - mes_def, ano_def   -> split de periodo_b (YYYY-MM)
+        """
+        ph = dict(placeholders)  # copia
+
+        # 1. _fecha_actual = fecha_emision
+        if '_fecha_actual' not in ph or not ph.get('_fecha_actual'):
+            fecha_emision = ph.get('fecha_emision')
+            if fecha_emision:
+                # fecha_emision puede ser "YYYY-MM-DD" o "YYYY-MM-DD HH:MM:SS"
+                s = str(fecha_emision).strip()
+                if len(s) >= 10:
+                    # Formato dd/mm/yyyy
+                    y, m, d = s[:10].split('-')
+                    ph['_fecha_actual'] = f"{d}/{m}/{y}"
+
+        # 2. inpc_c = inpc_a (alias)
+        if 'inpc_c' not in ph or not ph.get('inpc_c'):
+            if ph.get('inpc_a'):
+                ph['inpc_c'] = ph['inpc_a']
+
+        # 3. mes_inpc / ano_inpc a partir de periodo_a
+        periodo_a = ph.get('periodo_a')
+        if periodo_a and '-' in str(periodo_a):
+            try:
+                anio_a, mes_a = str(periodo_a).split('-')[:2]
+                if not ph.get('ano_inpc'):
+                    ph['ano_inpc'] = anio_a
+                if not ph.get('mes_inpc'):
+                    ph['mes_inpc'] = mes_a
+            except Exception:
+                pass
+
+        # 4. mes_def / ano_def a partir de periodo_b
+        periodo_b = ph.get('periodo_b')
+        if periodo_b and '-' in str(periodo_b):
+            try:
+                anio_b, mes_b = str(periodo_b).split('-')[:2]
+                if not ph.get('ano_def'):
+                    ph['ano_def'] = anio_b
+                if not ph.get('mes_def'):
+                    ph['mes_def'] = mes_b
+            except Exception:
+                pass
+
+        return ph
+
     # ============================================================
     # RENDERIZADO DE PDF (NÚCLEO)
     # ============================================================
@@ -268,6 +326,7 @@ class PlantillaRenderer:
         )
         
         todos_placeholders = {**especiales, **placeholders}
+        todos_placeholders = self._resolver_placeholders_derivados(todos_placeholders)
         
         for key, value in todos_placeholders.items():
             if value is None:

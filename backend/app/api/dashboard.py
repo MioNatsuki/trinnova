@@ -155,4 +155,4 @@ def get_dashboard(
         emisiones=emisiones,
         rol=rol,
         proyectos_usuario=proyectos_usuario,
-    )
+    ) 

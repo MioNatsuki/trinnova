@@ -30,7 +30,6 @@ EMISIONES_DIR.mkdir(exist_ok=True)
 
 # Imports unificados (sin el prefijo "backend.")
 from app.services.monitoreo_service import MonitoreoService
-from app.services.emision_service import EmisionService
 from app.services.codebar_service import CodebarService
 from app.db.session import SessionGlobal
 
@@ -272,54 +271,64 @@ class AsyncPlantillaRenderer:
             cls._browser = cls._context = cls._playwright = None
             logger.info("Navegador global cerrado.")
 
-    async def render_pdf(
-        self,
-        nombre_archivo: str,
-        placeholders: Dict[str, str],
-        altura: int = 1286
-    ) -> bytes:
-        import base64
-
-        # Asegurar que el contexto exista
+    async def render_pdf(self, nombre_archivo, placeholders, altura: int = 1286) -> bytes:
+        import base64, re
+        from app.services.codebar_service import CodebarService
+    
         if not AsyncPlantillaRenderer._context:
             await AsyncPlantillaRenderer.start()
-
+    
         ruta_completa = self.base_path / nombre_archivo
         if not ruta_completa.exists():
             raise FileNotFoundError(f"Archivo HTML no encontrado: {ruta_completa}")
-
-        with open(ruta_completa, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-
+    
+        html_content = ruta_completa.read_text(encoding="utf-8")
+    
+        # 1) El codebar se reemplaza APARTE, envuelto en <span class="codebar">
+        codebar_val = str(placeholders.get("codebar") or "")
+        html_content = html_content.replace(
+            "{{codebar}}", CodebarService.render_codebar_html(codebar_val)
+        )
+    
+        # 2) Resto de placeholders
         for key, value in placeholders.items():
-            html_content = html_content.replace(f"{{{{{key}}}}}", str(value if value is not None else ""))
-
-        # Inyectar estilos de código de barras
+            if key == "codebar":
+                continue
+            html_content = html_content.replace(
+                f"{{{{{key}}}}}", "" if value is None else str(value)
+            )
+    
+        # 3) Cualquier {{campo}} que NO venga en el registro (porque era NULL o no existe)
+        #    se limpia; antes se imprimía literal "{{colonia}}" en el PDF.
+        faltantes = set(re.findall(r"\{\{([a-zA-Z0-9_]+)\}\}", html_content))
+        if faltantes:
+            logger.warning(f"[{nombre_archivo}] placeholders sin valor: {sorted(faltantes)}")
+        html_content = re.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "", html_content)
+    
+        # 4) Fuente + CSS del código de barras (ahora sí se aplica)
         html_content = CodebarService.inject_codebar_style(html_content)
-
-        # Convertir imágenes
+    
+        # 5) Imágenes a base64
         img_folder = self.base_path / "img"
         if img_folder.exists():
             for img_path in img_folder.glob("*"):
                 try:
-                    with open(img_path, 'rb') as f:
-                        img_data = base64.b64encode(f.read()).decode('utf-8')
-                        mime = "image/png" if img_path.suffix == ".png" else "image/jpeg"
-                        html_content = html_content.replace(f"./img/{img_path.name}", f"data:{mime};base64,{img_data}")
-                        html_content = html_content.replace(f"img/{img_path.name}", f"data:{mime};base64,{img_data}")
-                except: continue
-
-        # USAR EL CONTEXTO GLOBAL
+                    data = base64.b64encode(img_path.read_bytes()).decode("utf-8")
+                    mime = "image/png" if img_path.suffix.lower() == ".png" else "image/jpeg"
+                    uri = f"data:{mime};base64,{data}"
+                    html_content = html_content.replace(f"./img/{img_path.name}", uri)
+                    html_content = html_content.replace(f"img/{img_path.name}", uri)
+                except Exception:
+                    continue
+    
         page = await AsyncPlantillaRenderer._context.new_page()
         try:
-            await page.set_content(html_content, wait_until='networkidle')
+            await page.set_content(html_content, wait_until="networkidle")
+            await page.evaluate("document.fonts.ready")      # espera a que cargue la fuente
             await page.wait_for_timeout(300)
-
             return await page.pdf(
-                print_background=True,
-                width='816px',
-                height=f'{altura}px',
-                margin={'top': '0mm', 'bottom': '0mm', 'left': '0mm', 'right': '0mm'},
+                print_background=True, width="816px", height=f"{altura}px",
+                margin={"top": "0mm", "bottom": "0mm", "left": "0mm", "right": "0mm"},
                 prefer_css_page_size=True,
             )
         finally:
@@ -512,6 +521,8 @@ class TrinnovaWorker:
                 ahora = datetime.now()
                 job_dir = base / proyecto_slug / ahora.strftime("%Y") / ahora.strftime("%m") / f"job_{job_id}"
                 logger.info(f"📂 Usando ruta de salida elegida por el usuario: {base}")
+            else:
+                job_dir = self._get_job_directory(proyecto_slug, job_id)
 
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
@@ -524,33 +535,6 @@ class TrinnovaWorker:
                     status="failed", error_msg=error_msg
                 )
                 return
-
-            # ============================================================
-            # 2. CREAR EmisionService PASÁNDOLE job_dir
-            # ============================================================
-            emision_service = EmisionService(
-                job_id=job_id,
-                db_global=db_session,
-                worker_id=self.worker_id,
-                job_dir=job_dir,
-            )
-
-            def on_progress(progreso):
-                asyncio.create_task(
-                    self.api_client.update_progress(
-                        self.worker_id, job_id,
-                        procesados=progreso["procesados"], ultimo_pk=None
-                    )
-                )
-
-            # ============================================================
-            # 3. GENERAR EMISIÓN (EmisionService usará job_dir internamente)
-            # ============================================================
-            resultados = await emision_service.generar_emision(
-                max_concurrent_pages=self.max_concurrent_pages,
-                checkpoint_interval=self.checkpoint_interval,
-                progress_callback=on_progress
-            )
 
             # ============================================================
             # 4. Post-proceso (contadores, checkpoint, manifest)
@@ -850,7 +834,7 @@ class TrinnovaWorker:
             async with semaphore:
                 try:
                     pk_value = registro.get(pk)
-                    orden_actual = orden_inicial + idx
+                    orden_actual = registro.get("orden_impresion") or (orden_inicial + idx)
 
                     placeholders = {}
                     for key, value in registro.items():
@@ -862,7 +846,7 @@ class TrinnovaWorker:
                     placeholders['_total_paginas'] = "1"
                     placeholders['orden_impresion'] = str(orden_actual)
 
-                    if 'codebar' not in placeholders:
+                    if not placeholders.get('codebar'):
                         from app.services.codebar_service import CodebarService
 
                         fecha_emision_job = job_data.get('fecha_emision')

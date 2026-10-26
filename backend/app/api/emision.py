@@ -500,27 +500,53 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
     """), params).fetchall()
  
     fecha_emision = datetime.now()
-    orden_sec, insertados, errores = 0, 0, 0
- 
+    insertados, errores = 0, 0
+
+    # Pre-calcular los órdenes manuales para evitar colisiones
+    ordenes_manuales = set()
+    for v in (orden_map or {}).values():
+        try:
+            ordenes_manuales.add(int(v))
+        except (ValueError, TypeError):
+            pass
+
+    max_orden_manual = max(ordenes_manuales) if ordenes_manuales else 0
+    siguiente_libre = max_orden_manual + 1
+
     for row in rows:
         rd = dict(row._mapping)
         pk_val = rd.pop("__pk__", None)
         cb_din = rd.pop("__cb_din__", None)
         if pk_val is None:
             continue
- 
+
+        # Calcular orden
         if orden_map and str(pk_val) in orden_map:
-            orden = int(orden_map[str(pk_val)])
+            try:
+                orden = int(orden_map[str(pk_val)])
+            except (ValueError, TypeError):
+                orden = None
         else:
-            orden_sec += 1
-            orden = orden_sec
+            orden = None
+
+        if orden is None:
+            # Buscar el siguiente orden libre
+            while siguiente_libre in ordenes_manuales:
+                siguiente_libre += 1
+            orden = siguiente_libre
+            ordenes_manuales.add(orden)
+            siguiente_libre += 1
  
-        codebar = cb_din or CodebarService.generar_codebar_completo(
-            pk_value=str(pk_val),
-            fecha_emision=fecha_emision,
-            visita=rd.get("visita"),
-            identificador_documento=rd.get("identificador_documento"),
-        )
+        if cb_din:
+            codebar = cb_din
+        else:
+            # Fallback: no debería pasar si se ejecutó "Calcular Todas"
+            codebar = CodebarService.generar_codebar_completo(
+                pk_value=str(pk_val),
+                fecha_emision=fecha_emision,
+                visita=rd.get("visita"),
+                identificador_documento=rd.get("identificador_documento"),
+            )
 
         if 'autoridad_impositora' in cols_destino and not rd.get('autoridad_impositora'):
             rd['autoridad_impositora'] = rd.get('autoridad_determinante')
@@ -2506,16 +2532,14 @@ def get_tabla_temporal(
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
-    """
-    Devuelve el contenido actual de tabla_temporal.
-    PK real = codebar. Clave foránea = la de _info (clave_APA, credito, ...).
-    """
     from sqlalchemy import text
     from app.api.analisis import _info
 
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     clave = info["pk"]
+    col_nombre = info["col_nombre"][0] if info["col_nombre"] else None
+    col_calle = info["col_calle"][0] if info["col_calle"] else None
 
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
@@ -2533,9 +2557,32 @@ def get_tabla_temporal(
             }
 
         offset = (page - 1) * limit
-        rows = db_proyecto.execute(text("""
-            SELECT * FROM tabla_temporal
-            ORDER BY orden_impresion ASC, `codebar` ASC
+
+        # JOIN con tabla_analisis para traer nombre y calle
+        cols_ana = set()
+        try:
+            cols_ana = {r[0] for r in db_proyecto.execute(
+                text("SHOW COLUMNS FROM tabla_analisis")
+            ).fetchall()}
+        except Exception:
+            pass
+
+        select_extra = ""
+        if col_nombre and col_nombre in cols_ana:
+            select_extra += f", a.`{col_nombre}` AS `_nombre_display`"
+        else:
+            select_extra += ", NULL AS `_nombre_display`"
+
+        if col_calle and col_calle in cols_ana:
+            select_extra += f", a.`{col_calle}` AS `_calle_display`"
+        else:
+            select_extra += ", NULL AS `_calle_display`"
+
+        rows = db_proyecto.execute(text(f"""
+            SELECT t.* {select_extra}
+            FROM tabla_temporal t
+            LEFT JOIN tabla_analisis a ON t.`{clave}` = a.`{clave}`
+            ORDER BY t.orden_impresion ASC, t.codebar ASC
             LIMIT :limit OFFSET :offset
         """), {"limit": limit, "offset": offset}).fetchall()
 
@@ -2544,8 +2591,8 @@ def get_tabla_temporal(
             "total": total,
             "page": page,
             "limit": limit,
-            "pk": "codebar",       # ← PK real
-            "clave": clave,        # ← clave foránea (por si el front la quiere)
+            "pk": "codebar",
+            "clave": clave,
         }
     finally:
         db_gen.close()

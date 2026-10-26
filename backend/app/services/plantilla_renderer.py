@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Dict, Optional, List, Any, Set
 from datetime import datetime
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from app.services.formatters import (
+    aplicar_formato_fechas,
+    aplicar_formato_moneda,
+    procesar_condicionales,
+)
 
 from app.core.config import settings
 
@@ -40,6 +45,20 @@ ALTURAS_ESPECIALES = {
     "apa_tlajomulco": {"apa_tlajomulco.html": 1286},
     "predial_gdl": {"predial_gdl.html": 1286},
     "predial_tlajomulco": {"predial_tlajomulco.html": 1286},
+}
+
+PLACEHOLDER_ALIASES = {
+    "pensiones": {
+        "orden":           "orden_impresion",
+        "subestatus":      "sub_estatus_id",
+        "afiliado":        "numero_afiliado",
+        "aval_nombre":     "nombre_aval",
+        "afiliado_cruza1": "cruce_1",
+        "afiliado_cruza2": "cruce_2",
+        "observaciones":   "obs",
+        "ultimo_abono":    "ultimo_abono_modificado",
+    },
+    # Aquí irán los de los demás proyectos cuando los normalicemos
 }
 
 # ============================================================
@@ -70,6 +89,20 @@ class PlantillaRenderer:
         if not self.base_path.exists():
             raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
     
+    def _aplicar_aliases(self, placeholders: Dict[str, str]) -> Dict[str, str]:
+        """
+        Mapea placeholders de la plantilla a columnas reales de BD.
+        Solo agrega el alias si:
+        - el alias NO está ya en placeholders
+        - la columna real SÍ está en placeholders
+        """
+        aliases = PLACEHOLDER_ALIASES.get(self.proyecto_slug, {})
+        ph = dict(placeholders)
+        for alias, col_real in aliases.items():
+            if alias not in ph and col_real in ph:
+                ph[alias] = ph[col_real]
+        return ph
+
     # ============================================================
     # GESTIÓN DEL NAVEGADOR (SINGLETON GLOBAL)
     # ============================================================
@@ -232,25 +265,16 @@ class PlantillaRenderer:
         """
         Agrega aliases y valores derivados que la plantilla espera pero
         que no existen como columnas en BD.
-
-        Reglas:
-          - _fecha_actual  -> fecha_emision (si existe)
-          - inpc_c         -> inpc_a (alias)
-          - mes_inpc, ano_inpc -> split de periodo_a (YYYY-MM)
-          - mes_def, ano_def   -> split de periodo_b (YYYY-MM)
         """
-        ph = dict(placeholders)  # copia
+        from app.services.formatters import formatear_fecha
 
-        # 1. _fecha_actual = fecha_emision
+        ph = dict(placeholders)
+
+        # 1. _fecha_actual = fecha_emision (formateada según proyecto)
         if '_fecha_actual' not in ph or not ph.get('_fecha_actual'):
             fecha_emision = ph.get('fecha_emision')
             if fecha_emision:
-                # fecha_emision puede ser "YYYY-MM-DD" o "YYYY-MM-DD HH:MM:SS"
-                s = str(fecha_emision).strip()
-                if len(s) >= 10:
-                    # Formato dd/mm/yyyy
-                    y, m, d = s[:10].split('-')
-                    ph['_fecha_actual'] = f"{d}/{m}/{y}"
+                ph['_fecha_actual'] = formatear_fecha(fecha_emision, self.proyecto_slug)
 
         # 2. inpc_c = inpc_a (alias)
         if 'inpc_c' not in ph or not ph.get('inpc_c'):
@@ -296,7 +320,7 @@ class PlantillaRenderer:
         total_paginas: int = 1,
         codebar: Optional[str] = None,
         usar_cache: bool = True,
-        inject_codebar_style: bool = False  # ← NUEVO PARÁMETRO
+        inject_codebar_style: bool = False,
     ) -> bytes:
         """
         Renderiza un PDF desde una plantilla HTML.
@@ -309,18 +333,14 @@ class PlantillaRenderer:
             total_paginas: Total de páginas del documento
             codebar: Código de barras personalizado (opcional)
             usar_cache: Usar caché de HTML
-        
-        Returns:
-            bytes: Contenido del PDF
+            inject_codebar_style: Inyectar CSS de código de barras
         """
-        # 1. Obtener navegador
         browser = await self.get_browser()
         context = PlantillaRenderer._context
         
-        # 2. Cargar HTML
         html = self._cargar_html(nombre_archivo, force_reload=not usar_cache)
         
-        # 3. Reemplazar placeholders
+        # Placeholders especiales
         especiales = self._calcular_placeholders_especiales(
             pagina_actual, total_paginas, codebar or ""
         )
@@ -328,22 +348,49 @@ class PlantillaRenderer:
         todos_placeholders = {**especiales, **placeholders}
         todos_placeholders = self._resolver_placeholders_derivados(todos_placeholders)
         
+        # Si viene codebar explícito, úsalo
+        if codebar:
+            todos_placeholders['codebar'] = codebar
+        
+        # ============================================================
+        # APLICAR FORMATOS
+        # ============================================================
+        from app.services.formatters import (
+            aplicar_formato_fechas,
+            aplicar_formato_moneda,
+        )
+        todos_placeholders = aplicar_formato_fechas(todos_placeholders, self.proyecto_slug)
+        todos_placeholders = aplicar_formato_moneda(todos_placeholders, self.proyecto_slug)
+        
+        # ============================================================
+        # CODEBAR (reemplazo especial)
+        # ============================================================
+        codebar_val = str(todos_placeholders.get("codebar") or "")
+        if codebar_val:
+            from app.services.codebar_service import CodebarService
+            html = html.replace("{{codebar}}", CodebarService.render_codebar_html(codebar_val))
+        
+        # Reemplazo normal
         for key, value in todos_placeholders.items():
+            if key == "codebar":
+                continue
             if value is None:
-                value = ""
+                value = "-"
             html = html.replace(f"{{{{{key}}}}}", str(value))
         
-        # 4. Convertir imágenes a base64
+        # Limpiar huérfanos
+        import re
+        html = re.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "-", html)
+        
+        # Imágenes a base64
         html = self._convertir_imagenes_a_base64(html)
         
-        # ============================================================
-        # 5. INYECTAR ESTILO DE CÓDIGO DE BARRAS (SI SE SOLICITA)
-        # ============================================================
+        # Inyectar CSS de codebar
         if inject_codebar_style:
             from app.services.codebar_service import CodebarService
             html = CodebarService.inject_codebar_style(html)
         
-        # 6. Generar PDF
+        # Generar PDF
         altura_final = altura or ALTURAS_ESPECIALES.get(self.proyecto_slug, {}).get(
             nombre_archivo, PAGE_HEIGHT
         )

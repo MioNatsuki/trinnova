@@ -18,6 +18,7 @@ from app.services.log_service import registrar_log
 from app.services.inpc_service import INPCService
 from app.services.numero_a_letras import numero_a_letras
 from pydantic import BaseModel
+from app.services.codebar_service import CodebarService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -605,8 +606,8 @@ def _upsert_tabla_dinamica(
     info: Optional[Dict] = None
 ):
     """
-    Inserta o actualiza un registro en tabla_dinamica
-    Solo usa columnas que existen en la tabla
+    Inserta o actualiza un registro en tabla_dinamica.
+    Ahora la PK es `pk_name` (no codebar), así que el upsert funciona correctamente.
     """
     from sqlalchemy import text
 
@@ -617,25 +618,21 @@ def _upsert_tabla_dinamica(
         if key in cols_existentes:
             data_filtrada[key] = value
 
-    # ============================================================
-    # AGREGAR CAMPOS DE NOMBRE Y ADEUDO SI NO EXISTEN
-    # ============================================================
+    # Agregar nombre y adeudo si no existen
     if nombre is not None and nombre not in data_filtrada:
-        # Buscar la columna de nombre en tabla_dinamica
         for col_nombre in ['nombre', 'propietario', 'nombre_razon_social', 'propietario_nombre', 'nombre_contribuyente']:
             if col_nombre in cols_existentes:
                 data_filtrada[col_nombre] = nombre
                 break
 
     if adeudo is not None and adeudo not in data_filtrada:
-        # Buscar la columna de adeudo en tabla_dinamica
         for col_adeudo in ['saldo', 'total_adeudo', 'importe_historico_determinado', 'adeudo', 'total']:
             if col_adeudo in cols_existentes:
                 data_filtrada[col_adeudo] = adeudo
                 break
 
     if not data_filtrada:
-        print(f"⚠️ No hay columnas válidas para guardar {pk_name}={pk_value}")
+        print(f"No hay columnas válidas para guardar {pk_name}={pk_value}")
         return
 
     columns = list(data_filtrada.keys())
@@ -1926,10 +1923,13 @@ def calcular_todas_filas(
     from sqlalchemy import text
     from app.services.inpc_service import INPCService
     from app.services.numero_a_letras import numero_a_letras
-
+    
     proyecto = check_project_access(proyecto_slug, current_user, db_global)
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
+
+    db_proyecto.execute(text("TRUNCATE TABLE tabla_dinamica"))
+    db_proyecto.commit()
 
     try:
         try:
@@ -2217,7 +2217,12 @@ def calcular_todas_filas(
 
                     po_valor = pmo or ''
 
-                    codebar = str(pk_value)
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento,
+                    )
 
                     ultimo_inpc = (
                         INPCService.obtener_ultimo_registro(
@@ -2322,7 +2327,12 @@ def calcular_todas_filas(
                     # ============================================================
                     # 4. GENERAR CÓDIGO DE BARRAS
                     # ============================================================
-                    codebar = str(pk_value)
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento,
+                    )
 
                     # ============================================================
                     # 5. PREPARAR DATOS PARA GUARDAR
@@ -2363,7 +2373,12 @@ def calcular_todas_filas(
                 # RESTO DE PROYECTOS
                 # ============================================================
                 else:
-                    codebar = str(pk_value)
+                    codebar = CodebarService.generar_codebar_completo(
+                        pk_value=str(pk_value),
+                        fecha_emision=fecha_emision_dt,
+                        visita=visita,
+                        identificador_documento=identificador_documento,
+                    )
 
                     data_dict = {
                         "codebar": codebar,

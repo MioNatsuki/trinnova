@@ -1,5 +1,3 @@
-# Workers/worker_service.py - CORREGIDO
-
 import sys
 import os
 import json
@@ -32,6 +30,12 @@ EMISIONES_DIR.mkdir(exist_ok=True)
 from app.services.monitoreo_service import MonitoreoService
 from app.services.codebar_service import CodebarService
 from app.db.session import SessionGlobal
+from app.services.formatters import (
+    aplicar_formato_fechas,
+    aplicar_formato_moneda,
+    procesar_condicionales,
+    formatear_fecha,
+)
 
 # ============================================================
 # CONFIGURACIÓN DE LOGGING
@@ -49,6 +53,32 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("TrinnovaWorker")
+
+# ============================================================
+# HELPERS DE CÓDIGO DE BARRAS
+# ============================================================
+
+def _detectar_sufijo_pensiones(plantilla_archivo: str) -> Optional[str]:
+    """
+    Detecta el sufijo de código de barras según el nombre del archivo
+    de la plantilla para el proyecto Pensiones.
+
+    Retorna:
+      'AF' si es afiliado
+      'AV' si es aval
+      'GA' si es garantía
+      None en cualquier otro caso
+    """
+    if not plantilla_archivo:
+        return None
+    nombre = plantilla_archivo.lower()
+    if 'afiliado' in nombre:
+        return 'AF'
+    if 'aval' in nombre:
+        return 'AV'
+    if 'garantia' in nombre or 'garantía' in nombre:
+        return 'GA'
+    return None
 
 # ============================================================
 # CLIENTE API ASÍNCRONO
@@ -272,43 +302,68 @@ class AsyncPlantillaRenderer:
             logger.info("Navegador global cerrado.")
 
     async def render_pdf(self, nombre_archivo, placeholders, altura: int = 1286) -> bytes:
-        import base64, re
+        import base64, re as re_mod
         from app.services.codebar_service import CodebarService
-    
+        from app.services.formatters import (
+            aplicar_formato_fechas,
+            aplicar_formato_moneda,
+            procesar_condicionales,
+        )
+
         if not AsyncPlantillaRenderer._context:
             await AsyncPlantillaRenderer.start()
-    
+
         ruta_completa = self.base_path / nombre_archivo
         if not ruta_completa.exists():
             raise FileNotFoundError(f"Archivo HTML no encontrado: {ruta_completa}")
-    
+
         html_content = ruta_completa.read_text(encoding="utf-8")
-    
-        # 1) El codebar se reemplaza APARTE, envuelto en <span class="codebar">
+
+        # ============================================================
+        # 1. APLICAR FORMATOS (fechas y moneda) ANTES de reemplazar
+        # ============================================================
+        placeholders = aplicar_formato_fechas(placeholders, self.proyecto_slug)
+        placeholders = aplicar_formato_moneda(placeholders, self.proyecto_slug)
+
+        # ============================================================
+        # 2. PROCESAR BLOQUES CONDICIONALES {{#if campo}}...{{/if}}
+        # ============================================================
+        html_content = procesar_condicionales(html_content, placeholders)
+
+        # ============================================================
+        # 3. CODEBAR (reemplazo especial con span)
+        # ============================================================
         codebar_val = str(placeholders.get("codebar") or "")
         html_content = html_content.replace(
             "{{codebar}}", CodebarService.render_codebar_html(codebar_val)
         )
-    
-        # 2) Resto de placeholders
+
+        # ============================================================
+        # 4. RESTO DE PLACEHOLDERS
+        # ============================================================
         for key, value in placeholders.items():
             if key == "codebar":
                 continue
             html_content = html_content.replace(
                 f"{{{{{key}}}}}", "" if value is None else str(value)
             )
-    
-        # 3) Cualquier {{campo}} que NO venga en el registro (porque era NULL o no existe)
-        #    se limpia; antes se imprimía literal "{{colonia}}" en el PDF.
-        faltantes = set(re.findall(r"\{\{([a-zA-Z0-9_]+)\}\}", html_content))
+
+        # ============================================================
+        # 5. Limpiar placeholders huérfanos (por si alguno no vino)
+        # ============================================================
+        faltantes = set(re_mod.findall(r"\{\{([a-zA-Z0-9_]+)\}\}", html_content))
         if faltantes:
             logger.warning(f"[{nombre_archivo}] placeholders sin valor: {sorted(faltantes)}")
-        html_content = re.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "", html_content)
-    
-        # 4) Fuente + CSS del código de barras (ahora sí se aplica)
+        html_content = re_mod.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "", html_content)
+
+        # ============================================================
+        # 6. Fuente + CSS del código de barras
+        # ============================================================
         html_content = CodebarService.inject_codebar_style(html_content)
-    
-        # 5) Imágenes a base64
+
+        # ============================================================
+        # 7. Imágenes a base64
+        # ============================================================
         img_folder = self.base_path / "img"
         if img_folder.exists():
             for img_path in img_folder.glob("*"):
@@ -320,11 +375,11 @@ class AsyncPlantillaRenderer:
                     html_content = html_content.replace(f"img/{img_path.name}", uri)
                 except Exception:
                     continue
-    
+
         page = await AsyncPlantillaRenderer._context.new_page()
         try:
             await page.set_content(html_content, wait_until="networkidle")
-            await page.evaluate("document.fonts.ready")      # espera a que cargue la fuente
+            await page.evaluate("document.fonts.ready")
             await page.wait_for_timeout(300)
             return await page.pdf(
                 print_background=True, width="816px", height=f"{altura}px",
@@ -840,15 +895,26 @@ class TrinnovaWorker:
                     for key, value in registro.items():
                         if value is not None:
                             placeholders[key] = str(value)
+                    
+                    if not placeholders.get('fecha_emision'):
+                        placeholders['fecha_emision'] = datetime.now().isoformat()
+                    
+                    from app.services.formatters import formatear_fecha
+                    if not placeholders.get('_fecha_actual'):
+                        fecha_em = placeholders.get('fecha_emision') or datetime.now().isoformat()
+                        placeholders['_fecha_actual'] = formatear_fecha(fecha_em, job_data.get('proyecto_slug'))
 
-                    placeholders['_fecha_actual'] = datetime.now().strftime("%d/%m/%Y")
                     placeholders['_numero_pagina'] = "1"
-                    placeholders['_total_paginas'] = "1"
+                    placeholders['_total_paginas'] = "1" #Entrevistar para saber el número total de hojas
                     placeholders['orden_impresion'] = str(orden_actual)
 
-                    if not placeholders.get('codebar'):
-                        from app.services.codebar_service import CodebarService
+                    from app.services.codebar_service import CodebarService
 
+                    # 1. Obtener codebar base (viene de tabla_temporal, ya generado en Cálculos)
+                    codebar_base = placeholders.get('codebar')
+
+                    # 2. Si no existe, generarlo con los datos del job
+                    if not codebar_base:
                         fecha_emision_job = job_data.get('fecha_emision')
                         if isinstance(fecha_emision_job, str):
                             try:
@@ -858,13 +924,24 @@ class TrinnovaWorker:
                         elif not isinstance(fecha_emision_job, datetime):
                             fecha_emision_job = datetime.now()
 
-                        codebar_final = CodebarService.generar_codebar_completo(
+                        codebar_base = CodebarService.generar_codebar_completo(
                             pk_value=str(pk_value),
                             fecha_emision=fecha_emision_job,
                             visita=job_data.get('visita'),
                             identificador_documento=job_data.get('identificador_documento'),
                         )
-                        placeholders['codebar'] = codebar_final
+
+                    # 3. Aplicar sufijo si es pensiones
+                    sufijo = None
+                    if job_data.get('proyecto_slug') == 'pensiones':
+                        sufijo = _detectar_sufijo_pensiones(plantilla_archivo)
+
+                    if sufijo:
+                        codebar_final = CodebarService.agregar_sufijo_pensiones(codebar_base, sufijo)
+                    else:
+                        codebar_final = codebar_base
+
+                    placeholders['codebar'] = codebar_final
 
                     pdf_bytes = await renderer.render_pdf(
                         plantilla_archivo,
@@ -890,6 +967,29 @@ class TrinnovaWorker:
 
                     with open(pdf_path, 'wb') as f:
                         f.write(pdf_bytes)
+                    
+                    # Actualizar codebar en tabla_temporal con el sufijo aplicado
+                    if sufijo and codebar_base != codebar_final:
+                        try:
+                            from app.db.router import get_project_db
+                            from sqlalchemy import text as sql_text
+
+                            db_gen = get_project_db(job_data.get('proyecto_slug'))
+                            db_proyecto = next(db_gen)
+                            try:
+                                db_proyecto.execute(
+                                    sql_text("""
+                                        UPDATE tabla_temporal
+                                        SET codebar = :nuevo
+                                        WHERE codebar = :viejo
+                                    """),
+                                    {"nuevo": codebar_final, "viejo": codebar_base}
+                                )
+                                db_proyecto.commit()
+                            finally:
+                                db_gen.close()
+                        except Exception as e:
+                            logger.warning(f"No se pudo actualizar codebar en tabla_temporal: {e}")
 
                     return {
                         "success": True,

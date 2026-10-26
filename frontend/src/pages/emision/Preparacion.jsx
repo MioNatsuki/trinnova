@@ -106,13 +106,40 @@ export default function Preparacion() {
 
   // ---------- Selección ----------
   const toggle = useCallback((pkVal) => {
-    setSelected(prev => {
-      const n = new Set(prev);
-      if (n.has(pkVal)) n.delete(pkVal);
-      else n.add(pkVal);
-      return n;
-    });
+      setSelected(prev => {
+          const n = new Set(prev);
+          const key = String(pkVal);
+          if (n.has(key)) n.delete(key);
+          else n.add(key);
+          return n;
+      });
   }, []);
+
+  // Persistir ordenMap en localStorage
+  useEffect(() => {
+      if (!proyectoSlug) return;
+      if (Object.keys(ordenMap).length > 0) {
+          localStorage.setItem(
+              `trinnova_orden_${proyectoSlug}`,
+              JSON.stringify(ordenMap)
+          );
+      } else {
+          localStorage.removeItem(`trinnova_orden_${proyectoSlug}`);
+      }
+  }, [ordenMap, proyectoSlug]);
+
+  // Restaurar ordenMap al montar / cambiar proyecto
+  useEffect(() => {
+      if (!proyectoSlug) return;
+      const saved = localStorage.getItem(`trinnova_orden_${proyectoSlug}`);
+      if (saved) {
+          try {
+              setOrdenMap(JSON.parse(saved));
+          } catch {
+              setOrdenMap({});
+          }
+      }
+  }, [proyectoSlug]);
 
   const todosSeleccionados = rows.length > 0 && selected.size === rows.length;
 
@@ -138,16 +165,18 @@ export default function Preparacion() {
 
   // ---------- Orden ----------
   const setOrden = (pkVal, val) => {
-    setOrdenMap(prev => {
-      const n = { ...prev };
-      if (val === '' || val === null || val === undefined) {
-        delete n[pkVal];
-      } else {
-        n[pkVal] = parseInt(val) || '';
-      }
-      return n;
-    });
-  };
+  const key = String(pkVal);
+  setOrdenMap(prev => {
+    const n = { ...prev };
+    if (val === '' || val === null || val === undefined) {
+      delete n[key];
+    } else {
+      const num = parseInt(val, 10);
+      n[key] = isNaN(num) ? '' : num;
+    }
+    return n;
+  });
+};
 
   // ---------- CSV ----------
   const handleCsv = async (file) => {
@@ -156,22 +185,32 @@ export default function Preparacion() {
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const res = await api.post(
-        `/emision/${proyectoSlug}/seleccionar-cuentas-csv`,
-        fd,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      );
-      const ids = res.data.ids || [];
-      const om = res.data.orden_map || {};
-      setSelected(new Set(ids));
-      setOrdenMap(prev => ({ ...prev, ...om }));
-      showMsg('success', `${ids.length} cuentas cargadas desde archivo.`);
+        const res = await api.post(
+            `/emision/${proyectoSlug}/seleccionar-cuentas-csv`,
+            fd,
+            { headers: { 'Content-Type': 'multipart/form-data' } }
+        );
+        
+        const ids = (res.data.ids || []).map(String);
+        const om = {};
+        Object.entries(res.data.orden_map || {}).forEach(([k, v]) => {
+            om[String(k)] = parseInt(v, 10);
+        });
+        
+        setSelected(new Set(ids));
+        setOrdenMap(om);
+        setObservacionesMap(res.data.observaciones_map || {});
+        
+        showMsg('success', `${ids.length} cuentas cargadas desde archivo.`);
+        
+        // Recargar tabla para reflejar las nuevas seleccionadas
+        // (el endpoint debe devolver las cuentas del CSV como "seleccionadas")
     } catch (err) {
-      showMsg('error', err.response?.data?.detail || 'Error leyendo archivo.');
+        showMsg('error', err.response?.data?.detail || 'Error leyendo archivo.');
     } finally {
-      setCsvLoading(false);
+        setCsvLoading(false);
     }
-  };
+};
 
   // ---------- Continuar ----------
   const continuar = async () => {
@@ -197,10 +236,11 @@ export default function Preparacion() {
         // TODO: abrir modal de errores
       } else {
         showMsg('success', res.data.message);
+        localStorage.removeItem(`trinnova_orden_${proyectoSlug}`);
         setTimeout(() => {
           navigate('/emision/emitir', { state: { proyectoSlug } });
         }, 800);
-      }
+            }
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al preparar.');
     } finally {
@@ -372,7 +412,7 @@ export default function Preparacion() {
                   : 'No hay cuentas para este proyecto.'}
               </td></tr>
             ) : rows.map(r => {
-              const pkVal = r[pk];
+              const pkVal = String(r[pk] ?? '');
               const isSel = selected.has(pkVal);
               const viab = r.viabilidad || 'pendiente';
               const cfg = VIABILIDAD_CFG[viab] || VIABILIDAD_CFG.pendiente;

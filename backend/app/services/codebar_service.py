@@ -26,52 +26,57 @@ class CodebarService:
         fecha_emision: Optional[datetime] = None,
         visita: Optional[str] = None,
         identificador_documento: Optional[str] = None,
-        id_documento: Optional[int] = None  # ← AGREGADO para compatibilidad
+        id_documento: Optional[int] = None,
+        sufijo_pensiones: Optional[str] = None,
     ) -> str:
         """
-        Genera código de barras con formato: *PK+FECHA+IDENTIFICADOR+VISITA*
-        
-        Args:
-            pk_value: Valor de la llave primaria (ej: cuenta, crédito, préstamo)
-            fecha_emision: Fecha de emisión del documento (default: ahora)
-            visita: Número de visita (ej: "1", "2", "3")
-            identificador_documento: Identificador del documento (ej: "N", "R", "A")
-            id_documento: ID del documento (alternativa a identificador_documento)
-            
-        Returns:
-            str: Código de barras en formato Código 39 con asteriscos (*codigo*)
+        Genera código de barras con formato:
+        *{pk}{fecha_excel}{documento}{visita}{sufijo}*
+
+        Ejemplos:
+        General:  *1234546308N1*
+        Afiliado: *1234546308N1AF*
+        Aval:     *1234546308N1AV*
+        Garantía: *1234546308N1GA*
         """
-        # Fecha por defecto
         if fecha_emision is None:
             fecha_emision = datetime.now()
-        
-        # Si se pasa id_documento pero no identificador_documento,
-        # obtener el identificador del catálogo (solo si está disponible)
+
         if id_documento and not identificador_documento:
-            # Intentar obtener de la BD (opcional - se puede hacer en el caller)
             identificador_documento = CodebarService._get_identificador_from_db(id_documento)
-        
-        # Fecha base Excel (1899-12-30)
+
+        # Fecha serial Excel (días desde 1899-12-30)
         fecha_base_excel = datetime(1899, 12, 30)
-        
-        # 1. PK COMPLETA (NO TRUNCADA)
-        pk_completa = str(pk_value)
-        
-        # 2. Fecha serial (días transcurridos desde 1899-12-30)
         fecha_str = str((fecha_emision - fecha_base_excel).days)
-        
-        # 3. Identificador del documento (N, R, A...)
+
+        # Componentes
+        pk_completa = str(pk_value)
         ident_str = str(identificador_documento).upper() if identificador_documento else ""
-        
-        # 4. Visita (número)
         visita_str = str(visita).strip() if visita else ""
-        
-        # Combinar todo
-        codigo = f"{pk_completa}{fecha_str}{ident_str}{visita_str}"
-        
-        # Retornar formato Código 39
+        sufijo_str = str(sufijo_pensiones).upper() if sufijo_pensiones else ""
+
+        # Construir código
+        codigo = f"{pk_completa}{fecha_str}{ident_str}{visita_str}{sufijo_str}"
+
         return f"*{codigo.upper()}*"
     
+    @staticmethod
+    def agregar_sufijo_pensiones(codebar: str, sufijo: str) -> str:
+        """
+        Toma un codebar ya generado tipo *1234546308N1*
+        y le agrega el sufijo antes del último asterisco:
+        *1234546308N1AF*
+
+        Si el codebar no tiene asteriscos, los agrega.
+        """
+        if not codebar or not sufijo:
+            return codebar
+        cb = codebar.strip()
+        sufijo = sufijo.upper().strip()
+        if cb.startswith("*") and cb.endswith("*"):
+            return f"{cb[:-1]}{sufijo}*"
+        return f"*{cb}{sufijo}*"
+
     # ============================================================
     # MÉTODO ALIAS - PARA COMPATIBILIDAD CON CÓDIGO EXISTENTE
     # ============================================================

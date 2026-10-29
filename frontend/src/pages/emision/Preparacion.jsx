@@ -1,5 +1,5 @@
 // frontend/src/pages/emision/Preparacion.jsx
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/auth';
 import { useProyecto } from '../../hooks/useProyecto';
@@ -71,6 +71,8 @@ export default function Preparacion() {
     setSearchQuery('');
     setFiltroViabilidad('');
   }, [proyectoSlug]);
+
+  const fileInputRef = useRef();
 
   // ---------- Mensajes ----------
   const showMsg = useCallback((type, text) => {
@@ -305,16 +307,30 @@ export default function Preparacion() {
             onChange={setProyectoSlug}
           />
 
-          <label className="prep-btn">
-            {csvLoading ? 'Cargando…' : '📂 Subir CSV/Excel'}
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              style={{ display: 'none' }}
-              onChange={e => handleCsv(e.target.files[0])}
-              disabled={csvLoading}
-            />
-          </label>
+          <div 
+              className="prep-dropzone"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      handleCsv(e.dataTransfer.files[0]);
+                  }
+              }}
+              onClick={() => fileInputRef.current?.click()}
+          >
+              <input 
+                  type="file" 
+                  accept=".csv, .xlsx, .xls" 
+                  style={{ display: 'none' }} 
+                  ref={fileInputRef}
+                  onChange={(e) => handleCsv(e.target.files[0])}
+                  disabled={csvLoading}
+              />
+              <span>{csvLoading ? 'Cargando archivo...' : '📂 Arrastra tu CSV/Excel aquí o haz clic para buscar'}</span>
+          </div>
+          <div style={{ fontSize: '12px', color: '#718096', marginTop: '-4px', marginBottom: '8px' }}>
+              El archivo debe contener las columnas: <strong>prestamo</strong> (o la PK del proyecto), <strong>orden_impresion</strong> y <strong>observaciones</strong> (opcional).
+          </div>
 
           <button
             className="prep-btn prep-btn--primary"

@@ -313,6 +313,29 @@
 }
 
 /* ---------- Modal ---------- */
+
+.prep-dropzone {
+    border: 2px dashed var(--clr-border);
+    border-radius: var(--radius);
+    padding: 10px 20px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--clr-text);
+    background: var(--clr-white);
+    transition: all 0.2s;
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 38px; /* Para que empate con los demás botones */
+}
+.prep-dropzone:hover {
+    border-color: var(--clr-accent);
+    background: var(--clr-accent-lt);
+    color: var(--clr-accent);
+}
+
 .prep-overlay {
   position: fixed;
   inset: 0;

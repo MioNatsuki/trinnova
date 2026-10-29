@@ -50,7 +50,7 @@ ALTURAS_ESPECIALES = {
 PLACEHOLDER_ALIASES = {
     "pensiones": {
         "orden":           "orden_impresion",
-        "subestatus":      "sub_estatus_id",
+        "subestatus":      "sub_estatus_id",   
         "afiliado":        "numero_afiliado",
         "aval_nombre":     "nombre_aval",
         "afiliado_cruza1": "cruce_1",
@@ -58,7 +58,6 @@ PLACEHOLDER_ALIASES = {
         "observaciones":   "obs",
         "ultimo_abono":    "ultimo_abono_modificado",
     },
-    # Aquí irán los de los demás proyectos cuando los normalicemos
 }
 
 # ============================================================
@@ -417,7 +416,7 @@ class PlantillaRenderer:
     
     async def render_batch_pdfs(
         self,
-        nombre_archivo: str,
+        nombre_archivo: str,            
         placeholders_list: List[Dict[str, str]],
         max_concurrent: int = 10,
         altura: Optional[int] = None,

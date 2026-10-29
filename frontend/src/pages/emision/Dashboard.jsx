@@ -23,6 +23,7 @@ export default function DashboardEmision() {
   const [showModal, setShowModal]       = useState(false);
   const [jobActivo, setJobActivo]       = useState(null);
   const [jobsRecientes, setJobsRecientes] = useState([]);
+  const [filtroPrograma, setFiltroPrograma] = useState('');
 
   useEffect(() => {
     if (location.state?.proyectoSlug) {
@@ -40,11 +41,14 @@ export default function DashboardEmision() {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
-      const res = await api.get(`/emision/${proyectoSlug}/tabla-temporal`, {
-        params: { page, limit }
-      });
-      setRows(res.data.rows || []);
-      setTotal(res.data.total || 0);
+        const params = { page, limit };
+        if (filtroPrograma && filtroPrograma !== 'todos') {
+            params.programa = filtroPrograma;
+        }
+        
+        const res = await api.get(`/emision/${proyectoSlug}/tabla-temporal`, { params });
+        setRows(res.data.rows || []);
+        setTotal(res.data.total || 0);
       setPk(res.data.pk || 'codebar');
       setClave(res.data.clave || 'id');
     } catch (err) {
@@ -52,7 +56,7 @@ export default function DashboardEmision() {
     } finally {
       setLoading(false);
     }
-  }, [proyectoSlug, page, limit]);
+  }, [proyectoSlug, page, limit, filtroPrograma]);
 
   const cargarJobs = useCallback(async () => {
     try {
@@ -91,6 +95,19 @@ export default function DashboardEmision() {
             value={proyectoSlug}
             onChange={setProyectoSlug}
           />
+          
+          {/* NUEVO FILTRO DE PROGRAMA */}
+          <select 
+              className="prep-select" 
+              value={filtroPrograma} 
+              onChange={(e) => { setFiltroPrograma(e.target.value); setPage(1); }}
+          >
+              <option value="">Todos los programas</option>
+              <option value="PLMP">PLMP</option>
+              <option value="PCP">PCP</option>
+              {/* Agrega aquí los demás programas que uses */}
+          </select>
+
           <button
             className="btn-primary"
             onClick={() => setShowModal(true)}

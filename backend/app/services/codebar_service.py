@@ -109,39 +109,34 @@ class CodebarService:
  
     @staticmethod
     def inject_codebar_style(html_content: str) -> str:
-        """
-        Inyecta @font-face + clase .codebar. Idempotente.
-        IMPORTANTE: ya no depende de encontrar '{{codebar}}' (el renderer lo reemplaza
-        ANTES de llamar a este método, por eso antes nunca se aplicaba la fuente).
-        """
         if "IDAutomationHC39M" in html_content:
             return html_content
- 
-        if not _FONT_PATH.exists():
-            # Mejor fallar fuerte que generar 10,000 PDFs con texto plano en vez de barras
-            raise FileNotFoundError(f"No existe la fuente del código de barras: {_FONT_PATH}")
- 
-        font_b64 = base64.b64encode(_FONT_PATH.read_bytes()).decode("utf-8")
- 
+
+        font_path = Path(__file__).parent.parent / "assets" / "fonts" / "IDAutomationHC39M.ttf"
+        if not font_path.exists():
+            raise FileNotFoundError(f"No existe la fuente del código de barras: {font_path}")
+
+        import base64
+        font_b64 = base64.b64encode(font_path.read_bytes()).decode("utf-8")
+
         style = f"""
-                <style>
-                @font-face {{
-                    font-family: 'IDAutomationHC39M';
-                    src: url('data:font/truetype;base64,{font_b64}') format('truetype');
-                    font-weight: normal;
-                    font-style: normal;
-                }}
-                .codebar {{
-                    font-family: 'IDAutomationHC39M' !important;
-                    font-size: 16px !important;      /* 10px es demasiado chico para que las barras se lean */
-                    font-weight: 400 !important;     /* si el padre es bold, Chromium "engorda" las barras y se rompen */
-                    font-style: normal !important;
-                    letter-spacing: 0 !important;
-                    line-height: 1 !important;
-                    white-space: pre !important;
-                }}
-                </style>
-                """
+            <style>
+            @font-face {{
+                font-family: 'IDAutomationHC39M';
+                src: url('data:font/truetype;charset=utf-8;base64,{font_b64}') format('truetype');
+                font-weight: normal;
+                font-style: normal;
+            }}
+            .codebar {{
+                font-family: 'IDAutomationHC39M' !important;
+                font-weight: normal !important;
+                font-style: normal !important;
+                letter-spacing: 0px !important;
+                line-height: 1 !important;
+                white-space: pre !important;
+            }}
+            </style>
+        """
         if "</head>" in html_content:
             return html_content.replace("</head>", style + "</head>", 1)
         return style + html_content

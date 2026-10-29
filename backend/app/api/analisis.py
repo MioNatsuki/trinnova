@@ -545,6 +545,21 @@ def _get_tabla_cols(db_session, tabla: str) -> List[str]:
     rows = db_session.execute(text(f"SHOW COLUMNS FROM `{tabla}`")).fetchall()
     return [r[0] for r in rows]
 
+def _resolver_columna_programa(db_proyecto, tablas: List[str]) -> Optional[str]:
+    """
+    Devuelve 'tabla.col' del lugar donde exista la columna `programa`,
+    o None si no existe en ninguna de las tablas indicadas.
+    Orden de preferencia: el orden de `tablas`.
+    """
+    for tabla in tablas:
+        try:
+            cols = _get_tabla_cols(db_proyecto, tabla)
+            if "programa" in cols:
+                return f"{tabla}.`programa`"
+        except Exception:
+            continue
+    return None
+
 def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str], proyecto_slug: str) -> str:
     """
     Construye el SQL para insertar datos en tabla_analisis.
@@ -665,6 +680,7 @@ def get_programas(
 
     check_project_access(proyecto_slug, current_user, db_global)
 
+    # 1) Catálogo en db_global
     try:
         proyecto = db_global.execute(
             text("SELECT id FROM proyectos WHERE slug = :s AND activo = 1"),
@@ -685,15 +701,38 @@ def get_programas(
     except Exception:
         pass
 
+    # 2) Fallback: tabla_programas en la BD del proyecto
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
     try:
-        rows = db_proyecto.execute(
-            text("SELECT id, nombre, slug FROM tabla_programas WHERE activo = 1 ORDER BY nombre")
-        ).fetchall()
-        return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
-    except Exception:
-        return []
+        try:
+            rows = db_proyecto.execute(
+                text("SELECT id, nombre, slug FROM tabla_programas WHERE activo = 1 ORDER BY nombre")
+            ).fetchall()
+            if rows:
+                return [{"id": r.id, "nombre": r.nombre, "slug": r.slug} for r in rows]
+        except Exception:
+            pass
+
+        # 3) Fallback final: DISTINCT de programa donde exista la columna
+        col = _resolver_columna_programa(
+            db_proyecto,
+            ["tabla_analisis", "tabla_padron", "tabla_complementaria"],
+        )
+        if not col:
+            return []
+        try:
+            rows = db_proyecto.execute(text(
+                f"SELECT DISTINCT `programa` FROM {col.split('.`')[0]} "
+                f"WHERE `programa` IS NOT NULL AND `programa` <> '' "
+                f"ORDER BY `programa`"
+            )).fetchall()
+            return [
+                {"id": i, "nombre": r[0], "slug": str(r[0]).lower().replace(' ', '_')}
+                for i, r in enumerate(rows, start=1)
+            ]
+        except Exception:
+            return []
     finally:
         db_gen.close()
 
@@ -1046,8 +1085,13 @@ def get_complementar(
         params["search"] = f"%{search}%"
 
     if programa and programa != "todos":
-        conditions.append("p.`programa` = :programa")
-        params["programa"] = programa
+        col_programa = _resolver_columna_programa(
+            db_proyecto,
+            ["tabla_padron", "tabla_complementaria"],
+        )
+        if col_programa:
+            conditions.append(f"{col_programa} = :programa")
+            params["programa"] = programa
 
     where = " AND ".join(conditions)
     db_gen = get_project_db(proyecto_slug)
@@ -1618,47 +1662,69 @@ def get_analisis(
     check_project_access(proyecto_slug, current_user, db_global)
     info = _info(proyecto_slug)
     pk = info["pk"]
-    conditions = []
-    params: Dict[str, Any] = {}
 
-    if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
-        conditions.append("viabilidad = :viabilidad")
-        params["viabilidad"] = viabilidad
-
-    if programa and programa != "todos":
-        conditions.append("`programa` = :programa")
-        params["programa"] = programa
-
-    if busqueda:
-        search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
-        parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols]
-        conditions.append("(" + " OR ".join(parts) + ")")
-        params["busqueda"] = f"%{busqueda}%"
-
-    where = " AND ".join(conditions) if conditions else "1=1"
+    # ============================================================
+    # ABRIR LA CONEXIÓN AL PROYECTO UNA SOLA VEZ
+    # ============================================================
     db_gen = get_project_db(proyecto_slug)
     db_proyecto = next(db_gen)
 
     try:
+        # Columnas reales de tabla_analisis (fuente de verdad)
         cols_validas = set(_get_tabla_cols(db_proyecto, "tabla_analisis"))
-        order_col = pk
+
+        conditions = []
+        params: Dict[str, Any] = {}
+
+        # ----- Filtro viabilidad -----
+        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+            conditions.append("viabilidad = :viabilidad")
+            params["viabilidad"] = viabilidad
+
+        # ----- Filtro programa (solo si la columna existe) -----
+        if programa and programa != "todos" and "programa" in cols_validas:
+            conditions.append("`programa` = :programa")
+            params["programa"] = programa
+
+        # ----- Búsqueda general -----
+        if busqueda:
+            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
+            parts = [f"CAST(`{c}` AS CHAR) LIKE :busqueda" for c in search_cols if c in cols_validas]
+            if parts:
+                conditions.append("(" + " OR ".join(parts) + ")")
+                params["busqueda"] = f"%{busqueda}%"
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+
+        # ----- Ordenamiento -----
+        order_col = pk if pk in cols_validas else "1"
         if sort_col and sort_col in cols_validas:
             order_col = sort_col
         order_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
 
+        # ----- Total -----
         total = db_proyecto.execute(
-            text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"), params
+            text(f"SELECT COUNT(*) AS total FROM tabla_analisis WHERE {where}"),
+            params,
         ).first().total
 
+        # ----- Página -----
         offset = (page - 1) * limit
         rows = db_proyecto.execute(
-            text(f"SELECT * FROM tabla_analisis WHERE {where} ORDER BY `{order_col}` {order_dir} LIMIT {limit} OFFSET {offset}"),
+            text(
+                f"SELECT * FROM tabla_analisis "
+                f"WHERE {where} "
+                f"ORDER BY `{order_col}` {order_dir} "
+                f"LIMIT {limit} OFFSET {offset}"
+            ),
             params,
         ).fetchall()
 
+        # ----- Enriquecer cada fila con display helpers -----
         result = []
         for r in rows:
             row_dict = dict(r._mapping)
+
             adeudo_val = 0
             for col in info["col_adeudo"]:
                 v = row_dict.get(col)
@@ -1669,6 +1735,7 @@ def get_analisis(
                     except (TypeError, ValueError):
                         pass
             row_dict["_adeudo_display"] = adeudo_val
+
             nombre_val = ""
             for col in info["col_nombre"]:
                 v = row_dict.get(col)
@@ -1676,6 +1743,7 @@ def get_analisis(
                     nombre_val = str(v)
                     break
             row_dict["_nombre_display"] = nombre_val
+
             calle_val = ""
             for col in info["col_calle"]:
                 v = row_dict.get(col)
@@ -1683,9 +1751,17 @@ def get_analisis(
                     calle_val = str(v)
                     break
             row_dict["_calle_display"] = calle_val
+
             result.append(row_dict)
 
-        return {"rows": result, "total": total, "page": page, "limit": limit, "pk": pk}
+        return {
+            "rows": result,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pk": pk,
+        }
+
     finally:
         db_gen.close()
 

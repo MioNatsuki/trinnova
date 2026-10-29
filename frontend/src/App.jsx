@@ -16,6 +16,10 @@ import {
   NavigationGuardProvider
 } from './context/NavigationGuardContext';
 
+import {
+  NotificationProvider
+} from './pages/emision/Notificaciones';
+
 import Login from './components/auth/Login';
 import Layout from './components/layout/Layout';
 
@@ -276,7 +280,11 @@ function App() {
 
       <AuthProvider>
 
-        <AppRoutes />
+        <NotificationProvider>
+
+          <AppRoutes />
+
+        </NotificationProvider>
 
       </AuthProvider>
 

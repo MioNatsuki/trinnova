@@ -47,19 +47,6 @@ ALTURAS_ESPECIALES = {
     "predial_tlajomulco": {"predial_tlajomulco.html": 1286},
 }
 
-PLACEHOLDER_ALIASES = {
-    "pensiones": {
-        "orden":           "orden_impresion",
-        "subestatus":      "sub_estatus_id",   
-        "afiliado":        "numero_afiliado",
-        "aval_nombre":     "nombre_aval",
-        "afiliado_cruza1": "cruce_1",
-        "afiliado_cruza2": "cruce_2",
-        "observaciones":   "obs",
-        "ultimo_abono":    "ultimo_abono_modificado",
-    },
-}
-
 # ============================================================
 # CLASE PRINCIPAL
 # ============================================================
@@ -88,20 +75,6 @@ class PlantillaRenderer:
         if not self.base_path.exists():
             raise FileNotFoundError(f"No se encontró la carpeta de plantillas para: {proyecto_slug}")
     
-    def _aplicar_aliases(self, placeholders: Dict[str, str]) -> Dict[str, str]:
-        """
-        Mapea placeholders de la plantilla a columnas reales de BD.
-        Solo agrega el alias si:
-        - el alias NO está ya en placeholders
-        - la columna real SÍ está en placeholders
-        """
-        aliases = PLACEHOLDER_ALIASES.get(self.proyecto_slug, {})
-        ph = dict(placeholders)
-        for alias, col_real in aliases.items():
-            if alias not in ph and col_real in ph:
-                ph[alias] = ph[col_real]
-        return ph
-
     # ============================================================
     # GESTIÓN DEL NAVEGADOR (SINGLETON GLOBAL)
     # ============================================================
@@ -355,9 +328,12 @@ class PlantillaRenderer:
         # APLICAR FORMATOS
         # ============================================================
         from app.services.formatters import (
+            aplicar_aliases,
             aplicar_formato_fechas,
             aplicar_formato_moneda,
         )
+
+        todos_placeholders = aplicar_aliases(todos_placeholders, self.proyecto_slug)
         todos_placeholders = aplicar_formato_fechas(todos_placeholders, self.proyecto_slug)
         todos_placeholders = aplicar_formato_moneda(todos_placeholders, self.proyecto_slug)
         

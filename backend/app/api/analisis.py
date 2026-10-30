@@ -560,6 +560,33 @@ def _resolver_columna_programa(db_proyecto, tablas: List[str]) -> Optional[str]:
             continue
     return None
 
+def _valores_programa(db_global, proyecto_slug: str, programa: str) -> List[str]:
+    """
+    El dropdown manda el slug, pero la columna `programa` guarda texto libre.
+    Devuelve todos los valores posibles (slug, nombre, variantes) para usar con IN.
+    """
+    from sqlalchemy import text
+    base = str(programa).strip()
+    valores = {base, base.replace("_", " ")}
+    try:
+        rows = db_global.execute(
+            text("""
+                SELECT pr.nombre, pr.slug
+                FROM programas pr
+                JOIN proyectos p ON p.id = pr.id_proyecto
+                WHERE p.slug = :ps AND (pr.slug = :v OR pr.nombre = :v)
+            """),
+            {"ps": proyecto_slug, "v": base},
+        ).fetchall()
+        for r in rows:
+            if r.nombre:
+                valores.add(str(r.nombre).strip())
+            if r.slug:
+                valores.add(str(r.slug).strip())
+    except Exception:
+        pass
+    return [v for v in valores if v]
+
 def _build_analisis_insert(db_session, pk: str, cols_complementaria: List[str], proyecto_slug: str) -> str:
     """
     Construye el SQL para insertar datos en tabla_analisis.
@@ -1683,8 +1710,11 @@ def get_analisis(
 
         # ----- Filtro programa (solo si la columna existe) -----
         if programa and programa != "todos" and "programa" in cols_validas:
-            conditions.append("`programa` = :programa")
-            params["programa"] = programa
+            vals = _valores_programa(db_global, proyecto_slug, programa)
+            ph = ", ".join(f":prog{i}" for i in range(len(vals)))
+            conditions.append(f"`programa` IN ({ph})")
+            for i, v in enumerate(vals):
+                params[f"prog{i}"] = v
 
         # ----- Búsqueda general -----
         if busqueda:

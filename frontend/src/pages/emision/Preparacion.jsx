@@ -55,6 +55,10 @@ export default function Preparacion() {
   const [guardando, setGuardando]     = useState(false);
   const [showConfirmAll, setShowConfirmAll] = useState(false);
 
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFile, setCsvFile]           = useState(null);
+  const [csvResult, setCsvResult]       = useState(null);
+
   // ---------- Efecto de proyecto desde navegación ----------
   useEffect(() => {
     if (location.state?.proyectoSlug) {
@@ -181,38 +185,62 @@ export default function Preparacion() {
 };
 
   // ---------- CSV ----------
-  const handleCsv = async (file) => {
-    if (!file) return;
+  const openCsvModal = () => {
+    setCsvFile(null);
+    setCsvResult(null);
+    setShowCsvModal(true);
+  };
+
+  const closeCsvModal = () => {
+    if (csvLoading) return;
+    if (csvFile && !csvResult &&
+        !window.confirm('Tienes un archivo seleccionado sin cargar. ¿Cerrar de todas formas?')) {
+      return;
+    }
+    setShowCsvModal(false);
+    setCsvFile(null);
+    setCsvResult(null);
+  };
+
+  const handleCsvUpload = async () => {
+    if (!csvFile) return;
     setCsvLoading(true);
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', csvFile);
     try {
-        const res = await api.post(
-            `/emision/${proyectoSlug}/seleccionar-cuentas-csv`,
-            fd,
-            { headers: { 'Content-Type': 'multipart/form-data' } }
-        );
-        
-        const ids = (res.data.ids || []).map(String);
-        const om = {};
-        Object.entries(res.data.orden_map || {}).forEach(([k, v]) => {
-            om[String(k)] = parseInt(v, 10);
-        });
-        
-        setSelected(new Set(ids));
-        setOrdenMap(om);
-        setObservacionesMap(res.data.observaciones_map || {});
-        
-        showMsg('success', `${ids.length} cuentas cargadas desde archivo.`);
-        
-        // Recargar tabla para reflejar las nuevas seleccionadas
-        // (el endpoint debe devolver las cuentas del CSV como "seleccionadas")
+      const res = await api.post(
+        `/emision/${proyectoSlug}/seleccionar-cuentas-csv`,
+        fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      const ids = (res.data.ids || []).map(String);
+      const om = {};
+      Object.entries(res.data.orden_map || {}).forEach(([k, v]) => {
+        om[String(k)] = parseInt(v, 10);
+      });
+      setSelected(new Set(ids));
+      setOrdenMap(om);
+
+      const conOrden = Object.keys(om).length;
+      setCsvResult({
+        success: true,
+        message: `${ids.length} cuentas cargadas desde el archivo.` +
+                 (conOrden ? ` ${conOrden} con orden asignado.` : ''),
+      });
+      setTimeout(() => {
+        setShowCsvModal(false);
+        setCsvResult(null);
+        setCsvFile(null);
+      }, 1500);
     } catch (err) {
-        showMsg('error', err.response?.data?.detail || 'Error leyendo archivo.');
+      setCsvResult({
+        success: false,
+        message: err.response?.data?.detail || 'Error leyendo archivo.',
+      });
     } finally {
-        setCsvLoading(false);
+      setCsvLoading(false);
     }
-};
+  };
 
   // ---------- Continuar ----------
   const continuar = async () => {
@@ -307,30 +335,14 @@ export default function Preparacion() {
             onChange={setProyectoSlug}
           />
 
-          <div 
-              className="prep-dropzone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                  e.preventDefault();
-                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                      handleCsv(e.dataTransfer.files[0]);
-                  }
-              }}
-              onClick={() => fileInputRef.current?.click()}
-          >
-              <input 
-                  type="file" 
-                  accept=".csv, .xlsx, .xls" 
-                  style={{ display: 'none' }} 
-                  ref={fileInputRef}
-                  onChange={(e) => handleCsv(e.target.files[0])}
-                  disabled={csvLoading}
-              />
-              <span>{csvLoading ? 'Cargando archivo...' : '📂 Arrastra tu CSV/Excel aquí o haz clic para buscar'}</span>
-          </div>
-          <div style={{ fontSize: '12px', color: '#718096', marginTop: '-4px', marginBottom: '8px' }}>
-              El archivo debe contener las columnas: <strong>prestamo</strong> (o la PK del proyecto), <strong>orden_impresion</strong> y <strong>observaciones</strong> (opcional).
-          </div>
+          <button className="prep-btn" onClick={openCsvModal}
+            title="Cargar cuentas y orden de impresión desde CSV o Excel">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>
+            </svg>
+            Cargar CSV
+          </button>
 
           <button
             className="prep-btn prep-btn--primary"
@@ -562,6 +574,53 @@ export default function Preparacion() {
           </div>
         </div>
       )}
+
+      {showCsvModal && (
+        <div className="prep-overlay" onClick={closeCsvModal}>
+          <div className="prep-modal prep-modal--csv" onClick={e => e.stopPropagation()}>
+            <div className="prep-modal-head">
+              <h3>Cargar cuentas desde CSV / Excel</h3>
+              <button className="prep-modal-x" onClick={closeCsvModal}>✕</button>
+            </div>
+            <p className="prep-modal-desc">
+              Columnas aceptadas: <code>{pk}</code> (requerida; también se acepta{' '}
+              <code>prestamo</code>, <code>cuenta</code>…) ·{' '}
+              <code>orden_impresion</code> (opcional)
+            </p>
+
+            <div
+              className="prep-csv-drop"
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={e => { e.preventDefault(); setCsvFile(e.dataTransfer.files[0] || null); }}
+              onDragOver={e => e.preventDefault()}
+            >
+              <input type="file" accept=".csv,.xlsx,.xls" ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={e => setCsvFile(e.target.files[0] || null)} />
+              {csvFile
+                ? <><span className="prep-csv-ok">✓</span><span>{csvFile.name}</span></>
+                : <><span className="prep-csv-ok">📂</span><span>Arrastra aquí o haz clic</span></>}
+            </div>
+
+            {csvResult && (
+              <div className={`prep-csv-result ${csvResult.success ? 'ok' : 'err'}`}>
+                {csvResult.message}
+              </div>
+            )}
+
+            <div className="prep-modal-actions">
+              <button className="prep-btn" onClick={closeCsvModal} disabled={csvLoading}>
+                Cerrar
+              </button>
+              <button className="prep-btn prep-btn--primary" onClick={handleCsvUpload}
+                disabled={!csvFile || csvLoading}>
+                {csvLoading ? 'Cargando…' : 'Cargar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 }

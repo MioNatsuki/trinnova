@@ -302,3 +302,27 @@ def reemplazar_vacios(placeholders: dict, default: str = '-') -> dict:
         else:
             ph[k] = v
     return ph
+
+PLACEHOLDER_ALIASES = {
+    "pensiones": {
+        "orden":           "orden_impresion",
+        "subestatus":      "sub_estatus_id",
+        "afiliado":        "numero_afiliado",
+        "aval_nombre":     "nombre_aval",
+        "afiliado_cruza1": "cruce_1",
+        "afiliado_cruza2": "cruce_2",
+        "observaciones":   "obs",
+        "ultimo_abono":    "ultimo_abono_modificado",
+    },
+}
+
+def aplicar_aliases(placeholders: dict, proyecto_slug: str) -> dict:
+    """
+    Agrega el alias solo si NO existe ya en placeholders y la columna real SÍ existe.
+    """
+    aliases = PLACEHOLDER_ALIASES.get(proyecto_slug, {})
+    ph = dict(placeholders)
+    for alias, col_real in aliases.items():
+        if alias not in ph and col_real in ph:
+            ph[alias] = ph[col_real]
+    return ph

@@ -124,6 +124,23 @@
       color: #0c0000;
     }
 
+    /* ===== Cuadro de datos (página 1) ===== */
+    .dat { position: absolute; left: 45px; top: 65px; width: 728px; height: 322px;
+          border: 1px solid #7f56c5; border-bottom: 3px solid #7f56c5; background: #fff;
+          display: flex; flex-direction: column; }
+    .dat .hd { flex: none; background: #7f56c5; color: #fff; font-size: 7px; font-weight: 700;
+              height: 11px; line-height: 11px; padding-left: 4px; text-transform: uppercase; }
+    .dat .fila { flex: none; display: grid; border-bottom: 1px solid #000; }
+    .dat .c { padding: 3px 4px 2px 8px; min-width: 0; }
+    .dat .l { font-size: 6px; font-weight: 600; line-height: 7px; text-transform: uppercase; color: #222; }
+    .dat .v { font-size: 10px; line-height: 13px; min-height: 13px; }
+    .dat .v2 { font-size: 10px; line-height: 13px; min-height: 17px; padding: 2px 4px 2px 8px; }
+    .dat .obs { flex: 1; padding: 4px 8px; font-size: 10px; line-height: 14px; }
+
+    /* ===== Texto legal ===== */
+    .legal p { font-size: 12px; line-height: 1.5; margin: 0 0 3px; }
+    .imp p { font-size: 12px; line-height: 1.3; margin: 0 0 12px; }
+
     /* Media print */
     @media print {
       body {
@@ -144,157 +161,121 @@
 <!-- ==================== PÁGINA 1: FRENTE ==================== -->
 <div class="pagina-container">
   <div class="pagina" style="position: relative;">
-    
+
     <!-- Título principal -->
-    <div style="position: absolute; left: 327px; top: 31px; font-size: 11px; font-weight: 700; text-align: center;">Requerimiento de Pago Vencido</div>
-    
-    <!-- Caja grande que contiene DATOS DEL AFILIADO, AVAL, GARANTÍA y OBSERVACIONES -->
-    <div class="caja-borde" style="position: absolute; left: 45px; top: 72px; width: 728px; height: 270px;">
+    <div style="position: absolute; left: 0; top: 34px; width: 100%; text-align: center; font-size: 13px; font-weight: 700;">Requerimiento de Pago Vencido</div>
 
-        <!-- CABECERAS DE SECCIÓN -->
-        <div style="position: absolute; left: 0; top: 0; width: 728px; height: 13px; background: #7f56c5;"></div>
-        <div style="position: absolute; left: 4px; top: 2px; color: white; font-size: 8px; font-weight: 700;">DATOS DEL AFILIADO</div>
-
-        <div style="position: absolute; left: 0; top: 103px; width: 728px; height: 13px; background: #7f56c5;"></div>
-        <div style="position: absolute; left: 4px; top: 106px; color: white; font-size: 8px; font-weight: 700;">DATOS DEL AVAL</div>
-
-        <div style="position: absolute; left: 0; top: 176px; width: 728px; height: 13px; background: #7f56c5;"></div>
-        <div style="position: absolute; left: 4px; top: 179px; color: white; font-size: 8px; font-weight: 700;">DATOS DE LA GARANTÍA</div>
-
-        <div style="position: absolute; left: 0; top: 219px; width: 728px; height: 13px; background: #7f56c5;"></div>
-        <div style="position: absolute; left: 4px; top: 222px; color: white; font-size: 8px; font-weight: 700;">OBSERVACIONES</div>
-
-        <!-- ===== DATOS DEL AFILIADO ===== -->
-        <div style="position: absolute; left: 8px; top: 33px; font-size: 6px; font-weight: 600;">NOMBRE DEL AFILIADO</div>
-        <div style="position: absolute; left: 8px; top: 15px; font-size: 10px; font-weight: 600;">{{nombre}}</div>
-
-        <div style="position: absolute; left: 8px; top: 68px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
-        <div style="position: absolute; left: 8px; top: 42px; font-size: 10px; font-weight: 600;">{{afiliado_calle}} {{afiliado_exterior}} {{afiliado_interior}} COLONIA: {{afiliado_colonia}} POBLACIÓN: {{afiliado_poblacion}} MUNICIPIO: {{afiliado_municipio}}</div>
-
-        <div style="position: absolute; left: 8px; top: 93px; font-size: 6px; font-weight: 600;">C.P.</div>
-        <div style="position: absolute; left: 8px; top: 75px; font-size: 10px; font-weight: 600;">{{afiliado_cp}}</div>
-
-        <div style="position: absolute; left: 147px; top: 93px; font-size: 6px; font-weight: 600;">TELÉFONO</div>
-        <div style="position: absolute; left: 113px; top: 75px; font-size: 10px; font-weight: 600;">{{afiliado_lada}} {{afiliado_telefono}}</div>
-
-        <div style="position: absolute; left: 316px; top: 93px; font-size: 6px; font-weight: 600;">CELULAR</div>
-        <div style="position: absolute; left: 305px; top: 75px; font-size: 10px; font-weight: 600;">{{afiliado_celular}}</div>
-
-        <div style="position: absolute; left: 484px; top: 33px; font-size: 6px; font-weight: 600;">NÚMERO DE AFILIADO</div>
-        <div style="position: absolute; left: 484px; top: 15px; font-size: 10px; font-weight: 600;">{{afiliado}}</div>
-
-        <div style="position: absolute; left: 617px; top: 33px; font-size: 6px; font-weight: 600;">NÚMERO DE PRÉSTAMO</div>
-        <div style="position: absolute; left: 617px; top: 15px; font-size: 10px; font-weight: 600;">{{prestamo}}</div>
-
-        <div style="position: absolute; left: 617px; top: 93px; font-size: 6px; font-weight: 600;">TIPO DE PRÉSTAMO</div>
-        <div style="position: absolute; left: 617px; top: 75px; font-size: 10px; font-weight: 600;">{{tipo_prestamo}}</div>
-
-        <!-- Líneas divisoras en DATOS DEL AFILIADO -->
-        <div class="linea-divisora" style="top: 28px;"></div>
-        <div class="linea-divisora" style="top: 65px;"></div>
-        <div class="linea-divisora" style="top: 88px;"></div>
-
-        <!-- ===== DATOS DEL AVAL ===== -->
-        <div style="position: absolute; left: 8px; top: 136px; font-size: 6px; font-weight: 600;">NOMBRE DEL AVAL</div>
-        <div style="position: absolute; left: 8px; top: 118px; font-size: 10px; font-weight: 600;">{{aval_nombre}}</div>
-
-        <div style="position: absolute; left: 8px; top: 166px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
-        <div style="position: absolute; left: 8px; top: 148px; font-size: 10px; font-weight: 600;">{{aval_calle}} {{aval_exterior}} {{aval_interior}} COLONIA: {{aval_colonia}} MUNICIPIO: {{aval_municipio}}</div>
-
-        <div style="position: absolute; left: 484px; top: 136px; font-size: 6px; font-weight: 600;">TELÉFONO</div>
-        <div style="position: absolute; left: 484px; top: 118px; font-size: 10px; font-weight: 600;">{{aval_telefono}}</div>
-
-        <div style="position: absolute; left: 617px; top: 136px; font-size: 6px; font-weight: 600;">CELULAR</div>
-        <div style="position: absolute; left: 617px; top: 118px; font-size: 10px; font-weight: 600;">{{aval_celular}}</div>
-
-        <div style="position: absolute; left: 8px; top: 237px; font-size: 10px; font-weight: 600;">ENTRE CALLES: {{afiliado_cruza1}} Y {{afiliado_cruza2}}</div>
-
-        <!-- Líneas divisoras en DATOS DEL AVAL -->
-        <div class="linea-divisora" style="top: 131px;"></div>
-        <div class="linea-divisora" style="top: 161px;"></div>
-        <div class="linea-divisora" style="top: 204px;"></div>
-
-        <!-- ===== DATOS DE LA GARANTÍA ===== -->
-        <div style="position: absolute; left: 8px; top: 209px; font-size: 6px; font-weight: 600;">DOMICILIO</div>
-        <div style="position: absolute; left: 8px; top: 191px; font-size: 10px; font-weight: 600;">{{garantia_direccion}} COLONIA: {{garantia_colonia}} POBLACIÓN: {{garantia_poblacion}} MUNICIPIO: {{garantia_municipio}}</div>
-
-        <!-- ===== OBSERVACIONES ===== -->
-        <div style="position: absolute; left: 8px; top: 252px; font-size: 10px; font-weight: 600;">{{observaciones}}</div>
-
-    </div>
-    
-    <!-- Estos se quedan fuera de caja-borde -->
+    <!-- Código de barras -->
     <div class="codebar" style="position: absolute; left: 525px; top: 29px; font-size: 12px; font-weight: normal;">{{codebar}}</div>
 
-    <div style="position: absolute; right: 15px; top: 200px; font-size: 12px; font-weight: 600; transform: rotate(270deg); transform-origin: center; white-space: nowrap;"> {{pmo}} - {{orden}} - {{subestatus}} </div>
-    
-    <!-- Texto legal extenso (fuera de la caja) -->
-    <div style="position: absolute; left: 45px; top: 355px; width: 728px; text-align: justify;">
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
-        <span style="font-weight: 700;">ESTIMADO AFILIADO DEUDOR.</span> Por este conducto, el Departamento de Cobranza Jurídica tiene a bien informarle que el crédito otorgado en atención a las prestaciones y servicios de seguridad social que le ofrece el Instituto de Pensiones del Estado de Jalisco, ha sido asignado para su recuperación, a través de procedimientos judiciales, extrajudiciales y análogos, dado que:
-    </p>
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
-        <span style="font-weight: 700;">a)</span> Usted está considerado como sujeto obligado al pago, en virtud de su condición de afiliado deudor por el otorgamiento del préstamo al que se refieren los artículos 17 fracción I, Incisos a, b, c, d, II, y III, primer párrafo del Reglamento General de Prestaciones, Derechos y Obligaciones de Afiliados y Pensionados de la Dirección de Pensiones del Estado de Jalisco, artículos 113, 114 primer párrafo, 116, 118 fracción V, 119 fracción V, 122 fracciones I, II, III y IV y 123 fracción IV, V, VII de la Ley del Instituto de Pensiones del Estado de Jalisco.
-    </p>  
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
-        <span style="font-weight: 700;">b)</span> Que dicha condición de sujeto obligado y su vinculación con la omisión en el pago del préstamo se deriva de la información y datos asentados en los registros correspondientes del Instituto de Pensiones del Estado de Jalisco.
-    </p> 
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
-        <span style="font-weight: 700;">c)</span> Que dentro del género de obligaciones como afiliado o pensionado que debe cumplir cabalmente y como sujeto obligado al pago con relación al préstamo obtenido, se encuentra la obligación de regularizarse y/o liquidar su préstamo, a través de retenciones o pagos directamente en el Instituto de Pensiones del Estado de Jalisco esto de conformidad con los artículos 114, 116, 123 fracción IV, V, VII, VIII de la Ley del Instituto de Pensiones del Estado de Jalisco.
-    </p>
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 8px;">
-        POR TODO LO ANTERIOR, SE LE NOTIFICA EL PRÉSTAMO VENCIDO AL SUJETO OBLIGADO, AVAL O RESPONSABLE SOLIDARIO, PARA LA REGULARIZACION Y/O LIQUIDACION DEL MISMO, RESPECTO DE SU ADEUDO CON RELACIÓN AL PRÉSTAMO OBTENIDO POR PARTE DEL INSTITUTO DE PENSIONES DEL ESTADO DE JALISCO, JUNTO CON SUS ACCESORIOS LEGALES DERIVADOS. ASÍ MISMO SE CONCEDE UN <span style="font-weight: 700;">PLAZO DE 15 (QUINCE) DÍAS HÁBILES</span>, CONTADOS A PARTIR DEL DÍA SIGUIENTE EN QUE SURTA EFECTOS LA NOTIFICACIÓN RESPECTIVA PARA EL CUMPLIMIENTO DE DICHA OBLIGACIÓN DE PAGO, APERCIBIDO TAMBIÉN DE QUE EN EL CASO DE NO HACERLO SE DARA SEGUIMIENTO AL PROCEDIMIENTO LEGAL CORRESPONDIENTE.
-    </p>
-    <p style="font-size: 12px; line-height: 1.15; margin-bottom: 0;">
-        Los siguientes saldos son para uso informativo del adeudo y están actualizados hasta la fecha de impresión de este documento.
-    </p>
+    <!-- Texto vertical derecho -->
+    <div style="position: absolute; left: 798px; top: 150px; font-size: 11px; font-weight: 600; transform: translate(-50%, -50%) rotate(270deg); white-space: nowrap;">PMO {{pmo}} - {{orden}} - <b>{{subestatus}}</b></div>
 
-    <div style="position: absolute; left: 515px; top: 352px; font-size: 12px; font-weight: 600; white-space: nowrap;">Fecha de emisión: {{_fecha_actual}}</div>
+    <!-- ===== CUADRO DE DATOS ===== -->
+    <div class="dat">
 
+      <!-- DATOS DEL AFILIADO -->
+      <div class="hd">Datos del afiliado</div>
+      <div class="fila" style="grid-template-columns: 445px 141px 1fr;">
+        <div class="c"><div class="l">Nombre del afiliado:</div><div class="v">{{nombre}}</div></div>
+        <div class="c"><div class="l">Número de afiliado:</div><div class="v">{{afiliado}}</div></div>
+        <div class="c"><div class="l">Número de préstamo:</div><div class="v">{{prestamo}}</div></div>
+      </div>
+      <div class="fila" style="grid-template-columns: 1fr;">
+        <div class="c"><div class="l">Domicilio:</div><div class="v">{{afiliado_calle}} {{afiliado_exterior}} {{afiliado_interior}}, <b>Colonia:</b> {{afiliado_colonia}}</div></div>
+      </div>
+      <div class="fila" style="grid-template-columns: 1fr;">
+        <div class="v2"><b>Población:</b> {{afiliado_poblacion}}, <b>Municipio:</b> {{afiliado_municipio}}</div>
+      </div>
+      <div class="fila" style="grid-template-columns: 162px 181px 214px 1fr;">
+        <div class="c"><div class="l">C.P.:</div><div class="v">{{afiliado_cp}}</div></div>
+        <div class="c"><div class="l">Teléfono(s):</div><div class="v">{{afiliado_lada}} {{afiliado_telefono}}</div></div>
+        <div class="c"><div class="l">Celular:</div><div class="v">{{afiliado_celular}}</div></div>
+        <div class="c"><div class="l">Tipo de préstamo:</div><div class="v">{{tipo_prestamo}}</div></div>
+      </div>
+
+      <!-- DATOS DEL AVAL -->
+      <div class="hd">Datos del aval</div>
+      <div class="fila" style="grid-template-columns: 449px 127px 1fr;">
+        <div class="c"><div class="l">Nombre del aval:</div><div class="v">{{aval_nombre}}</div></div>
+        <div class="c"><div class="l">Teléfono(s):</div><div class="v">{{aval_telefono}}</div></div>
+        <div class="c"><div class="l">Celular:</div><div class="v">{{aval_celular}}</div></div>
+      </div>
+      <div class="fila" style="grid-template-columns: 1fr;">
+        <div class="c"><div class="l">Domicilio:</div><div class="v">{{aval_calle}} {{aval_exterior}} {{aval_interior}}</div></div>
+      </div>
+      <div class="fila" style="grid-template-columns: 345px 1fr;">
+        <div class="c"><div class="l">Colonia:</div><div class="v">{{aval_colonia}}</div></div>
+        <div class="c"><div class="l">Municipio:</div><div class="v">{{aval_municipio}}</div></div>
+      </div>
+
+      <!-- DATOS DE LA GARANTÍA -->
+      <div class="hd">Datos de la garantía</div>
+      <div class="fila" style="grid-template-columns: 1fr;">
+        <div class="c"><div class="l">Domicilio:</div><div class="v">{{garantia_direccion}}</div></div>
+      </div>
+      <div class="fila" style="grid-template-columns: 355px 233px 1fr;">
+        <div class="c"><div class="l">Colonia:</div><div class="v">{{garantia_colonia}}</div></div>
+        <div class="c"><div class="l">Población:</div><div class="v">{{garantia_poblacion}}</div></div>
+        <div class="c"><div class="l">Municipio:</div><div class="v">{{garantia_municipio}}</div></div>
+      </div>
+
+      <!-- OBSERVACIONES -->
+      <div class="hd">Observaciones</div>
+      <div class="obs">
+        <b>Entre calles:</b> {{afiliado_cruza1}} Y {{afiliado_cruza2}}<br>
+        <b>Observaciones visita pasada:</b> {{observaciones}}
+      </div>
     </div>
-    
-    <!-- TABLA DE ADEUDOS -->
-    <div class="caja-borde" style="position: absolute; left: 46px; top: 730px; width: 728px; height: 55px; background: white;">
 
-      <table style="position: absolute; left: 9px; top: 5px; width: 710px; border-collapse: collapse;">
-        <tr>
-          <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">ÚLTIMO ABONO</td>
-          <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">MONTO VENCIDO</td>
-          <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">SALDO POR VENCER</td>
-          <td style="width: 130px; padding: 4px 0; font-size: 11px; font-weight: 600;">INT. MORATORIO</td>
-          <td style="width: 99px; padding: 4px 0; font-size: 11px; font-weight: 600;">TOTAL</td>
+    <!-- ===== TEXTO LEGAL ===== -->
+    <div class="legal" style="position: absolute; left: 45px; top: 400px; width: 728px; text-align: justify;">
+      <p><span style="font-weight: 700;">ESTIMADO AFILIADO DEUDOR.</span> Por este conducto, el Departamento de Cobranza Jurídica tiene a bien informarle que el crédito otorgado en atención a las prestaciones y servicios de seguridad social que le ofrece el Instituto de Pensiones del Estado de Jalisco, ha sido asignado para su recuperación, a través de procedimientos judiciales, extrajudiciales y análogos, dado que:</p>
+      <p><span style="font-weight: 700;">a)</span> Usted está considerado como sujeto obligado al pago, en virtud de su condición de afiliado deudor por el otorgamiento del préstamo al que se refieren los artículos 17 fracción I, Incisos a, b, c, d, II, y III, primer párrafo del Reglamento General de Prestaciones, Derechos y Obligaciones de Afiliados y Pensionados de la Dirección de Pensiones del Estado de Jalisco, artículos 113, 114 primer párrafo, 116, 118 fracción V, 119 fracción V, 122 fracciones I, II, III y IV y 123 fracción IV, V, VII de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p><span style="font-weight: 700;">b)</span> Que dicha condición de sujeto obligado y su vinculación con la omisión en el pago del préstamo se deriva de la información y datos asentados en los registros correspondientes del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="margin-bottom: 12px;"><span style="font-weight: 700;">c)</span> Que dentro del género de obligaciones como afiliado o pensionado que debe cumplir cabalmente y como sujeto obligado al pago con relación al préstamo obtenido, se encuentra la obligación de regularizarse y/o liquidar su préstamo, a través de retenciones o pagos directamente en el Instituto de Pensiones del Estado de Jalisco esto de conformidad con los artículos 114, 116, 123 fracción IV, V, VII, VIII de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="margin-bottom: 12px;">POR TODO LO ANTERIOR, SE LE NOTIFICA EL PRÉSTAMO VENCIDO AL SUJETO OBLIGADO, AVAL O RESPONSABLE SOLIDARIO, PARA LA REGULARIZACION Y/O LIQUIDACION DEL MISMO, RESPECTO DE SU ADEUDO CON RELACIÓN AL PRÉSTAMO OBTENIDO POR PARTE DEL INSTITUTO DE PENSIONES DEL ESTADO DE JALISCO, JUNTO CON SUS ACCESORIOS LEGALES DERIVADOS. ASÍ MISMO SE CONCEDE UN <span style="font-weight: 700;">PLAZO DE 15 (QUINCE) DÍAS HÁBILES</span>, CONTADOS A PARTIR DEL DÍA SIGUIENTE EN QUE SURTA EFECTOS LA NOTIFICACIÓN RESPECTIVA PARA EL CUMPLIMIENTO DE DICHA OBLIGACIÓN DE PAGO, APERCIBIDO TAMBIÉN DE QUE EN EL CASO DE NO HACERLO SE DARA SEGUIMIENTO AL PROCEDIMIENTO LEGAL CORRESPONDIENTE.</p>
+      <p style="font-weight: 700; text-align: left;">Los siguientes saldos son para uso informativo del adeudo y están actualizados hasta la fecha de impresión de este documento.</p>
+      <div style="text-align: right; font-size: 12px; font-weight: 700; margin-top: 4px;">Fecha de emisión: {{_fecha_actual}}</div>
+    </div>
+
+    <!-- ===== TABLA DE ADEUDOS ===== -->
+    <div style="position: absolute; left: 46px; top: 845px; width: 728px; height: 44px; border: 1px solid #7f56c5; border-bottom-width: 3px; border-radius: 6px; background: #fff; box-sizing: border-box;">
+      <table style="width: 100%; border-collapse: collapse; text-align: center; table-layout: fixed;">
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 3px 0; font-size: 10.5px; font-weight: 700;">ÚLTIMO ABONO</td>
+          <td style="padding: 3px 0; font-size: 10.5px; font-weight: 700;">MONTO VENCIDO</td>
+          <td style="padding: 3px 0; font-size: 10.5px; font-weight: 700;">SALDO POR VENCER</td>
+          <td style="padding: 3px 0; font-size: 10.5px; font-weight: 700;">INT. MORATORIO</td>
+          <td style="padding: 3px 0; font-size: 10.5px; font-weight: 700;">TOTAL</td>
         </tr>
         <tr>
-          <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{ultimo_abono}}</td>
-          <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{adeudo}}</td>
-          <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{saldo_por_vencer}}</td>
-          <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{moratorio}}</td>
-          <td style="padding: 4px 0; font-size: 11px; font-weight: 600;">{{liquidacion}}</td>
+          <td style="padding: 4px 0; font-size: 11px;">{{ultimo_abono}}</td>
+          <td style="padding: 4px 0; font-size: 11px;">{{adeudo}}</td>
+          <td style="padding: 4px 0; font-size: 11px;">{{saldo_por_vencer}}</td>
+          <td style="padding: 4px 0; font-size: 11px;">{{moratorio}}</td>
+          <td style="padding: 4px 0; font-size: 11px; font-weight: 700;">{{liquidacion}}</td>
         </tr>
       </table>
-
-  <!-- Línea divisoria solo dentro del recuadro -->
-  <div class="linea-divisora" style="left: 0; top: 22px; width: 100%;"></div>
-
-</div>
-    
-    <!-- Texto IMPORTANTE -->
-    <div style="position: absolute; left: 45px; top: 797px; width: 728px; text-align: justify;">
-      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 700;">IMPORTANTE:</span> Los préstamos a corto y mediano plazo causan el interés que para cada tipo determina el Consejo Directivo del Instituto de Pensiones del Estado, de manera general, con referencia a la Tasa de Interés Interbancaria de Equilibrio (TIIE), o la que en su caso la sustituya, vigente en la fecha de otorgamiento del préstamo, más los puntos porcentuales que el propio Consejo Directivo determine, de conformidad con el artículo 115 de la Ley del Instituto de Pensiones del Estado de Jalisco; y para los préstamos de esquema hipotecario, estos causan el interés que de manera general determina el Consejo Directivo del Instituto de Pensiones del Estado de Jalisco, conforme a las tasas del mercado vigentes en la fecha de otorgamiento del préstamo, más los puntos porcentuales adicionales que el propio Consejo Directivo del Instituto de Pensiones del Estado de Jalisco autorice, con base en los estudios financieros y actuariales que al efecto se realicen, de conformidad con el artículo 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
-      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 600;">EL MONTO VENCIDO</span> del adeudo se determinó de acuerdo con la omisión de los pagos que debe realizar el sujeto obligado de manera quincenal o mensual (según se hubiese determinado). Dicho monto se sujetará a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas entre el deudor directo, el aval solidario y el Instituto de Pensiones del Estado de Jalisco, conforme a lo establecido en los artículos 113 y 123, fracciones III y V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
-      <p style="font-size: 12px; line-height: 1.5; margin-bottom: 8px;"><span style="font-weight: 600;">LOS INTERESES MORATORIOS</span> que acompañan al préstamo obtenido por el deudor directo y, en su caso, el aval solidario, están sujetos a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas, tal y como se establece en los artículos 115 y 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
-      <p style="font-size: 12px; line-height: 1.5;"><span style="font-weight: 600;">EL SALDO POR VENCER</span> se encuentra estipulado en los contratos y títulos de crédito que documenten las obligaciones contraídas, siendo aquel que, junto con el monto vencido del préstamo y los intereses moratorios, arroja un total del adeudo; lo anterior, de conformidad con los artículos 114, 115 y 123, fracción V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
     </div>
-    
+
+    <!-- ===== IMPORTANTE ===== -->
+    <div class="imp" style="position: absolute; left: 45px; top: 895px; width: 728px; text-align: justify;">
+      <p><span style="font-weight: 700;">IMPORTANTE:</span> Los préstamos a corto y mediano plazo causan el interés que para cada tipo determina el Consejo Directivo del Instituto de Pensiones del Estado, de manera general, con referencia a la Tasa de Interés Interbancaria de Equilibrio (TIIE), o la que en su caso la sustituya, vigente en la fecha de otorgamiento del préstamo, más los puntos porcentuales que el propio Consejo Directivo determine, de conformidad con el artículo 115 de la Ley del Instituto de Pensiones del Estado de Jalisco; y para los préstamos de esquema hipotecario, estos causan el interés que de manera general determina el Consejo Directivo del Instituto de Pensiones del Estado de Jalisco, conforme a las tasas del mercado vigentes en la fecha de otorgamiento del préstamo, más los puntos porcentuales adicionales que el propio Consejo Directivo del Instituto de Pensiones del Estado de Jalisco autorice, con base en los estudios financieros y actuariales que al efecto se realicen, de conformidad con el artículo 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p><span style="font-weight: 700;">EL MONTO VENCIDO</span> del adeudo se determinó de acuerdo con la omisión de los pagos que debe realizar el sujeto obligado de manera quincenal o mensual (según se hubiese determinado). Dicho monto se sujetará a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas entre el deudor directo, el aval solidario y el Instituto de Pensiones del Estado de Jalisco, conforme a lo establecido en los artículos 113 y 123, fracciones III y V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p><span style="font-weight: 700;">LOS INTERESES MORATORIOS</span> que acompañan al préstamo obtenido por el deudor directo y, en su caso, el aval solidario, están sujetos a lo establecido en los contratos y títulos de crédito que documenten las obligaciones contraídas, tal y como se establece en los artículos 115 y 123, fracción VII, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+      <p style="margin-bottom: 0;"><span style="font-weight: 700;">EL SALDO POR VENCER</span> se encuentra estipulado en los contratos y títulos de crédito que documenten las obligaciones contraídas, siendo aquel que, junto con el monto vencido del préstamo y los intereses moratorios, arroja un total del adeudo; lo anterior, de conformidad con los artículos 114, 115 y 123, fracción V, de la Ley del Instituto de Pensiones del Estado de Jalisco.</p>
+    </div>
+
     <!-- Rectángulos inferiores -->
-    <div style="position: absolute; left: 0px; top: 1253px; width: 600px; height: 15px; background: #7f56c5;"></div>
-    <div style="position: absolute; left: 600px; top: 1253px; width: 700px; height: 15px; background: #B1B2B5;"></div>
-    
+    <div style="position: absolute; left: 0; top: 1253px; width: 600px; height: 15px; background: #7f56c5;"></div>
+    <div style="position: absolute; left: 600px; top: 1253px; width: 216px; height: 15px; background: #B1B2B5;"></div>
+
     <!-- Pie de página -->
-    <div style="position: absolute; left: 320px; top: 1270px; font-size: 10px; font-weight: 600;">
+    <div style="position: absolute; left: 0; top: 1270px; width: 100%; text-align: center; font-size: 10px; font-weight: 600;">
       Página {{_numero_pagina}} de {{_total_paginas}}
     </div>
-    
+
   </div>
 </div>
 
@@ -345,7 +326,7 @@
   <div class="pagina" style="position: relative;">
 
     <!-- Título reverso -->
-    <div style="position: absolute; left: 0; top: 28px; width: 100%; text-align: center; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; line-height: 1.3;">
+    <div style="position: absolute; left: 0; top: 28px; width: 100%; text-align: center; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; line-height: 1.3;">
       Acta de Notificación<br>del Requerimiento de Pago Vencido.
     </div>
 

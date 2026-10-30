@@ -3020,9 +3020,14 @@ async def seleccionar_cuentas_csv(
     try:
         if file.filename.lower().endswith(".csv"):
             try:
-                df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", sep=None, engine="python")
+                df = pd.read_csv(io.BytesIO(contents), encoding="utf-8-sig", sep=None, engine="python")
             except UnicodeDecodeError:
                 df = pd.read_csv(io.BytesIO(contents), encoding="latin-1", sep=None, engine="python")
+            
+            df.columns = [
+                str(c).replace("\ufeff", "").replace("ï»¿", "").strip().lower()
+                for c in df.columns
+            ]
         else:
             df = pd.read_excel(io.BytesIO(contents))
     except Exception as e:

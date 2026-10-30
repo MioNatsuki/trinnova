@@ -305,6 +305,7 @@ class AsyncPlantillaRenderer:
         import base64, re as re_mod
         from app.services.codebar_service import CodebarService
         from app.services.formatters import (
+            aplicar_aliases,
             aplicar_formato_fechas,
             aplicar_formato_moneda,
             procesar_condicionales,
@@ -322,6 +323,7 @@ class AsyncPlantillaRenderer:
         # ============================================================
         # 1. APLICAR FORMATOS (fechas y moneda) ANTES de reemplazar
         # ============================================================
+        placeholders = aplicar_aliases(placeholders, self.proyecto_slug)
         placeholders = aplicar_formato_fechas(placeholders, self.proyecto_slug)
         placeholders = aplicar_formato_moneda(placeholders, self.proyecto_slug)
 

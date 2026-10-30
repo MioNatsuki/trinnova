@@ -239,7 +239,8 @@ export default function LimpiezaAnalisis() {
 
   // Cargar programas
   useEffect(() => {
-    if (!proyectoSlug) { setProgramas([]); setPrograma('todos'); return; }
+    setPrograma('todos');
+    if (!proyectoSlug) { setProgramas([]); return; }
     api.get(`/analisis/${proyectoSlug}/programas`)
       .then(r => setProgramas(r.data || []))
       .catch(() => setProgramas([]));

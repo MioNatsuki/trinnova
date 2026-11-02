@@ -2632,6 +2632,45 @@ def get_tabla_temporal_errores(
         db_gen.close()
 
 # ============================================================
+# PROYECTO: /{proyecto_slug}/preparacion/todas
+# ============================================================
+
+@router.get("/{proyecto_slug}/preparacion/todas")
+def get_preparacion_todas(
+    proyecto_slug: str,
+    current_user: Usuario = Depends(get_current_active_user),
+    db_global: Session = Depends(get_global_db),
+):
+    """Lista ligera (pk, nombre, viabilidad) de TODAS las cuentas, para el modal 'Emitir TODAS'."""
+    from sqlalchemy import text
+    from app.api.analisis import _info
+
+    check_project_access(proyecto_slug, current_user, db_global)
+    info = _info(proyecto_slug)
+    pk = info["pk"]
+
+    db_gen = get_project_db(proyecto_slug)
+    db_proyecto = next(db_gen)
+    try:
+        cols = set(_get_columnas_tabla(db_proyecto, "tabla_analisis"))
+        col_nombre = next((c for c in info["col_nombre"] if c in cols), None)
+        nombre_sql = f"CAST(`{col_nombre}` AS CHAR)" if col_nombre else "NULL"
+        via_sql = "COALESCE(NULLIF(viabilidad, ''), 'pendiente')" if "viabilidad" in cols else "'pendiente'"
+
+        rows = db_proyecto.execute(text(f"""
+            SELECT `{pk}` AS pk, {nombre_sql} AS nombre, {via_sql} AS viabilidad
+            FROM tabla_analisis
+            ORDER BY `{pk}` ASC
+        """)).fetchall()
+        return {
+            "pk": pk,
+            "total": len(rows),
+            "rows": [{"pk": str(r.pk), "nombre": r.nombre, "viabilidad": r.viabilidad} for r in rows],
+        }
+    finally:
+        db_gen.close()
+
+# ============================================================
 # PROYECTO: /{proyecto_slug}/preparación
 # ============================================================
 

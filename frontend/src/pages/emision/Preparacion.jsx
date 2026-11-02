@@ -53,7 +53,12 @@ export default function Preparacion() {
 
   const [csvLoading, setCsvLoading]   = useState(false);
   const [guardando, setGuardando]     = useState(false);
-  const [showConfirmAll, setShowConfirmAll] = useState(false);
+  const [csvCargado, setCsvCargado]   = useState(false);
+  const [showSinCsv, setShowSinCsv]   = useState(false);
+  const [showTodas, setShowTodas]     = useState(false);
+  const [todas, setTodas]             = useState({ loading: false, rows: [], error: null });
+  const [descartadas, setDescartadas] = useState(new Set());
+  const [todasQuery, setTodasQuery]   = useState('');
 
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvFile, setCsvFile]           = useState(null);
@@ -147,42 +152,87 @@ export default function Preparacion() {
       }
   }, [proyectoSlug]);
 
-  const todosSeleccionados = rows.length > 0 && selected.size === rows.length;
+  const pageKeys = useMemo(
+    () => rows.map(r => String(r[pk] ?? '')).filter(Boolean), [rows, pk]);
+  const selEnPagina = pageKeys.filter(k => selected.has(k)).length;
+  const todosPaginaSel = pageKeys.length > 0 && selEnPagina === pageKeys.length;
+  const algunoPaginaSel = selEnPagina > 0 && !todosPaginaSel;
 
-  const handleSelectAll = () => {
-    if (todosSeleccionados) {
-      setSelected(new Set());
-      return;
-    }
+  // Marca/desmarca solo la página visible
+  const handleSelectPage = () => {
+    setSelected(prev => {
+      const n = new Set(prev);
+      if (todosPaginaSel) pageKeys.forEach(k => n.delete(k));
+      else pageKeys.forEach(k => n.add(k));
+      return n;
+    });
+  };
 
-    // Verificar si hay no viables
-    const noViables = rows.filter(r => (r.viabilidad || 'pendiente') !== 'viable');
-    if (noViables.length > 0) {
-      setShowConfirmAll(true);
-    } else {
-      setSelected(new Set(rows.map(r => r[pk])));
+  const abrirTodas = async () => {
+    setShowTodas(true);
+    setDescartadas(new Set());
+    setTodasQuery('');
+    setTodas({ loading: true, rows: [], error: null });
+    try {
+      const res = await api.get(`/emision/${proyectoSlug}/preparacion/todas`);
+      setTodas({ loading: false, rows: res.data.rows || [], error: null });
+    } catch (err) {
+      setTodas({ loading: false, rows: [],
+        error: err.response?.data?.detail || 'No se pudo cargar el resumen.' });
     }
   };
 
-  const confirmarSelectAll = () => {
-    setSelected(new Set(rows.map(r => r[pk])));
-    setShowConfirmAll(false);
+  const resumenTodas = useMemo(() => {
+    const r = { viable: 0, no_viable: 0, pendiente: 0 };
+    todas.rows.forEach(x => { r[x.viabilidad] = (r[x.viabilidad] || 0) + 1; });
+    return r;
+  }, [todas.rows]);
+
+  const descartarPorViabilidad = (v) =>
+    setDescartadas(prev => {
+      const n = new Set(prev);
+      todas.rows.forEach(x => { if (x.viabilidad === v) n.add(x.pk); });
+      return n;
+    });
+
+  const toggleDescarte = (k) =>
+    setDescartadas(prev => {
+      const n = new Set(prev);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+
+  const listaModal = useMemo(() => {
+    const q = todasQuery.trim().toLowerCase();
+    const base = q
+      ? todas.rows.filter(x =>
+          x.pk.toLowerCase().includes(q) || String(x.nombre || '').toLowerCase().includes(q))
+      : todas.rows.filter(x => x.viabilidad !== 'viable');
+    return { total: base.length, visibles: base.slice(0, 200) };
+  }, [todas.rows, todasQuery]);
+
+  const aEmitir = todas.rows.length - descartadas.size;
+
+  const confirmarTodas = () => {
+    setSelected(new Set(todas.rows.filter(x => !descartadas.has(x.pk)).map(x => x.pk)));
+    setShowTodas(false);
+    showMsg('success', `${aEmitir.toLocaleString('es-MX')} cuentas seleccionadas.`);
   };
 
   // ---------- Orden ----------
   const setOrden = (pkVal, val) => {
-  const key = String(pkVal);
-  setOrdenMap(prev => {
-    const n = { ...prev };
-    if (val === '' || val === null || val === undefined) {
-      delete n[key];
-    } else {
-      const num = parseInt(val, 10);
-      n[key] = isNaN(num) ? '' : num;
-    }
-    return n;
-  });
-};
+    const key = String(pkVal);
+    setOrdenMap(prev => {
+      const n = { ...prev };
+      if (val === '' || val === null || val === undefined) {
+        delete n[key];
+      } else {
+        const num = parseInt(val, 10);
+        n[key] = isNaN(num) ? '' : num;
+      }
+      return n;
+    });
+  };
 
   // ---------- CSV ----------
   const openCsvModal = () => {
@@ -220,6 +270,7 @@ export default function Preparacion() {
       });
       setSelected(new Set(ids));
       setOrdenMap(om);
+      setCsvCargado(true);
 
       const conOrden = Object.keys(om).length;
       setCsvResult({
@@ -263,34 +314,42 @@ export default function Preparacion() {
         showMsg('error',
           `Se insertaron ${res.data.insertados} de ${selected.size}. ` +
           `${res.data.errores} tuvieron problemas. Revisa errores.`);
-        // TODO: abrir modal de errores
       } else {
         showMsg('success', res.data.message);
         localStorage.removeItem(`trinnova_orden_${proyectoSlug}`);
         setTimeout(() => {
           navigate('/emision/emitir', { state: { proyectoSlug } });
         }, 800);
-            }
+      }
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error al preparar.');
     } finally {
       setGuardando(false);
+      setShowSinCsv(false);
     }
   };
 
+  const intentarContinuar = () => {
+    if (selected.size === 0) {
+      showMsg('error', 'Selecciona al menos una cuenta.');
+      return;
+    }
+    if (!csvCargado && Object.keys(ordenMap).length === 0) {
+      setShowSinCsv(true);
+      return;
+    }
+    continuar();
+  };
+
   // ---------- Columnas a mostrar ----------
-  // Mostramos la PK y las columnas d_* (de tabla_dinamica) para dar visibilidad de los cálculos
   const columnasMostrar = useMemo(() => {
     const cols = [];
-    // Orden, PK, nombre, domicilio, viabilidad, cálculo
-    cols.push({ key: 'orden',        label: 'Orden' });
-    cols.push({ key: pk,             label: 'Cuenta',          isPk: true });
+    cols.push({ key: 'orden',       label: 'Orden' });
+    cols.push({ key: pk,            label: 'Cuenta',            isPk: true });
     cols.push({ key: '_nombre_display', label: 'Nombre' });
     cols.push({ key: '_calle_display',  label: 'Domicilio' });
 
-    // Todas las columnas d_*
     columnasDinamica.forEach(c => {
-      // Omitir codebar temporal para no confundir en Preparación
       if (c === 'd_codebar') return;
       cols.push({ key: c, label: c.replace(/^d_/, '').replace(/_/g, ' ') });
     });
@@ -346,7 +405,7 @@ export default function Preparacion() {
 
           <button
             className="prep-btn prep-btn--primary"
-            onClick={continuar}
+            onClick={intentarContinuar}
             disabled={guardando || selected.size === 0}
           >
             {guardando
@@ -396,9 +455,14 @@ export default function Preparacion() {
 
         {selected.size > 0 && (
           <span className="prep-selected-badge">
-            {selected.size} seleccionada{selected.size !== 1 ? 's' : ''}
+            {selected.size.toLocaleString('es-MX')} seleccionada{selected.size !== 1 ? 's' : ''}
+            {' · '}
+            <a href="#limpiar" onClick={e => { e.preventDefault(); setSelected(new Set()); }}>limpiar</a>
           </span>
         )}
+        <button className="prep-btn prep-btn--todas" onClick={abrirTodas}>
+          Emitir TODAS
+        </button>
       </div>
 
       {/* MENSAJES */}
@@ -416,11 +480,9 @@ export default function Preparacion() {
               <th className="prep-th prep-th--check">
                 <input
                   type="checkbox"
-                  checked={todosSeleccionados}
-                  onChange={handleSelectAll}
-                  ref={el => {
-                    if (el) el.indeterminate = selected.size > 0 && selected.size < rows.length;
-                  }}
+                  checked={todosPaginaSel}
+                  onChange={handleSelectPage}
+                  ref={el => { if (el) el.indeterminate = algunoPaginaSel; }}
                 />
               </th>
               {columnasMostrar.map(col => (
@@ -460,7 +522,6 @@ export default function Preparacion() {
                   </td>
 
                   {columnasMostrar.map(col => {
-                    // Orden
                     if (col.key === 'orden') {
                       return (
                         <td key={col.key} className="prep-td prep-td--orden">
@@ -476,7 +537,6 @@ export default function Preparacion() {
                       );
                     }
 
-                    // Viabilidad
                     if (col.key === 'viabilidad') {
                       return (
                         <td key={col.key} className="prep-td">
@@ -490,7 +550,6 @@ export default function Preparacion() {
                       );
                     }
 
-                    // Cálculo
                     if (col.key === '_tiene_calculo') {
                       return (
                         <td key={col.key} className="prep-td">
@@ -508,7 +567,6 @@ export default function Preparacion() {
                       );
                     }
 
-                    // PK
                     if (col.isPk) {
                       return (
                         <td key={col.key} className="prep-td prep-td--pk">
@@ -517,7 +575,6 @@ export default function Preparacion() {
                       );
                     }
 
-                    // Cualquier otro campo
                     const val = r[col.key];
                     return (
                       <td key={col.key} className="prep-td" title={String(val ?? '')}>
@@ -548,33 +605,111 @@ export default function Preparacion() {
         </div>
       )}
 
-      {/* MODAL CONFIRMAR SELECCIONAR TODO CON NO VIABLES */}
-      {showConfirmAll && (
-        <div className="prep-overlay" onClick={() => setShowConfirmAll(false)}>
-          <div className="prep-modal" onClick={e => e.stopPropagation()}>
-            <h3>Confirmar selección</h3>
-            <p>
-              Estás a punto de seleccionar <strong>{rows.length}</strong> cuentas,
-              de las cuales{' '}
-              <strong>
-                {rows.filter(r => (r.viabilidad || 'pendiente') !== 'viable').length}
-              </strong>{' '}
-              están marcadas como <strong>no viables</strong> o <strong>pendientes</strong>.
-              <br /><br />
-              ¿Deseas continuar?
-            </p>
+      {/* MODAL EMITIR TODAS */}
+      {showTodas && (
+        <div className="prep-overlay" onClick={() => setShowTodas(false)}>
+          <div className="prep-modal prep-modal--todas" onClick={e => e.stopPropagation()}>
+            <h3>Emitir TODAS las cuentas</h3>
+
+            {todas.loading ? <p>Cargando cuentas…</p>
+            : todas.error ? <p className="prep-message prep-message--error">{todas.error}</p>
+            : (<>
+              <p>
+                Seleccionaste <strong>{todas.rows.length.toLocaleString('es-MX')}</strong> cuentas:{' '}
+                <strong>{resumenTodas.viable.toLocaleString('es-MX')}</strong> viables y{' '}
+                <strong>{(resumenTodas.no_viable + resumenTodas.pendiente).toLocaleString('es-MX')}</strong> no viables
+                {resumenTodas.pendiente > 0 && ` (${resumenTodas.pendiente.toLocaleString('es-MX')} pendientes de evaluar)`}.
+              </p>
+
+              <div className="prep-todas-actions">
+                {resumenTodas.no_viable > 0 && (
+                  <button className="prep-btn" onClick={() => descartarPorViabilidad('no_viable')}>
+                    Descartar no viables ({resumenTodas.no_viable.toLocaleString('es-MX')})
+                  </button>
+                )}
+                {resumenTodas.pendiente > 0 && (
+                  <button className="prep-btn" onClick={() => descartarPorViabilidad('pendiente')}>
+                    Descartar pendientes ({resumenTodas.pendiente.toLocaleString('es-MX')})
+                  </button>
+                )}
+                {descartadas.size > 0 && (
+                  <button className="prep-btn" onClick={() => setDescartadas(new Set())}>
+                    Incluir todas de nuevo
+                  </button>
+                )}
+              </div>
+
+              <input
+                className="prep-search-input"
+                style={{ width: '100%', marginBottom: 8 }}
+                placeholder="Buscar cuenta o nombre para descartar manualmente…"
+                value={todasQuery}
+                onChange={e => setTodasQuery(e.target.value)}
+              />
+              <div className="prep-todas-hint">
+                {todasQuery.trim() ? 'Coincidencias' : 'No viables y pendientes'}:{' '}
+                {listaModal.total.toLocaleString('es-MX')}
+                {listaModal.total > 200 && ' (mostrando 200; afina la búsqueda)'}
+                {' · '}desmarca para descartar
+              </div>
+
+              <div className="prep-todas-list">
+                {listaModal.visibles.map(x => {
+                  const fuera = descartadas.has(x.pk);
+                  const cfg = VIABILIDAD_CFG[x.viabilidad] || VIABILIDAD_CFG.pendiente;
+                  return (
+                    <label key={x.pk} className={`prep-todas-row ${fuera ? 'prep-todas-row--out' : ''}`}>
+                      <input type="checkbox" checked={!fuera} onChange={() => toggleDescarte(x.pk)} />
+                      <span>{x.pk}</span>
+                      <span style={{ flex: 1 }}>{x.nombre || '—'}</span>
+                      <span className={`prep-badge prep-badge--${cfg.cls}`}>{cfg.icon} {cfg.label}</span>
+                    </label>
+                  );
+                })}
+                {listaModal.total === 0 && <div className="prep-empty">Sin resultados.</div>}
+              </div>
+
+              <p style={{ marginTop: 12 }}>
+                Se seleccionarán <strong>{aEmitir.toLocaleString('es-MX')}</strong> cuentas
+                {descartadas.size > 0 && <> ({descartadas.size.toLocaleString('es-MX')} descartadas)</>}.
+              </p>
+            </>)}
+
             <div className="prep-modal-actions">
-              <button className="prep-btn" onClick={() => setShowConfirmAll(false)}>
-                Cancelar
-              </button>
-              <button className="prep-btn prep-btn--primary" onClick={confirmarSelectAll}>
-                Sí, seleccionar todas
+              <button className="prep-btn" onClick={() => setShowTodas(false)}>Cancelar</button>
+              <button className="prep-btn prep-btn--primary"
+                      onClick={confirmarTodas}
+                      disabled={todas.loading || !!todas.error || aEmitir === 0}>
+                Seleccionar {aEmitir.toLocaleString('es-MX')}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* MODAL ADVERTENCIA SIN CSV */}
+      {showSinCsv && (
+        <div className="prep-overlay" onClick={() => setShowSinCsv(false)}>
+          <div className="prep-modal" onClick={e => e.stopPropagation()}>
+            <h3>¿Emitir sin CSV?</h3>
+            <p>
+              No cargaste un CSV con las cuentas y su orden de impresión. Si continúas,
+              se emitirán las <strong>{selected.size.toLocaleString('es-MX')}</strong> cuentas
+              seleccionadas en el orden por defecto (por clave ascendente).
+            </p>
+            <div className="prep-modal-actions">
+              <button className="prep-btn" onClick={() => { setShowSinCsv(false); openCsvModal(); }}>
+                Cargar CSV
+              </button>
+              <button className="prep-btn prep-btn--primary" onClick={continuar}>
+                Continuar de todas formas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CARGA CSV */}
       {showCsvModal && (
         <div className="prep-overlay" onClick={closeCsvModal}>
           <div className="prep-modal prep-modal--csv" onClick={e => e.stopPropagation()}>
@@ -620,7 +755,7 @@ export default function Preparacion() {
           </div>
         </div>
       )}
-      
+
     </div>
   );
 }

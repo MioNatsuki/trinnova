@@ -376,3 +376,12 @@
   gap: 10px;
   justify-content: flex-end;
 }
+
+.prep-btn--todas { margin-left: auto; }
+.prep-modal--todas { max-width: 720px; width: 92vw; }
+.prep-todas-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.prep-todas-hint { font-size: 12px; opacity: .7; margin-bottom: 6px; }
+.prep-todas-list { max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+.prep-todas-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+                  border-bottom: 1px solid #e2e8f0; font-size: 13px; cursor: pointer; }
+.prep-todas-row--out { opacity: .5; text-decoration: line-through; }

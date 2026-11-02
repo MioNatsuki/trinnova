@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import json
 import asyncio
 import logging
@@ -887,11 +888,17 @@ class TrinnovaWorker:
         if pk is None:
             pk = self._get_pk_name(job_data.get('proyecto_slug'))
 
+        def _sanitizar_nombre_archivo(valor) -> str:
+            s = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', str(valor or "")).strip().strip('.')
+            return s or "sin_codebar"
+
         async def generar_pdf(registro, idx):
             async with semaphore:
                 try:
                     pk_value = registro.get(pk)
-                    orden_actual = registro.get("orden_impresion") or (orden_inicial + idx)
+                    es_historico = (pk == "codebar")          # misma convención que ya usa el worker
+                    orden_reg = None if es_historico else registro.get("orden_impresion")
+                    orden_actual = int(orden_reg) if orden_reg not in (None, "") else (orden_inicial + idx)
 
                     placeholders = {}
                     for key, value in registro.items():
@@ -964,7 +971,7 @@ class TrinnovaWorker:
                         .replace('|', '_')
                     ) or "sin_pk"
 
-                    nombre_pdf = f"{orden_actual:05d} - {pk_limpio}.pdf"
+                    nombre_pdf = f"{orden_actual:05d}- {_sanitizar_nombre_archivo(codebar_final)}.pdf"
                     pdf_path = job_dir / nombre_pdf
 
                     with open(pdf_path, 'wb') as f:

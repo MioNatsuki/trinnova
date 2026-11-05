@@ -344,8 +344,15 @@ class AsyncPlantillaRenderer:
         # ============================================================
         # 4. RESTO DE PLACEHOLDERS
         # ============================================================
+        html_content = html_content.replace(
+            "{{_numero_pagina}}", '<span data-pg="num">1</span>'
+        )
+        html_content = html_content.replace(
+            "{{_total_paginas}}", '<span data-pg="total">1</span>'
+        )
+
         for key, value in placeholders.items():
-            if key == "codebar":
+            if key in ("codebar", "_numero_pagina", "_total_paginas"):
                 continue
             html_content = html_content.replace(
                 f"{{{{{key}}}}}", "" if value is None else str(value)
@@ -383,9 +390,30 @@ class AsyncPlantillaRenderer:
         try:
             await page.set_content(html_content, wait_until="networkidle")
             await page.evaluate("document.fonts.ready")
+
+            total_paginas = await page.evaluate("""() => {
+                const paginas = Array.from(document.querySelectorAll('.pagina'));
+                const total = paginas.length || 1;
+                document.querySelectorAll('[data-pg]').forEach(el => {
+                    if (el.dataset.pg === 'total') {
+                        el.textContent = String(total);
+                        return;
+                    }
+                    const pag = el.closest('.pagina')
+                        || (el.closest('.pagina-container') || document).querySelector('.pagina');
+                    const idx = paginas.indexOf(pag) + 1;
+                    el.textContent = String(idx > 0 ? idx : 1);
+                }); 
+                return total;
+            }""")
+            
+            logger.debug(f"[{nombre_archivo}] total_paginas={total_paginas}")
             await page.wait_for_timeout(300)
+
             return await page.pdf(
-                print_background=True, width="816px", height=f"{altura}px",
+                print_background=True, 
+                width="816px", 
+                height=f"{altura}px",
                 margin={"top": "0mm", "bottom": "0mm", "left": "0mm", "right": "0mm"},
                 prefer_css_page_size=True,
             )
@@ -912,10 +940,6 @@ class TrinnovaWorker:
                     if not placeholders.get('_fecha_actual'):
                         fecha_em = placeholders.get('fecha_emision') or datetime.now().isoformat()
                         placeholders['_fecha_actual'] = formatear_fecha(fecha_em, job_data.get('proyecto_slug'))
-
-                    placeholders['_numero_pagina'] = "1"
-                    placeholders['_total_paginas'] = "1" #Entrevistar para saber el número total de hojas
-                    placeholders['orden_impresion'] = str(orden_actual)
 
                     from app.services.codebar_service import CodebarService
 

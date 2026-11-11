@@ -219,6 +219,14 @@ export default function Proyectos() {
                                                 <Icon {...ICONS.print} size={14} />
                                                 Emisión Especial
                                             </button>
+                                            <button 
+                                                onClick={() => irA(proyecto.slug, '/subida-directa')} 
+                                                className="proyecto-action-btn"
+                                                title="Emitir desde un archivo ya listo (omite Análisis)"
+                                            >
+                                                <Icon {...ICONS.upload} size={14} />
+                                                Subida Directa
+                                            </button>
                                         </div>
                                     </div>
                                 )}

@@ -2023,6 +2023,7 @@ def calcular_todas_filas(
     id_notificador: Optional[int] = Query(None, description="ID del notificador del catálogo"),
     modo_inpc: Optional[str] = Query("actual", description="actual | anterior",
                                       regex="^(actual|anterior)$"),
+    origen: Optional[str] = Query("analisis", regex="^(analisis|subida_directa)$"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
@@ -2091,7 +2092,12 @@ def calcular_todas_filas(
             except Exception:
                 pass
 
-        rows = db_proyecto.execute(text(f"SELECT * FROM tabla_analisis")).fetchall()
+        tabla_origen = (
+            "tabla_temporal_subida_directa" if origen == "subida_directa"
+            else "tabla_analisis"
+        )
+        
+        rows = db_proyecto.execute(text(f"SELECT * FROM `{tabla_origen}`")).fetchall()
 
         if not rows:
             return {"success": False, "error": "No hay datos en tabla_analisis"}

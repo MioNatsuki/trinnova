@@ -43,6 +43,8 @@ import DashboardEmision from './pages/emision/Dashboard';
 import Preparacion from './pages/emision/Preparacion';
 import EmisionEspecial from './pages/emision/EmisionEspecial';
 
+import SubidaDirecta from './pages/subida_directa/SubidaDirecta';
+
 
 function ProtectedRoute({ children }) {
   const {
@@ -213,6 +215,13 @@ function AppRoutes() {
             element={<EmisionEspecial />}
           />
 
+          {/* ====================================================
+              SUBIDA DIRECTA
+              ==================================================== */}
+          <Route
+            path="subida-directa"
+            element={<SubidaDirecta />}
+          />
 
           {/* ====================================================
               CATÁLOGOS / BITÁCORA

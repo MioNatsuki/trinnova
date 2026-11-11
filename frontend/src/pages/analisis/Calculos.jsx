@@ -230,7 +230,8 @@ export default function Calculos() {
     const [modoInpc, setModoInpc] = useState('actual');
     
     const esEstado = proyectoSlug === 'estado';
-    
+    const origen = location.state?.origen || 'analisis';   // ← NUEVO
+
     const [filtros, setFiltros] = useState({
         fecha_emision: new Date().toISOString().split('T')[0],
         visita: '',
@@ -406,6 +407,7 @@ export default function Calculos() {
                 visita: filtros.visita || '',
                 pmo: filtros.pmo || '',
                 modo_inpc: modoInpc,
+                origen,                                           // ← NUEVO
             };
             
             if (selectedDoc) params.id_documento = parseInt(selectedDoc);

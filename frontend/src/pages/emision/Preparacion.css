@@ -385,3 +385,15 @@
 .prep-todas-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px;
                   border-bottom: 1px solid #e2e8f0; font-size: 13px; cursor: pointer; }
 .prep-todas-row--out { opacity: .5; text-decoration: line-through; }
+
+.prep-orden-readonly {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--clr-bg);
+  border: 1px solid var(--clr-border);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--clr-text);
+  font-family: monospace;
+  font-weight: 600;
+}

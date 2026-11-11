@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, usuarios, proyectos, roles, dashboard, analisis, plantillas, calculos, emision, catalogos, logs
+from app.api import auth, usuarios, proyectos, roles, dashboard, analisis, plantillas, calculos, emision, catalogos, logs, subida_directa
 from app.core.config import settings  
 
 app = FastAPI(
@@ -32,6 +32,7 @@ app.include_router(calculos.router, prefix="/api/v1/calculos", tags=["Cálculos"
 app.include_router(emision.router,   prefix="/api/v1/emision",   tags=["Emisión"])
 app.include_router(catalogos.router, prefix="/api/v1/catalogos", tags=["Catálogos"])
 app.include_router(logs.router, prefix="/api/v1/logs", tags=["Bitácora"])
+app.include_router(subida_directa.router, prefix="/api/v1", tags=["Subida Directa"])
 
 
 @app.get("/")

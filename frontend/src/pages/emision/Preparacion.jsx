@@ -82,6 +82,28 @@ export default function Preparacion() {
   }, [proyectoSlug]);
 
   const fileInputRef = useRef();
+  const origen = location.state?.origen || 'analisis';   // ← NUEVO
+
+  // ── Preseleccionar todas las cuentas al venir de Subida Directa ─────
+  useEffect(() => {
+    if (origen !== 'subida_directa' || !proyectoSlug) return;
+    if (selected.size > 0) return; // ya hay selección, no pisar
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await api.get(`/${proyectoSlug}/subida-directa/ids`);
+        if (cancelado) return;
+        const ids = (res.data.ids || []).map(String);
+        if (ids.length > 0) {
+          setSelected(new Set(ids));
+          setCsvCargado(true); // marcar como "cargado" para saltar el modal de "sin CSV"
+        }
+      } catch (err) {
+        console.warn('No se pudo preseleccionar cuentas de Subida Directa:', err);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [origen, proyectoSlug]);   // intencionalmente sin 'selected' para no re-disparar
 
   // ---------- Mensajes ----------
   const showMsg = useCallback((type, text) => {
@@ -94,7 +116,7 @@ export default function Preparacion() {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
-      const params = { page, limit };
+      const params = { page, limit, origen };
       if (searchQuery) params.search = searchQuery;
       if (filtroViabilidad) params.viabilidad = filtroViabilidad;
 
@@ -307,6 +329,7 @@ export default function Preparacion() {
         {
           ids: Array.from(selected),
           orden_map: ordenMap,
+          origen,                                          // ← NUEVO
         }
       );
 
@@ -523,6 +546,21 @@ export default function Preparacion() {
 
                   {columnasMostrar.map(col => {
                     if (col.key === 'orden') {
+                      // En subida directa, el orden viene del Excel: solo lectura
+                      if (origen === 'subida_directa') {
+                        const ordenFila = r['orden_impresion'] ?? '—';
+                        return (
+                          <td key={col.key} className="prep-td prep-td--orden">
+                            <span
+                              className="prep-orden-readonly"
+                              title="El orden viene del archivo subido"
+                            >
+                              {ordenFila}
+                            </span>
+                          </td>
+                        );
+                      }
+                      // Flujo normal: input editable (como hoy)
                       return (
                         <td key={col.key} className="prep-td prep-td--orden">
                           <input

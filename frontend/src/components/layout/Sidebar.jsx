@@ -131,6 +131,12 @@ export default function Sidebar() {
         </Section>
       )}
 
+      {canEmision && (
+        <Section label="Subida Directa">
+          <SItem to="/subida-directa" iconKey="upload" label="Subida Directa" sub exact />
+        </Section>
+      )}
+
       {isSuperadmin && (
         <Section label="Catálogos">
           <SItem to="/catalogo/documentos"    iconKey="catalog" label="Catálogo Documentos"    sub exact />

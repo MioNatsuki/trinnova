@@ -146,6 +146,7 @@ class ContinuarEmisionResponse(BaseModel):
 class PrepararTablaTemporalRequest(BaseModel):
     ids: List[Any] = Field(default_factory=list)
     orden_map: Dict[str, int] = Field(default_factory=dict)
+    origen: str = Field("analisis", description="analisis | subida_directa")
 
 class ResolverDuplicadoRequest(BaseModel):
     error_id: int
@@ -437,68 +438,108 @@ def _get_columnas_tipos(db_proyecto, tabla: str) -> dict:
 def _es_texto(tipo: str) -> bool:
     return any(t in tipo for t in ("char", "text"))
 
-def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_map=None):
+def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados,
+                            orden_map=None, origen="analisis"):
     from sqlalchemy import text
     from app.services.codebar_service import CodebarService
     from datetime import datetime
     import json
- 
+
+    # ── NUEVO: elegir tabla fuente según origen ──────────────────────────
+    tabla_fuente = (
+        "tabla_temporal_subida_directa" if origen == "subida_directa"
+        else "tabla_analisis"
+    )
+    # ─────────────────────────────────────────────────────────────────────
+
     if not ids_seleccionados:
         db_proyecto.execute(text("DELETE FROM tabla_temporal"))
         db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
         db_proyecto.commit()
         return {"insertados": 0, "errores": 0, "total_errores": 0}
- 
+
     tip_temp = _get_columnas_tipos(db_proyecto, "tabla_temporal")
-    tip_ana = _get_columnas_tipos(db_proyecto, "tabla_analisis")
+    tip_ana = _get_columnas_tipos(db_proyecto, tabla_fuente)   # ← cambia
     tip_din = _get_columnas_tipos(db_proyecto, "tabla_dinamica")
     try:
         tip_pad = _get_columnas_tipos(db_proyecto, "tabla_padron")
     except Exception:
         tip_pad = {}
- 
+
     if clave_origen not in tip_temp:
         raise HTTPException(500, f"La clave '{clave_origen}' no existe en tabla_temporal.")
- 
+
     cols_excluir = {"codebar", "orden_impresion", "seleccionada", "id_temporal", clave_origen}
     cols_destino = [c for c in tip_temp if c not in cols_excluir]
- 
+
     db_proyecto.execute(text("DELETE FROM tabla_temporal"))
     db_proyecto.execute(text("DELETE FROM tabla_temporal_errores"))
- 
+
     # --- Un valor "vacío" ('' o '   ') NO debe ganarle a un valor real de otra tabla.
     #     Sin NULLIF, COALESCE se quedaba con '' de dinámica y nunca llegaba a analisis/padrón.
+    # ── En subida directa no hay JOIN con padrón, así que tampoco debe
+    #    entrar en el COALESCE (evita "Unknown column 'p.col'").
+    tip_pad_efectivo = tip_pad if origen == "analisis" else {}
+    # sd = tabla_temporal_subida_directa (solo aplica en subida directa)
+    tip_sd = tip_ana if origen == "subida_directa" else {}
+
     def cand(alias, col, tipos):
         if col not in tipos:
             return None
         if _es_texto(tipos[col]):
             return f"NULLIF(TRIM({alias}.`{col}`), '')"
         return f"{alias}.`{col}`"
- 
+
     select_parts = []
     for col in cols_destino:
-        cs = [x for x in (cand("d", col, tip_din),
-                          cand("a", col, tip_ana),
-                          cand("p", col, tip_pad)) if x]
+        if origen == "subida_directa":
+            # Orden: 1) dinámica, 2) ad-hoc (sd), 3) tabla fuente (a)
+            # `a` y `sd` son la misma tabla física, pero `a` es el alias
+            # que usa el query; dejar `a` de reserva por si el JOIN no
+            # se materializó por algún motivo.
+            cs = [x for x in (cand("d", col, tip_din),
+                              cand("sd", col, tip_sd),
+                              cand("a", col, tip_ana)) if x]
+        else:
+            cs = [x for x in (cand("d", col, tip_din),
+                              cand("a", col, tip_ana),
+                              cand("p", col, tip_pad_efectivo)) if x]
         expr = "NULL" if not cs else (cs[0] if len(cs) == 1 else f"COALESCE({', '.join(cs)})")
         select_parts.append(f"{expr} AS `{col}`")
- 
+
     # codebar: se respeta el que ya calculó tabla_dinamica (con fecha + identificador + visita)
     d_codebar = "d.`codebar`" if "codebar" in tip_din else "NULL"
- 
+    o_orden = "a.`orden_impresion`" if "orden_impresion" in tip_ana else "NULL"
+
+    # ── NUEVO: el JOIN con tabla_padron solo aplica en el flujo normal ──
+    # En subida directa, la fuente ya trae todo lo que el usuario subió
+    # y tabla_padron es de otro flujo (mezclaría datos).
+    padron_join = (
+        f"LEFT JOIN tabla_padron p ON a.`{clave_origen}` = p.`{clave_origen}`"
+        if origen == "analisis" else ""
+    )
+    sd_join = (
+        f"LEFT JOIN tabla_temporal_subida_directa sd "
+        f"ON a.`{clave_origen}` = sd.`{clave_origen}`"
+        if origen == "subida_directa" else ""
+    )
+    # ─────────────────────────────────────────────────────────────────────
+
     placeholders = ", ".join(f":id{i}" for i in range(len(ids_seleccionados)))
     params = {f"id{i}": v for i, v in enumerate(ids_seleccionados)}
- 
+
     rows = db_proyecto.execute(text(f"""
         SELECT a.`{clave_origen}` AS `__pk__`, {d_codebar} AS `__cb_din__`,
+               {o_orden} AS `__orden_origen__`,
                {', '.join(select_parts)}
-        FROM tabla_analisis a
+        FROM `{tabla_fuente}` a
         LEFT JOIN tabla_dinamica d ON a.`{clave_origen}` = d.`{clave_origen}`
-        LEFT JOIN tabla_padron   p ON a.`{clave_origen}` = p.`{clave_origen}`
+        {sd_join}
+        {padron_join}
         WHERE a.`{clave_origen}` IN ({placeholders})
         ORDER BY a.`{clave_origen}` ASC
     """), params).fetchall()
- 
+
     fecha_emision = datetime.now()
     insertados, errores = 0, 0
 
@@ -517,6 +558,7 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
         rd = dict(row._mapping)
         pk_val = rd.pop("__pk__", None)
         cb_din = rd.pop("__cb_din__", None)
+        orden_origen = rd.pop("__orden_origen__", None)   # ← NUEVO
         if pk_val is None:
             continue
 
@@ -529,6 +571,14 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
         else:
             orden = None
 
+        # ── Origen (subida directa): respetar el orden que trae el Excel ──
+        if orden is None and orden_origen not in (None, ""):
+            try:
+                orden = int(float(orden_origen))
+            except (ValueError, TypeError):
+                orden = None
+        # ─────────────────────────────────────────────────────────────────
+
         if orden is None:
             # Buscar el siguiente orden libre
             while siguiente_libre in ordenes_manuales:
@@ -536,7 +586,7 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
             orden = siguiente_libre
             ordenes_manuales.add(orden)
             siguiente_libre += 1
- 
+
         if cb_din:
             codebar = cb_din
         else:
@@ -550,11 +600,19 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
 
         if 'autoridad_impositora' in cols_destino and not rd.get('autoridad_impositora'):
             rd['autoridad_impositora'] = rd.get('autoridad_determinante')
-            
+
         insert_cols = [clave_origen] + cols_destino + ["codebar", "orden_impresion"]
         vals = [f":{c}" for c in insert_cols]
         p = {**rd, clave_origen: pk_val, "codebar": codebar, "orden_impresion": orden}
- 
+
+        # ── Subida Directa: propagar _fila_origen a tabla_temporal ──
+        # `rd` ya trae `_fila_origen` si la fuente era la tabla ad-hoc
+        # (porque `cols_destino` incluye todas las columnas de tabla_temporal).
+        if origen == "subida_directa" and "_fila_origen" in rd:
+            insert_cols.append("_fila_origen")
+            vals.append(":_fila_origen")
+            p["_fila_origen"] = rd.get("_fila_origen")
+
         # SAVEPOINT: un error en una fila no tumba la transacción de las demás
         try:
             with db_proyecto.begin_nested():
@@ -569,7 +627,7 @@ def _poblar_tabla_temporal(db_proyecto, clave_origen, ids_seleccionados, orden_m
                 VALUES (:c, :cb, :m, :p)"""),
                 {"c": str(pk_val), "cb": codebar, "m": str(e)[:200],
                  "p": json.dumps(rd, default=str)[:60000]})
- 
+
     db_proyecto.commit()
     total_err = db_proyecto.execute(text("SELECT COUNT(*) AS c FROM tabla_temporal_errores")).first().c
     return {"insertados": insertados, "errores": errores, "total_errores": total_err}
@@ -2497,6 +2555,7 @@ def preparar_tabla_temporal(
             clave,
             request.ids,
             orden_map,
+            origen=request.origen,
         )
 
         registrar_log(
@@ -2681,19 +2740,19 @@ def get_preparacion(
     limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
     viabilidad: Optional[str] = Query(None),
+    origen: str = Query("analisis", description="analisis | subida_directa"),
     current_user: Usuario = Depends(get_current_active_user),
     db_global: Session = Depends(get_global_db),
 ):
     """
     Endpoint exclusivo de Preparación.
 
-    Devuelve una fila por cada cuenta en tabla_analisis, con:
-      - viabilidad (de tabla_analisis)
-      - todos los campos calculados de tabla_dinamica (si existen)
-      - flag _tiene_calculo: True/False
-      - columnas de display: _nombre_display, _calle_display, _adeudo_display
+    - origen="analisis" (default): lee de tabla_analisis (flujo normal).
+    - origen="subida_directa": lee de tabla_temporal_subida_directa.
 
-    El frontend usa esto para poblar la tabla de Preparación.
+    En ambos casos enriquece con tabla_dinamica (cálculos) y devuelve:
+      - _tiene_calculo: True/False
+      - _nombre_display, _calle_display, _adeudo_display
     """
     from sqlalchemy import text
     from app.api.analisis import _info
@@ -2706,9 +2765,14 @@ def get_preparacion(
     db_proyecto = next(db_gen)
 
     try:
-        # Detectar columnas de cada tabla
+        # ── Fuente principal según origen ──────────────────────────────
+        tabla_fuente = (
+            "tabla_temporal_subida_directa" if origen == "subida_directa"
+            else "tabla_analisis"
+        )
+
         try:
-            cols_analisis = set(_get_columnas_tabla(db_proyecto, "tabla_analisis"))
+            cols_fuente = set(_get_columnas_tabla(db_proyecto, tabla_fuente))
         except Exception:
             return {
                 "rows": [], "total": 0, "page": page, "limit": limit,
@@ -2720,7 +2784,7 @@ def get_preparacion(
         except Exception:
             cols_dinamica = set()
 
-        # Construir WHERE
+        # ── WHERE ──────────────────────────────────────────────────────
         conditions = []
         params: Dict[str, Any] = {}
 
@@ -2729,65 +2793,69 @@ def get_preparacion(
             params["viabilidad"] = viabilidad
 
         if search:
-            search_cols = list(dict.fromkeys(info["col_nombre"] + info["col_calle"] + [pk]))
-            partes = [f"CAST(a.`{c}` AS CHAR) LIKE :search" for c in search_cols if c in cols_analisis]
+            search_cols = list(dict.fromkeys(
+                info["col_nombre"] + info["col_calle"] + [pk]
+            ))
+            partes = [
+                f"CAST(a.`{c}` AS CHAR) LIKE :search"
+                for c in search_cols if c in cols_fuente
+            ]
             if partes:
                 conditions.append("(" + " OR ".join(partes) + ")")
                 params["search"] = f"%{search}%"
 
         where = " AND ".join(conditions) if conditions else "1=1"
 
-        # Total
+        # ── ORDER BY ───────────────────────────────────────────────────
+        order_col = pk if pk in cols_fuente else "1"
+        order_dir = "ASC"
+
+        # ── OFFSET ─────────────────────────────────────────────────────
+        offset = (page - 1) * limit
+
+        # ── Total ──────────────────────────────────────────────────────
         total = db_proyecto.execute(text(
-            f"SELECT COUNT(*) AS total FROM tabla_analisis a WHERE {where}"
+            f"SELECT COUNT(*) AS total FROM `{tabla_fuente}` a WHERE {where}"
         ), params).first().total
 
-        # Columnas del SELECT: todo de analisis + todo de dinamica (excluyendo duplicados)
-        select_analisis = ", ".join(f"a.`{c}`" for c in cols_analisis)
-        # De dinamica solo traemos las que no existan en analisis para no duplicar
-        cols_dinamica_solo = cols_dinamica - cols_analisis
-        select_dinamica = ", ".join(f"d.`{c}` AS `d_{c}`" for c in cols_dinamica_solo) if cols_dinamica_solo else ""
+        # ── SELECT: fuente (a) + dinámica (d) ─────────────────────────
+        select_fuente = ", ".join(f"a.`{c}`" for c in cols_fuente)
+        cols_dinamica_solo = cols_dinamica - cols_fuente
+        select_dinamica = ", ".join(
+            f"d.`{c}` AS `d_{c}`" for c in cols_dinamica_solo
+        ) if cols_dinamica_solo else ""
 
-        select_str = select_analisis
+        select_str = select_fuente
         if select_dinamica:
             select_str += ", " + select_dinamica
 
-        # ORDER BY dinámico
-        order_col = pk
-        order_dir = "ASC"
-
-        offset = (page - 1) * limit
-
         rows = db_proyecto.execute(text(f"""
             SELECT {select_str}
-            FROM tabla_analisis a
+            FROM `{tabla_fuente}` a
             LEFT JOIN tabla_dinamica d ON a.`{pk}` = d.`{pk}`
             WHERE {where}
             ORDER BY a.`{order_col}` {order_dir}
             LIMIT {limit} OFFSET {offset}
         """), params).fetchall()
 
-        # Construir respuesta
+        # ── Construir respuesta ───────────────────────────────────────
         result = []
         for r in rows:
             row_dict = dict(r._mapping)
 
-            # Detectar si tiene cálculo
+            # ¿Tiene cálculo?
             tiene_calculo = False
             if cols_dinamica_solo:
                 for c in cols_dinamica_solo:
-                    val = row_dict.get(f"d_{c}")
-                    if val is not None:
+                    if row_dict.get(f"d_{c}") is not None:
                         tiene_calculo = True
                         break
             else:
-                # Si no hay columnas extra de dinamica, asumimos que sí porque tabla_dinamica existe
-                # (caso borde: si las columnas son idénticas, no podemos distinguir)
                 tiene_calculo = True
 
             row_dict["_tiene_calculo"] = tiene_calculo
 
-            # Display helpers
+            # _nombre_display
             nombre_val = ""
             for col in info["col_nombre"]:
                 v = row_dict.get(col)
@@ -2796,6 +2864,7 @@ def get_preparacion(
                     break
             row_dict["_nombre_display"] = nombre_val
 
+            # _calle_display
             calle_val = ""
             for col in info["col_calle"]:
                 v = row_dict.get(col)
@@ -2804,6 +2873,7 @@ def get_preparacion(
                     break
             row_dict["_calle_display"] = calle_val
 
+            # _adeudo_display
             adeudo_val = 0
             for col in info["col_adeudo"]:
                 v = row_dict.get(col)
@@ -2823,7 +2893,7 @@ def get_preparacion(
             "page": page,
             "limit": limit,
             "pk": pk,
-            "columnas_analisis": sorted(cols_analisis),
+            "columnas_analisis": sorted(cols_fuente),
             "columnas_dinamica": sorted(cols_dinamica),
         }
     finally:
@@ -3435,7 +3505,18 @@ def preparar_emision(
         )
 
     # 4. CREAR JOB
-    filtros_finales = {"fuente": "temporal"}
+    origen_detectado = "analisis"
+    try:
+        cols_temp = _get_columnas_tabla(db_proyecto, "tabla_temporal")
+        if "_fila_origen" in cols_temp:
+            origen_detectado = "subida_directa"
+    except Exception:
+        pass
+
+    filtros_finales = {
+        "fuente": "temporal",
+        "origen": origen_detectado,     # ← NUEVO
+    }
 
     job = EmisionJob(
         id_proyecto=proyecto.id,

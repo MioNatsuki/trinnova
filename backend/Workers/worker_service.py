@@ -97,18 +97,25 @@ class AsyncAPIClient:
         self.client = None
 
     async def __aenter__(self):
-        await self._register()
+        registrado = await self._register()
+
+        if not registrado or not self.token:
+            raise RuntimeError(
+                f"No se pudo autenticar el worker {self.worker_id}. "
+                "Verifica WORKER_SECRET y el estado del usuario de servicio."
+            )
 
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
             headers={
-                'Authorization': f'Bearer {self.token}',
-                'Content-Type': 'application/json',
-                'User-Agent': f'Trinnova-Worker/{self.worker_id}'
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+                "User-Agent": f"Trinnova-Worker/{self.worker_id}"
             },
             limits=httpx.Limits(max_keepalive_connections=10)
         )
+
         return self
 
     async def _register(self):
@@ -670,6 +677,8 @@ class TrinnovaWorker:
                     job_dir,
                     orden_impresion,
                     pk=pk,
+                    lote_numero=(offset // max(1, int(claimed_job.get("cuentas_por_lote") or 50))) + 1,
+                    cuentas_por_lote=max(1, int(claimed_job.get("cuentas_por_lote") or 50)),
                 )
 
                 for resultado in resultados_pdf:
@@ -682,7 +691,7 @@ class TrinnovaWorker:
 
                 offset += len(registros)
 
-                if offset % self.checkpoint_interval == 0 or offset >= total:
+                if True:  # Reportar progreso después de cada bloque procesado.
                     ultimo_pk = None
                     if resultados_pdf:
                         ultimo_pk = resultados_pdf[-1].get('pk_value')
@@ -717,7 +726,14 @@ class TrinnovaWorker:
                 "errores": errores[:10]
             }
 
-            await self.api_client.complete_job(self.worker_id, job_id, manifest)
+            if fallidos or offset < total or pdfs_generados != total:
+                await self.api_client.update_progress(
+                    self.worker_id, job_id, procesados=offset, status="failed",
+                    error_msg=f"Emisión incompleta: {pdfs_generados}/{total} PDF generados; {fallidos} fallidos. " + "; ".join(errores[:3])
+                )
+            else:
+                if not await self.api_client.complete_job(self.worker_id, job_id, manifest):
+                    raise RuntimeError("No se pudo confirmar la emisión en la API")
 
             MonitoreoService.registrar_log_estructurado(
                 nivel="info",
@@ -911,6 +927,8 @@ class TrinnovaWorker:
         job_dir: Path,
         orden_inicial: int,
         pk: str = None,
+        lote_numero: int = 1,
+        cuentas_por_lote: int = 50,
     ) -> List[Dict[str, Any]]:
         semaphore = asyncio.Semaphore(self.max_concurrent_pages)
         if pk is None:
@@ -996,7 +1014,9 @@ class TrinnovaWorker:
                     ) or "sin_pk"
 
                     nombre_pdf = f"{orden_actual:05d}- {_sanitizar_nombre_archivo(codebar_final)}.pdf"
-                    pdf_path = job_dir / nombre_pdf
+                    carpeta_lote = job_dir / f"lote_{((orden_inicial + idx - 1) // cuentas_por_lote) + 1:04d}" if job_data.get("modo", "lotes") == "lotes" else job_dir
+                    carpeta_lote.mkdir(parents=True, exist_ok=True)
+                    pdf_path = carpeta_lote / nombre_pdf
 
                     with open(pdf_path, 'wb') as f:
                         f.write(pdf_bytes)

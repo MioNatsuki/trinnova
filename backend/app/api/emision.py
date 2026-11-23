@@ -1379,14 +1379,16 @@ def upload_result(
     if not ruta_local:
         raise HTTPException(status_code=400, detail="Falta ruta_local en el manifiesto")
 
-    # Validar ruta dentro de EMISIONES_PATH
-    base_emisiones = Path(settings.EMISIONES_PATH).resolve()
-    ruta_resuelta = Path(ruta_local).resolve()
-    if base_emisiones not in ruta_resuelta.parents and ruta_resuelta != base_emisiones:
-        raise HTTPException(
-            status_code=400,
-            detail="ruta_local debe estar dentro del directorio de emisiones configurado",
-        )
+    # La ruta de salida pertenece al filesystem del worker, no necesariamente al de la API.
+    ruta_resuelta = Path(ruta_local)
+    if not ruta_resuelta.is_absolute() or ".." in ruta_resuelta.parts:
+        raise HTTPException(status_code=400, detail="La ruta de emisión debe ser absoluta y segura")
+    if int(total_fallidos) > 0 or int(total_generados) != int(job.total_registros):
+        job.status = "failed"
+        job.error_msg = f"Emisión incompleta: {total_generados}/{job.total_registros} generados; {total_fallidos} fallidos"
+        job.completed_at = datetime.now()
+        db_global.commit()
+        raise HTTPException(status_code=409, detail=job.error_msg)
 
     # ============================================================
     # TRASPASO TEMPORAL → HISTÓRICA
@@ -2768,6 +2770,7 @@ def get_preparacion(
         # ── Fuente principal según origen ──────────────────────────────
         tabla_fuente = (
             "tabla_temporal_subida_directa" if origen == "subida_directa"
+            else "tabla_padron" if origen == "padron"
             else "tabla_analisis"
         )
 
@@ -2784,11 +2787,26 @@ def get_preparacion(
         except Exception:
             cols_dinamica = set()
 
+        # Fuentes complementarias, sin perder registros de la tabla principal.
+        cols_padron = set(_get_columnas_tabla(db_proyecto, "tabla_padron")) if tabla_fuente != "tabla_padron" else set()
+        try:
+            cols_comp = set(_get_columnas_tabla(db_proyecto, "tabla_complementaria"))
+        except Exception:
+            cols_comp = set()
+        joins = []
+        if pk in cols_padron:
+            joins.append(f"LEFT JOIN tabla_padron p ON a.`{pk}` = p.`{pk}`")
+        if pk in cols_comp:
+            joins.append(f"LEFT JOIN tabla_complementaria c ON a.`{pk}` = c.`{pk}`")
+        if pk in cols_dinamica:
+            joins.append(f"LEFT JOIN tabla_dinamica d ON a.`{pk}` = d.`{pk}`")
+        joins_sql = "\n".join(joins)
+
         # ── WHERE ──────────────────────────────────────────────────────
         conditions = []
         params: Dict[str, Any] = {}
 
-        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+        if "viabilidad" in cols_fuente and viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
             conditions.append("a.viabilidad = :viabilidad")
             params["viabilidad"] = viabilidad
 
@@ -2820,19 +2838,22 @@ def get_preparacion(
 
         # ── SELECT: fuente (a) + dinámica (d) ─────────────────────────
         select_fuente = ", ".join(f"a.`{c}`" for c in cols_fuente)
-        cols_dinamica_solo = cols_dinamica - cols_fuente
+        cols_dinamica_solo = cols_dinamica - {pk}
         select_dinamica = ", ".join(
             f"d.`{c}` AS `d_{c}`" for c in cols_dinamica_solo
         ) if cols_dinamica_solo else ""
 
         select_str = select_fuente
-        if select_dinamica:
+        if select_dinamica and pk in cols_dinamica:
             select_str += ", " + select_dinamica
+        for alias, columns in (("p", cols_padron), ("c", cols_comp)):
+            for column in sorted(columns - cols_fuente - {pk}):
+                select_str += f", {alias}.`{column}` AS `{alias}_{column}`"
 
         rows = db_proyecto.execute(text(f"""
             SELECT {select_str}
             FROM `{tabla_fuente}` a
-            LEFT JOIN tabla_dinamica d ON a.`{pk}` = d.`{pk}`
+            {joins_sql}
             WHERE {where}
             ORDER BY a.`{order_col}` {order_dir}
             LIMIT {limit} OFFSET {offset}
@@ -2851,14 +2872,14 @@ def get_preparacion(
                         tiene_calculo = True
                         break
             else:
-                tiene_calculo = True
+                tiene_calculo = False
 
             row_dict["_tiene_calculo"] = tiene_calculo
 
             # _nombre_display
             nombre_val = ""
             for col in info["col_nombre"]:
-                v = row_dict.get(col)
+                v = next((row_dict.get(k) for k in (col, f"p_{col}", f"c_{col}", f"d_{col}") if row_dict.get(k) not in (None, "")), None)
                 if v:
                     nombre_val = str(v)
                     break
@@ -2867,7 +2888,7 @@ def get_preparacion(
             # _calle_display
             calle_val = ""
             for col in info["col_calle"]:
-                v = row_dict.get(col)
+                v = next((row_dict.get(k) for k in (col, f"p_{col}", f"c_{col}", f"d_{col}") if row_dict.get(k) not in (None, "")), None)
                 if v:
                     calle_val = str(v)
                     break
@@ -2876,7 +2897,7 @@ def get_preparacion(
             # _adeudo_display
             adeudo_val = 0
             for col in info["col_adeudo"]:
-                v = row_dict.get(col)
+                v = next((row_dict.get(k) for k in (col, f"p_{col}", f"c_{col}", f"d_{col}") if row_dict.get(k) is not None), None)
                 if v is not None:
                     try:
                         adeudo_val = float(v)
@@ -3362,13 +3383,10 @@ def preparar_emision_especial(
         
         ruta_salida_final = None
         if request.ruta_salida:
-            rutas_permitidas = settings.rutas_salida_lista
-            if rutas_permitidas and request.ruta_salida not in rutas_permitidas:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"La ruta '{request.ruta_salida}' no está en la lista permitida."
-                )
-            ruta_salida_final = request.ruta_salida
+            ruta = Path(request.ruta_salida).expanduser()
+            if not ruta.is_absolute() or ".." in ruta.parts:
+                raise HTTPException(status_code=400, detail="Selecciona una ruta absoluta válida")
+            ruta_salida_final = str(ruta)
 
         # 3. Crear EmisionJob
         total = len(request.codebars)
@@ -3754,10 +3772,18 @@ def get_cuentas_emision(
     db_proyecto = next(db_gen)
 
     try:
+        # Columnas reales disponibles para filtros y ordenamiento.
+        cols_validas = set()
+        try:
+            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
+            cols_validas = {r[0] for r in cols_result}
+        except Exception:
+            pass
+
         conditions = []
         params = {}
 
-        if viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
+        if "viabilidad" in cols_validas and viabilidad and viabilidad in ("viable", "no_viable", "pendiente"):
             conditions.append("viabilidad = :viabilidad")
             params["viabilidad"] = viabilidad
 
@@ -3772,13 +3798,6 @@ def get_cuentas_emision(
             params["busqueda"] = f"%{busqueda}%"
 
         where = " AND ".join(conditions) if conditions else "1=1"
-
-        # Columnas válidas para ordenamiento
-        try:
-            cols_result = db_proyecto.execute(text("SHOW COLUMNS FROM tabla_analisis")).fetchall()
-            cols_validas = {r[0] for r in cols_result}
-        except Exception:
-            cols_validas = set()
 
         order_col = pk
         if sort_col and sort_col in cols_validas:

@@ -7,6 +7,8 @@ export default function Monitoreo({ jobId, onComplete }) {
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(true);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(t); }, []);
   const intervalRef = useRef(null);
   
   // Cargar estado inicial
@@ -79,6 +81,11 @@ export default function Monitoreo({ jobId, onComplete }) {
   const isActive = status === 'processing' || status === 'pending';
   const isComplete = status === 'completed' || status === 'failed' || status === 'cancelled';
   
+  const inicio = job.started_at || job.created_at;
+  const fin = job.completed_at ? new Date(job.completed_at).getTime() : clock;
+  const segundos = Math.max(0, Math.floor((fin - new Date(inicio).getTime()) / 1000));
+  const tiempoTranscurrido = `${Math.floor(segundos / 60)} min ${String(segundos % 60).padStart(2, "0")} s`;
+
   const statusMessages = {
     pending: '⏳ En cola...',
     processing: `⚙️ Procesando (${progreso}%)`,
@@ -115,6 +122,8 @@ export default function Monitoreo({ jobId, onComplete }) {
         </div>
       </div>
       
+      <div className="monitoreo-tiempo" aria-live="off">Tiempo transcurrido: {tiempoTranscurrido}</div>
+
       {/* Detalles */}
       <div className="monitoreo-detalles">
         <div className="detalle-item">

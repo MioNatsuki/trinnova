@@ -14,6 +14,7 @@ router = APIRouter()
 def _load_user(db: Session, user_id: int) -> Usuario:
     user = (
         db.query(Usuario)
+        .filter(Usuario.activo.is_(True))
         .options(
             joinedload(Usuario.rol),
             joinedload(Usuario.proyectos).joinedload(UsuarioProyecto.proyecto),

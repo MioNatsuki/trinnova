@@ -20,10 +20,18 @@ export default function Paso2Mapeo({
   onAtras,
   onSiguiente,
 }) {
-  const [mapeo, setMapeo] = useState(mapeoInicial || {});
+  const [mapeo, setMapeo] = useState(() => (
+    mapeoInicial && typeof mapeoInicial === 'object' && !Array.isArray(mapeoInicial)
+      ? mapeoInicial
+      : {}
+  ));
 
-  // Columnas destino disponibles (vienen del backend, extraídas de tabla_temporal)
-  const destinosDisponibles = preview?.columnas_destino_disponibles || [];
+  const columnasArchivo = Array.isArray(preview?.columnas_archivo)
+    ? preview.columnas_archivo
+    : [];
+  const destinosDisponibles = Array.isArray(preview?.columnas_destino_disponibles)
+    ? preview.columnas_destino_disponibles
+    : [];
 
   // ── Cambios de mapeo ────────────────────────────────────────────────────
   const setColumnaDestino = useCallback((colArchivo, destino) => {
@@ -48,7 +56,9 @@ export default function Paso2Mapeo({
     return errs;
   }, [mapeo]);
 
-  const faltantes = preview?.columnas_sin_mapear || [];
+  const faltantes = Array.isArray(preview?.columnas_sin_mapear)
+    ? preview.columnas_sin_mapear
+    : [];
   const columnasNuevas = Object.entries(mapeo)
     .filter(([, v]) => v === '__nueva__')
     .map(([k]) => k);
@@ -56,7 +66,7 @@ export default function Paso2Mapeo({
     .filter(([, v]) => !v)
     .map(([k]) => k);
 
-  const puedeSiguiente = errores.length === 0 && preview?.columnas_archivo?.length > 0;
+  const puedeSiguiente = errores.length === 0 && columnasArchivo.length > 0;
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (
@@ -86,11 +96,11 @@ export default function Paso2Mapeo({
             </tr>
           </thead>
           <tbody>
-            {preview.columnas_archivo.map((colArchivo) => {
+            {columnasArchivo.map((colArchivo) => {
               const destino = mapeo[colArchivo] || '';
               const esNueva = destino === '__nueva__';
               const esSinMapeo = !destino;
-              const esSugerida = preview.mapeo_propuesto?.[colArchivo] === destino;
+              const esSugerida = preview?.mapeo_propuesto?.[colArchivo] === destino;
 
               return (
                 <tr key={colArchivo} className="sd-mapeo-row">

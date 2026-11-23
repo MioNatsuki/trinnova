@@ -61,7 +61,9 @@ def listar_logs(
     query = db.query(Log)
     
     # Filtros
-    if usuario_id:
+    if usuario_id == -1:
+        query = query.join(Usuario, Log.id_usuario == Usuario.id).filter(Usuario.activo.is_(False))
+    elif usuario_id:
         query = query.filter(Log.id_usuario == usuario_id)
     
     if proyecto_id:

@@ -2,15 +2,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import api from '../../api/auth';
 
-/**
- * Paso 3 — Confirmación y creación de la tabla ad-hoc.
- *
- * Acciones:
- *   1. POST /subida-directa/{slug}/crear-temporal  (crea tabla y sube todo)
- *   2. POST /subida-directa/{slug}/limpieza        (si el usuario aplicó
- *                                                    limpieza en el paso 1)
- *   3. Redirige a Cálculos con origen=subida_directa
- */
 export default function Paso3Confirmar({
   proyectoSlug,
   archivo,
@@ -19,85 +10,117 @@ export default function Paso3Confirmar({
   onAtras,
   onFinalizar,
 }) {
+  // ── Guard against null / non-object mapeo ───────────────────────────────
+  const mapeoSeguro = useMemo(() => {
+    if (mapeo && typeof mapeo === 'object' && !Array.isArray(mapeo)) {
+      return mapeo;
+    }
+    return {};
+  }, [mapeo]);
+
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState('');
   const [aplicarLimpieza, setAplicarLimpieza] = useState(true);
-  const [modoElegido, setModoElegido] = useState(null);  // ← NUEVO
+  const [modoElegido, setModoElegido] = useState(null);
 
-  // ── Resumen para mostrar ────────────────────────────────────────────────
+  // ── Resumen ─────────────────────────────────────────────────────────────
   const resumen = useMemo(() => {
-    const mapeados = Object.entries(mapeo).filter(
-      ([, v]) => v && v !== '__nueva__'
+    const columnasArchivo = Array.isArray(preview?.columnas_archivo)
+      ? preview.columnas_archivo
+      : [];
+
+    const entradas = columnasArchivo.map((columna) => [
+      columna,
+      mapeoSeguro[columna] ?? '',
+    ]);
+
+    const mapeados = entradas.filter(
+      ([, destino]) => destino && destino !== '__nueva__'
     );
-    const nuevas = Object.entries(mapeo).filter(([, v]) => v === '__nueva__');
-    const sinMapear = Object.entries(mapeo).filter(([, v]) => !v);
+    const nuevas = entradas.filter(([, destino]) => destino === '__nueva__');
+    const sinMapear = entradas.filter(([, destino]) => !destino);
 
     return {
       totalFilas: preview?.total_filas || 0,
-      totalColumnas: preview?.columnas_archivo?.length || 0,
+      totalColumnas: columnasArchivo.length,
       mapeados,
       nuevas,
       sinMapear,
-      faltantes: preview?.columnas_sin_mapear || [],
+      faltantes: Array.isArray(preview?.columnas_sin_mapear)
+        ? preview.columnas_sin_mapear
+        : [],
     };
-  }, [mapeo, preview]);
+  }, [mapeoSeguro, preview]);
 
-  // ── Crear tabla ad-hoc ──────────────────────────────────────────────────
-  const handleConfirmar = useCallback(async (modo) => {
-    setCreando(true);
-    setError('');
-    setModoElegido(modo);
-
-    try {
-      const fd = new FormData();
-      fd.append('file', archivo);
-
-      const res = await api.post(
-        `/${proyectoSlug}/subida-directa/crear-temporal`,
-        fd,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          params: {
-            mapeo_json: JSON.stringify(mapeo),
-            modo,                    // ← "sin_calcular" | "calcular"
-          },
-        }
-      );
-
-      if (!res.data.success) {
-        setError(res.data.advertencia || 'No se pudo crear la tabla temporal.');
-        setCreando(false);
+  // ── Crear tabla ─────────────────────────────────────────────────────────
+  const handleConfirmar = useCallback(
+    async (modo) => {
+      if (!archivo) {
+        setError('No se encontró el archivo original. Vuelve al paso 1.');
+        return;
+      }
+      if (!preview?.columnas_archivo?.length) {
+        setError('No hay columnas disponibles para procesar.');
+        return;
+      }
+      if (Object.keys(mapeoSeguro).length === 0) {
+        setError(
+          'No se recibió el mapeo de columnas. Regresa al paso 2 y confirma el mapeo.'
+        );
         return;
       }
 
-      // 2. Aplicar limpieza si el usuario lo decidió
-      if (aplicarLimpieza) {
-        try {
-          await api.post(
-            `/${proyectoSlug}/subida-directa/limpieza`,
-            { accion: 'espacios' }
-          );
-          await api.post(
-            `/${proyectoSlug}/subida-directa/limpieza`,
-            { accion: 'calles' }
-          );
-        } catch (e) {
-          // No bloquear si falla la limpieza: solo advertir
-          console.warn('Limpieza post-creación falló:', e);
-        }
-      }
+      setCreando(true);
+      setError('');
+      setModoElegido(modo);
 
-      // 3. Finalizar
-      onFinalizar(res.data);
-    } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-        err.message ||
-        'Error al crear la tabla temporal.'
-      );
-      setCreando(false);
-    }
-  }, [archivo, mapeo, proyectoSlug, aplicarLimpieza, onFinalizar]);
+      try {
+        const fd = new FormData();
+        fd.append('file', archivo);
+
+        const res = await api.post(
+          `/${proyectoSlug}/subida-directa/crear-temporal`,
+          fd,
+          {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            params: {
+              mapeo_json: JSON.stringify(mapeoSeguro),
+              modo,
+            },
+          }
+        );
+
+        if (!res.data.success) {
+          setError(res.data.advertencia || 'No se pudo crear la tabla temporal.');
+          setCreando(false);
+          return;
+        }
+
+        if (aplicarLimpieza) {
+          try {
+            await api.post(`/${proyectoSlug}/subida-directa/limpieza`, {
+              accion: 'espacios',
+            });
+            await api.post(`/${proyectoSlug}/subida-directa/limpieza`, {
+              accion: 'calles',
+            });
+          } catch (e) {
+            console.warn('Limpieza post-creación falló:', e);
+          }
+        }
+
+        onFinalizar(res.data);
+      } catch (err) {
+        setError(
+          err.response?.data?.detail ||
+            err.message ||
+            'Error al crear la tabla temporal.'
+        );
+        setCreando(false);
+      }
+    },
+    [archivo, mapeoSeguro, preview, proyectoSlug, aplicarLimpieza, onFinalizar]
+  );
 
   // ── Render ──────────────────────────────────────────────────────────────
   return (

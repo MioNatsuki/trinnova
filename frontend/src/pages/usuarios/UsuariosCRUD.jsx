@@ -36,7 +36,7 @@ export default function UsuariosCRUD() {
         api.get('/proyectos/'),
         api.get('/roles/'),
       ]);
-      setUsuarios(u.data);
+      setUsuarios(u.data.filter(x => x.activo));
       setProyectos(p.data);
       setRoles(r.data);
     } finally {
@@ -98,6 +98,13 @@ export default function UsuariosCRUD() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const cerrarModal = () => {
+    if (saving) return;
+    const modificado = editUser ? (form.nombre !== editUser.nombre || form.apellidos !== editUser.apellidos || form.correo !== editUser.correo || Boolean(form.password)) : Object.values(form).some(v => Array.isArray(v) ? v.length > 0 : Boolean(v));
+    if (modificado && !window.confirm("Hay cambios sin guardar. ¿Descartarlos?")) return;
+    setShowModal(false);
   };
 
   const handleDelete = async (u) => {
@@ -188,11 +195,11 @@ export default function UsuariosCRUD() {
 
       {/* Modal */}
       {showModal && (
-        <div className="uc-overlay" onClick={() => setShowModal(false)}>
+        <div className="uc-overlay" onClick={cerrarModal}>
           <div className="uc-modal" onClick={e => e.stopPropagation()}>
             <div className="uc-modal-header">
               <h3>{editUser ? 'Editar usuario' : 'Nuevo usuario'}</h3>
-              <button className="uc-modal-close" onClick={() => setShowModal(false)}>✕</button>
+              <button className="uc-modal-close" onClick={cerrarModal}>✕</button>
             </div>
 
             <form onSubmit={handleSubmit} className="uc-form">
@@ -249,7 +256,7 @@ export default function UsuariosCRUD() {
               {formErr && <p className="uc-form-error">{formErr}</p>}
 
               <div className="uc-modal-footer">
-                <button type="button" className="uc-btn-cancel" onClick={() => setShowModal(false)}>Cancelar</button>
+                <button type="button" className="uc-btn-cancel" onClick={cerrarModal}>Cancelar</button>
                 <button type="submit" className="uc-btn-save" disabled={saving}>
                   {saving ? 'Guardando...' : editUser ? 'Guardar cambios' : 'Crear usuario'}
                 </button>

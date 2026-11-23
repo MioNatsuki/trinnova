@@ -82,7 +82,9 @@ export default function Preparacion() {
   }, [proyectoSlug]);
 
   const fileInputRef = useRef();
-  const origen = location.state?.origen || 'analisis';   // ← NUEVO
+  const origen = location.state?.origen || 'analisis';
+  const [mostrarPadron, setMostrarPadron] = useState(false);
+  const origenConsulta = mostrarPadron ? 'padron' : origen;
 
   // ── Preseleccionar todas las cuentas al venir de Subida Directa ─────
   useEffect(() => {
@@ -116,7 +118,7 @@ export default function Preparacion() {
     if (!proyectoSlug) return;
     setLoading(true);
     try {
-      const params = { page, limit, origen };
+      const params = { page, limit, origen: origenConsulta };
       if (searchQuery) params.search = searchQuery;
       if (filtroViabilidad) params.viabilidad = filtroViabilidad;
 
@@ -133,7 +135,7 @@ export default function Preparacion() {
     } finally {
       setLoading(false);
     }
-  }, [proyectoSlug, page, limit, searchQuery, filtroViabilidad, showMsg]);
+  }, [proyectoSlug, page, limit, searchQuery, filtroViabilidad, showMsg, origenConsulta]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -293,6 +295,7 @@ export default function Preparacion() {
       setSelected(new Set(ids));
       setOrdenMap(om);
       setCsvCargado(true);
+      showMsg("success", `${ids.length} cuentas cargadas correctamente.`);
 
       const conOrden = Object.keys(om).length;
       setCsvResult({
@@ -480,7 +483,7 @@ export default function Preparacion() {
           <span className="prep-selected-badge">
             {selected.size.toLocaleString('es-MX')} seleccionada{selected.size !== 1 ? 's' : ''}
             {' · '}
-            <a href="#limpiar" onClick={e => { e.preventDefault(); setSelected(new Set()); }}>limpiar</a>
+            <a href="#limpiar" onClick={e => { e.preventDefault(); setSelected(new Set()); setMostrarPadron(true); setPage(1); }}>limpiar</a>
           </span>
         )}
         <button className="prep-btn prep-btn--todas" onClick={abrirTodas}>

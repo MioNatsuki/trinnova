@@ -4,7 +4,7 @@
         "nombre": "Worker Principal",
         "poll_interval": 5,
         "heartbeat_interval": 30,
-        "secret": "Admin2024!"
+        "secret": "n-gUU5N1cnkJVSc-0DZAtEVMOPoH8oJsTtzTqcXGgC9LmLjoab5zzzFg-BdMLfIi"
     },
     "servidor": {
         "url": "http://localhost:8000/api/v1",

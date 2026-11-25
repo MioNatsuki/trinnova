@@ -4,7 +4,6 @@ import { useLocation } from 'react-router-dom';
 import { useProyecto } from '../../hooks/useProyecto';
 import ProyectoSelector from '../../components/ProyectoSelector';
 import ModalConfiguracion from './ModalConfiguracion';
-import Monitoreo from './Monitoreo';
 import Historial from './Historial';
 import api from '../../api/auth';
 import './Dashboard.css';
@@ -65,14 +64,19 @@ export default function DashboardEmision() {
       const activo = (res.data.jobs || []).find(
         j => j.status === 'processing' || j.status === 'pending'
       );
-      if (activo) setJobActivo(activo);
+      setJobActivo(activo || null);
     } catch (err) {
       console.error('Error cargando jobs:', err);
     }
   }, []);
 
   useEffect(() => { cargarTemporal(); }, [cargarTemporal]);
-  useEffect(() => { cargarJobs(); }, [cargarJobs]);
+  useEffect(() => {
+    cargarJobs();
+    const timer = setInterval(cargarJobs, 1000);
+    return () => clearInterval(timer);
+  }, [cargarJobs]);
+  useEffect(() => { if (!jobActivo) cargarTemporal(); }, [jobActivo?.id, cargarTemporal]);
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -120,12 +124,6 @@ export default function DashboardEmision() {
         </div>
       </div>
 
-      {jobActivo && (
-        <Monitoreo
-          jobId={jobActivo.id}
-          onComplete={() => { setJobActivo(null); cargarJobs(); cargarTemporal(); }}
-        />
-      )}
 
       <div className="emision-table-wrapper">
         <table className="emision-table">

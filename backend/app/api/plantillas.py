@@ -302,6 +302,7 @@ async def preview_plantilla_pdf(
             nombre_archivo,
             placeholders,
             codebar=placeholders.get('codebar') if placeholders else None,
+            preview_mode="examples" if body.preview_on else "placeholders",
             inject_codebar_style=True,   # ← para que el codebar se vea en preview
         )
 

@@ -677,6 +677,9 @@ class TrinnovaWorker:
                     job_dir,
                     orden_impresion,
                     pk=pk,
+                    offset_registros=offset,
+                    total_registros=total,
+                    job_id=job_id,
                     lote_numero=(offset // max(1, int(claimed_job.get("cuentas_por_lote") or 50))) + 1,
                     cuentas_por_lote=max(1, int(claimed_job.get("cuentas_por_lote") or 50)),
                 )
@@ -927,6 +930,9 @@ class TrinnovaWorker:
         job_dir: Path,
         orden_inicial: int,
         pk: str = None,
+        offset_registros: int = 0,
+        total_registros: int = 0,
+        job_id: int = 0,
         lote_numero: int = 1,
         cuentas_por_lote: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -1014,7 +1020,9 @@ class TrinnovaWorker:
                     ) or "sin_pk"
 
                     nombre_pdf = f"{orden_actual:05d}- {_sanitizar_nombre_archivo(codebar_final)}.pdf"
-                    carpeta_lote = job_dir / f"lote_{((orden_inicial + idx - 1) // cuentas_por_lote) + 1:04d}" if job_data.get("modo", "lotes") == "lotes" else job_dir
+                    inicio_lote = ((offset_registros + idx) // cuentas_por_lote) * cuentas_por_lote + 1
+                    fin_lote = min(inicio_lote + cuentas_por_lote - 1, total_registros)
+                    carpeta_lote = job_dir / f"{inicio_lote} - {fin_lote}" if job_data.get("modo", "lotes") == "lotes" else job_dir
                     carpeta_lote.mkdir(parents=True, exist_ok=True)
                     pdf_path = carpeta_lote / nombre_pdf
 
@@ -1060,7 +1068,13 @@ class TrinnovaWorker:
                     }
 
         tasks = [generar_pdf(reg, i) for i, reg in enumerate(registros)]
-        resultados = await asyncio.gather(*tasks)
+        resultados = []
+        for tarea in asyncio.as_completed(tasks):
+            resultado = await tarea
+            resultados.append(resultado)
+            await self.api_client.update_progress(
+                self.worker_id, job_id, procesados=offset_registros + len(resultados)
+            )
         return resultados
 
     def _get_job_directory(self, proyecto_slug: str, job_id: int) -> Path:

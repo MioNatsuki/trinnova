@@ -128,7 +128,8 @@ export default function Preparacion() {
       setPk(res.data.pk || 'id');
 
       // Columnas dinámicas con prefijo d_
-      const cols = (res.data.columnas_dinamica || []).map(c => `d_${c}`);
+      const dinamicas = (res.data.columnas_dinamica || []).filter(c => c !== res.data.pk);
+      const cols = [...new Set([...(res.data.columnas_analisis || []), ...dinamicas])];
       setColumnasDinamica(cols);
     } catch (err) {
       showMsg('error', err.response?.data?.detail || 'Error cargando datos.');
@@ -376,8 +377,8 @@ export default function Preparacion() {
     cols.push({ key: '_calle_display',  label: 'Domicilio' });
 
     columnasDinamica.forEach(c => {
-      if (c === 'd_codebar') return;
-      cols.push({ key: c, label: c.replace(/^d_/, '').replace(/_/g, ' ') });
+      if ([pk, 'codebar', 'orden', 'orden_impresion', 'viabilidad', '_tiene_calculo', '_nombre_display', '_calle_display'].includes(c)) return;
+      cols.push({ key: c, label: c.replace(/_/g, ' ') });
     });
 
     cols.push({ key: 'viabilidad',  label: 'Viabilidad' });

@@ -1089,6 +1089,7 @@ def listar_jobs_usuario(
                 "procesados": j.procesados,
                 "progreso": round((j.procesados / j.total_registros) * 100, 1) if j.total_registros > 0 else 0,
                 "created_at": j.created_at,
+                "started_at": j.started_at,
                 "completed_at": j.completed_at,
                 "ruta_zip": j.ruta_zip,
                 "error_msg": j.error_msg
@@ -2787,19 +2788,19 @@ def get_preparacion(
         except Exception:
             cols_dinamica = set()
 
-        # Fuentes complementarias, sin perder registros de la tabla principal.
-        cols_padron = set(_get_columnas_tabla(db_proyecto, "tabla_padron")) if tabla_fuente != "tabla_padron" else set()
-        try:
-            cols_comp = set(_get_columnas_tabla(db_proyecto, "tabla_complementaria"))
-        except Exception:
-            cols_comp = set()
+        sources = {}
         joins = []
-        if pk in cols_padron:
-            joins.append(f"LEFT JOIN tabla_padron p ON a.`{pk}` = p.`{pk}`")
-        if pk in cols_comp:
-            joins.append(f"LEFT JOIN tabla_complementaria c ON a.`{pk}` = c.`{pk}`")
-        if pk in cols_dinamica:
-            joins.append(f"LEFT JOIN tabla_dinamica d ON a.`{pk}` = d.`{pk}`")
+        for alias, table in (("p", "tabla_padron"), ("c", "tabla_complementaria"), ("d", "tabla_dinamica")):
+            if table == tabla_fuente or pk not in cols_fuente:
+                continue
+            try:
+                columns = set(_get_columnas_tabla(db_proyecto, table))
+            except Exception:
+                continue
+            if pk in columns:
+                sources[alias] = columns
+                joins.append(f"LEFT JOIN `{table}` {alias} ON a.`{pk}` = {alias}.`{pk}`")
+        cols_dinamica = sources.get("d", set())
         joins_sql = "\n".join(joins)
 
         # ── WHERE ──────────────────────────────────────────────────────
@@ -2837,18 +2838,16 @@ def get_preparacion(
         ), params).first().total
 
         # ── SELECT: fuente (a) + dinámica (d) ─────────────────────────
-        select_fuente = ", ".join(f"a.`{c}`" for c in cols_fuente)
+        all_columns = cols_fuente.union(*sources.values())
+        select_parts = []
+        for col in sorted(all_columns):
+            aliases = (["a"] if col in cols_fuente else []) + [a for a in ("c", "p", "d") if col in sources.get(a, set())]
+            expressions = [f"NULLIF({a}.`{col}`, '')" if col == "programa" else f"{a}.`{col}`" for a in aliases]
+            expr = expressions[0] if len(expressions) == 1 else f"COALESCE({', '.join(expressions)})"
+            select_parts.append(f"{expr} AS `{col}`")
         cols_dinamica_solo = cols_dinamica - {pk}
-        select_dinamica = ", ".join(
-            f"d.`{c}` AS `d_{c}`" for c in cols_dinamica_solo
-        ) if cols_dinamica_solo else ""
-
-        select_str = select_fuente
-        if select_dinamica and pk in cols_dinamica:
-            select_str += ", " + select_dinamica
-        for alias, columns in (("p", cols_padron), ("c", cols_comp)):
-            for column in sorted(columns - cols_fuente - {pk}):
-                select_str += f", {alias}.`{column}` AS `{alias}_{column}`"
+        select_parts.extend(f"d.`{c}` AS `d_{c}`" for c in sorted(cols_dinamica_solo))
+        select_str = ", ".join(select_parts)
 
         rows = db_proyecto.execute(text(f"""
             SELECT {select_str}
@@ -2914,7 +2913,7 @@ def get_preparacion(
             "page": page,
             "limit": limit,
             "pk": pk,
-            "columnas_analisis": sorted(cols_fuente),
+            "columnas_analisis": sorted(all_columns),
             "columnas_dinamica": sorted(cols_dinamica),
         }
     finally:

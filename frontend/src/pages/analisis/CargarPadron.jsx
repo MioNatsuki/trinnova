@@ -25,6 +25,8 @@ export default function CargarPadron() {
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
+    const [toast, setToast] = useState(null);
+    useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 6000); return () => clearTimeout(timer); }, [toast]);
     const [error, setError] = useState('');
     const [preview, setPreview] = useState(null);
     const [versiones, setVersiones] = useState([]);
@@ -202,10 +204,13 @@ const readPreview = (f) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setResult(res.data);
-      const ver = await api.get(`/analisis/${proyectoSlug}/versiones`);
-      setVersiones(ver.data);
+      setToast({ type: res.data.success ? (res.data.errores?.length ? 'warn' : 'success') : 'error', message: res.data.message || 'Resultado de carga recibido.' });
+      try { const ver = await api.get(`/analisis/${proyectoSlug}/versiones`); setVersiones(ver.data); } catch (e) { console.warn('No se actualizaron las versiones', e); }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Error al cargar el archivo.');
+      const detail = err.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Error al cargar el archivo.';
+      setError(message);
+      setToast({ type: 'error', message });
     } finally {
       setLoading(false);
     }
@@ -218,6 +223,7 @@ const readPreview = (f) => {
 
   return (
     <div className="analisis-container">
+      {toast && <div role="status" style={{position:'fixed',top:24,right:24,zIndex:9999,maxWidth:420,padding:'16px 20px',borderRadius:8,color:'#fff',background:toast.type === 'success' ? '#15803d' : toast.type === 'warn' ? '#92400e' : '#b91c1c',boxShadow:'0 4px 20px #0003'}}>{toast.message} <button type="button" onClick={() => setToast(null)} aria-label="Cerrar aviso" style={{marginLeft:12,color:'inherit',background:'transparent',border:0,cursor:'pointer'}}>×</button></div>}
       <div className="analisis-header">
         <h1>Cargar Padrón</h1>
       </div>

@@ -293,6 +293,7 @@ class PlantillaRenderer:
         codebar: Optional[str] = None,
         usar_cache: bool = True,
         inject_codebar_style: bool = False,
+        preview_mode: Optional[str] = None,
     ) -> bytes:
         """
         Renderiza un PDF desde una plantilla HTML.
@@ -312,6 +313,7 @@ class PlantillaRenderer:
         
         html = self._cargar_html(nombre_archivo, force_reload=not usar_cache)
         
+        original_html = html
         # Placeholders especiales
         especiales = self._calcular_placeholders_especiales(
             pagina_actual, total_paginas, codebar or ""
@@ -355,7 +357,10 @@ class PlantillaRenderer:
         
         # Limpiar huérfanos
         import re
-        html = re.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "-", html)
+        if preview_mode == "placeholders":
+            html = original_html
+        elif preview_mode != "examples":
+            html = re.sub(r"\{\{[a-zA-Z0-9_]+\}\}", "-", html)
         
         # Imágenes a base64
         html = self._convertir_imagenes_a_base64(html)

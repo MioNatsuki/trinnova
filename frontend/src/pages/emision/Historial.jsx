@@ -29,6 +29,12 @@ export default function Historial({ jobs, onRefresh, proyectoSlug }) {
     });
   };
   
+  const formatDuration = (job) => {
+    if (!job.started_at) return '—';
+    const end = job.completed_at ? new Date(job.completed_at).getTime() : Date.now();
+    const seconds = Math.max(0, Math.floor((end - new Date(job.started_at).getTime()) / 1000));
+    return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
+  };
   const displayJobs = expanded ? jobs : jobs?.slice(0, 5);
   
   if (!jobs || jobs.length === 0) {
@@ -69,6 +75,7 @@ export default function Historial({ jobs, onRefresh, proyectoSlug }) {
               <th>Progreso</th>
               <th>Registros</th>
               <th>Fecha</th>
+              <th>Tiempo</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -95,13 +102,14 @@ export default function Historial({ jobs, onRefresh, proyectoSlug }) {
                   {job.procesados || 0} / {job.total_registros || 0}
                 </td>
                 <td className="job-fecha">{formatDate(job.created_at)}</td>
+                <td>{formatDuration(job)}</td>
                 <td>
                   {job.status === 'processing' && (
                     <button 
                       className="btn-ver"
-                      onClick={() => window.location.href = `?job=${job.id}`}
+                      onClick={async () => { if (window.confirm("¿Cancelar esta emisión?")) { await api.post(`/emision/jobs/${job.id}/cancelar`); onRefresh?.(); } }}
                     >
-                      Ver
+                      Cancelar
                     </button>
                   )}
                   {job.ruta_zip && (
